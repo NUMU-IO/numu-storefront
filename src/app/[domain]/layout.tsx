@@ -3,6 +3,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRenderer";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
+import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
 import type { Metadata } from "next";
 
 interface LayoutProps {
@@ -39,6 +40,9 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
 
   return (
     <ThemeDataProvider themeSettings={themeSettings} storeData={store}>
+      {/* Preview bridge — only active when ?preview=true&editor=v3.
+          Listens for postMessage updates from the dashboard editor. */}
+      <PreviewBridge />
       {!isByot && themeSettings.section_groups?.header && (
         <SectionGroupRenderer
           group={themeSettings.section_groups.header}

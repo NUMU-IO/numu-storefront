@@ -4,8 +4,15 @@ import { ComponentType } from "react";
 type SectionComponent = ComponentType<SectionProps>;
 type BlockComponent = ComponentType<BlockProps>;
 
-// Dynamic imports for built-in theme sections
-const SECTION_MODULES: Record<string, Record<string, () => Promise<{ default: SectionComponent }>>> = {
+// Dynamic-import factories. Each factory is invoked at most once per
+// process: results are cached in `_resolvedSections` / `_resolvedBlocks`
+// below to avoid re-running webpack/Turbopack module resolution on every
+// section render.
+
+const SECTION_MODULES: Record<
+  string,
+  Record<string, () => Promise<{ default: SectionComponent }>>
+> = {
   bazar: {
     hero: () => import("@/themes/bazar/sections/Hero"),
     "featured-products": () => import("@/themes/bazar/sections/FeaturedProducts"),
@@ -27,15 +34,19 @@ const SECTION_MODULES: Record<string, Record<string, () => Promise<{ default: Se
   },
 };
 
-// Shared sections available to all themes
-const SHARED_SECTIONS: Record<string, () => Promise<{ default: SectionComponent }>> = {
+const SHARED_SECTIONS: Record<
+  string,
+  () => Promise<{ default: SectionComponent }>
+> = {
   header: () => import("@/themes/shared/sections/Header"),
   footer: () => import("@/themes/shared/sections/Footer"),
   "announcement-bar": () => import("@/themes/shared/sections/AnnouncementBar"),
 };
 
-// Block modules: theme-specific -> shared fallback
-const BLOCK_MODULES: Record<string, Record<string, () => Promise<{ default: BlockComponent }>>> = {
+const BLOCK_MODULES: Record<
+  string,
+  Record<string, () => Promise<{ default: BlockComponent }>>
+> = {
   bazar: {
     "product-card": () => import("@/themes/bazar/blocks/ProductCard"),
     "category-card": () => import("@/themes/bazar/blocks/CategoryCard"),
@@ -43,7 +54,10 @@ const BLOCK_MODULES: Record<string, Record<string, () => Promise<{ default: Bloc
   },
 };
 
-const SHARED_BLOCKS: Record<string, () => Promise<{ default: BlockComponent }>> = {
+const SHARED_BLOCKS: Record<
+  string,
+  () => Promise<{ default: BlockComponent }>
+> = {
   heading: () => import("@/themes/shared/blocks/Heading"),
   paragraph: () => import("@/themes/shared/blocks/Paragraph"),
   button: () => import("@/themes/shared/blocks/Button"),
@@ -54,43 +68,65 @@ const SHARED_BLOCKS: Record<string, () => Promise<{ default: BlockComponent }>> 
   icon: () => import("@/themes/shared/blocks/Icon"),
 };
 
-export async function resolveSection(themeId: string, sectionType: string): Promise<SectionComponent | null> {
-  // 1. Theme-specific
-  const themeModules = SECTION_MODULES[themeId];
-  if (themeModules?.[sectionType]) {
-    const mod = await themeModules[sectionType]();
-    return mod.default;
-  }
+// Per-process resolution cache. Maps `${themeId}:${type}` → resolved
+// component. We store the in-flight Promise so concurrent renders don't
+// double-load the same module.
+const _resolvedSections = new Map<string, Promise<SectionComponent | null>>();
+const _resolvedBlocks = new Map<string, Promise<BlockComponent | null>>();
 
-  // 2. Shared
-  if (SHARED_SECTIONS[sectionType]) {
-    const mod = await SHARED_SECTIONS[sectionType]();
-    return mod.default;
-  }
+export function resolveSection(
+  themeId: string,
+  sectionType: string,
+): Promise<SectionComponent | null> {
+  const key = `${themeId}:${sectionType}`;
+  const cached = _resolvedSections.get(key);
+  if (cached) return cached;
 
-  console.warn(`Section not found: ${sectionType} for theme ${themeId}`);
-  return null;
+  const promise = (async () => {
+    const themeModules = SECTION_MODULES[themeId];
+    if (themeModules?.[sectionType]) {
+      const mod = await themeModules[sectionType]();
+      return mod.default;
+    }
+    if (SHARED_SECTIONS[sectionType]) {
+      const mod = await SHARED_SECTIONS[sectionType]();
+      return mod.default;
+    }
+    console.warn(`Section not found: ${sectionType} for theme ${themeId}`);
+    return null;
+  })();
+
+  _resolvedSections.set(key, promise);
+  return promise;
 }
 
-export async function resolveBlock(themeId: string, blockType: string): Promise<BlockComponent | null> {
-  // Skip @app/ blocks (handled by AppBlockLoader)
-  if (blockType.startsWith("@app/")) return null;
+export function resolveBlock(
+  themeId: string,
+  blockType: string,
+): Promise<BlockComponent | null> {
+  // Skip @app/ blocks — handled by AppBlockLoader, not the static registry.
+  if (blockType.startsWith("@app/")) return Promise.resolve(null);
 
-  // 1. Theme-specific
-  const themeBlocks = BLOCK_MODULES[themeId];
-  if (themeBlocks?.[blockType]) {
-    const mod = await themeBlocks[blockType]();
-    return mod.default;
-  }
+  const key = `${themeId}:${blockType}`;
+  const cached = _resolvedBlocks.get(key);
+  if (cached) return cached;
 
-  // 2. Shared
-  if (SHARED_BLOCKS[blockType]) {
-    const mod = await SHARED_BLOCKS[blockType]();
-    return mod.default;
-  }
+  const promise = (async () => {
+    const themeBlocks = BLOCK_MODULES[themeId];
+    if (themeBlocks?.[blockType]) {
+      const mod = await themeBlocks[blockType]();
+      return mod.default;
+    }
+    if (SHARED_BLOCKS[blockType]) {
+      const mod = await SHARED_BLOCKS[blockType]();
+      return mod.default;
+    }
+    console.warn(`Block not found: ${blockType} for theme ${themeId}`);
+    return null;
+  })();
 
-  console.warn(`Block not found: ${blockType} for theme ${themeId}`);
-  return null;
+  _resolvedBlocks.set(key, promise);
+  return promise;
 }
 
 export function isBuiltInTheme(themeId: string): boolean {
