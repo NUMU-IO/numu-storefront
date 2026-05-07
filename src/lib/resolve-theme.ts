@@ -4,11 +4,33 @@ import type { ThemeSettingsV3, SectionGroup, SectionInstance, PageTemplate } fro
  * Dual-Read normalization: converts V1/V2 legacy payloads to V3 in memory.
  * This ensures the Next.js storefront can render stores that haven't
  * been touched by the V3 customizer yet.
+ *
+ * The backend's `/storefront/theme/{store_id}` endpoint returns:
+ *   {
+ *     theme_id, bundle_url, css_url, customization,
+ *     customization_v3: { schema_version: 3, templates, ... },
+ *     ...
+ *   }
+ * — the V3 shape lives nested under `customization_v3`. Newer stores
+ * have a populated `customization_v3` (V3 customizer or BYOT seed);
+ * older stores have it empty and we fall back to `customization`
+ * (legacy V1/V2 flat shape).
  */
 export function resolveThemeSettings(raw: Record<string, any>): ThemeSettingsV3 {
   // Already V3
   if (raw?.schema_version === 3) {
     return raw as ThemeSettingsV3;
+  }
+
+  // Storefront `/storefront/theme/{id}` response shape — prefer the
+  // nested V3 payload when present.
+  if (raw?.customization_v3?.schema_version === 3) {
+    return raw.customization_v3 as ThemeSettingsV3;
+  }
+
+  // Some callers pass `themeRaw.customization` (legacy flat) directly.
+  if (raw?.customization && typeof raw.customization === "object" && !raw.schema_version) {
+    raw = raw.customization;
   }
 
   // Normalize V1/V2

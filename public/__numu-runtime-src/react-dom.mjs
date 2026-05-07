@@ -1,0 +1,12 @@
+import * as ns from "react-dom";
+export default ns;
+export const createPortal = ns.createPortal;
+export const flushSync = ns.flushSync;
+export const preconnect = ns.preconnect;
+export const prefetchDNS = ns.prefetchDNS;
+export const preinit = ns.preinit;
+export const preinitModule = ns.preinitModule;
+export const preload = ns.preload;
+export const preloadModule = ns.preloadModule;
+export const version = ns.version;
+export const __DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = ns.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;

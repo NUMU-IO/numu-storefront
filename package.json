@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=2048 next dev --turbopack",
+    "dev:webpack": "cross-env NODE_OPTIONS=--max-old-space-size=2048 next dev",
+    "predev": "node scripts/build-runtime.mjs",
+    "prebuild": "node scripts/build-runtime.mjs",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build",
+    "build:runtime": "node scripts/build-runtime.mjs",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "clean": "rimraf .next .turbo node_modules/.cache public/__numu-runtime"
   },
   "dependencies": {
     "next": "^16.2.0",
@@ -14,11 +19,14 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "typescript": "^5.8.0",
-    "@tailwindcss/postcss": "^4.1.0",
-    "tailwindcss": "^4.1.0"
+    "cross-env": "^7.0.3",
+    "esbuild": "^0.24.2",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.0"
   }
 }
