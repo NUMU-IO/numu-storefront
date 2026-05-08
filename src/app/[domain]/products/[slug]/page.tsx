@@ -14,6 +14,19 @@ interface PageProps {
   params: Promise<{ domain: string; slug: string }>;
 }
 
+/**
+ * Phase 4.7 — ISR cache: revalidate every 5 minutes.
+ *
+ * PDPs change less frequently than the home page but are the
+ * most-trafficked individual URLs after `/`. 5-minute ISR keeps
+ * cache pressure off the API for hot products while still picking
+ * up inventory + price edits in a window short enough that "out of
+ * stock" surfaces before frustrating an active shopper. The API
+ * client's `product:${storeId}:${slug}` revalidation tag fires
+ * sooner on explicit publishes.
+ */
+export const revalidate = 300;
+
 function storeBaseUrl(domain: string): string {
   const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
   const isProd = process.env.NEXT_PUBLIC_NUMU_ENV === "production";

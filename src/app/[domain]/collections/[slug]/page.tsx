@@ -10,6 +10,17 @@ import {
 } from "@/lib/json-ld";
 import type { Metadata } from "next";
 
+/**
+ * Phase 4.7 — ISR cache: revalidate every 5 minutes.
+ *
+ * Collection pages aggregate product listings; the same cache
+ * pressure analysis as PDPs applies. The API client's
+ * `collection:${storeId}:${slug}` revalidation tag fires sooner on
+ * explicit publishes (a merchant adding/removing products from a
+ * collection invalidates this cache via the hub's publish flow).
+ */
+export const revalidate = 300;
+
 interface PageProps {
   params: Promise<{ domain: string; slug: string }>;
 }

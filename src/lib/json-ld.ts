@@ -129,6 +129,82 @@ export function buildCollectionLd({
 }
 
 /**
+ * Phase 4.6 — Organization + WebSite JSON-LD for the home page.
+ *
+ * Google's rich-results docs recommend BOTH on a homepage:
+ *   - Organization establishes the merchant identity (logo, social
+ *     profiles, contact). Surfaces in the Knowledge Graph panel.
+ *   - WebSite enables sitelinks search box (the search input that
+ *     appears under the result in Google) when potentialAction is set.
+ *
+ * Both are static across the home renders, so callers can compute
+ * once at module scope and inline. We don't compute SearchAction's
+ * URL template here because it depends on the storefront's `/search`
+ * route shape — caller passes baseUrl and we build it.
+ */
+export interface BuildOrganizationLdProps {
+  baseUrl: string;
+  storeName: string;
+  logoUrl?: string | null;
+  description?: string | null;
+  socialLinks?: Record<string, string> | null;
+}
+
+export function buildOrganizationLd({
+  baseUrl,
+  storeName,
+  logoUrl,
+  description,
+  socialLinks,
+}: BuildOrganizationLdProps): Record<string, unknown> {
+  // sameAs is the schema.org canonical for "list of social profiles"
+  // — Twitter / Facebook / Instagram / etc. Search engines use this
+  // to dedupe the merchant across channels in their entity graph.
+  const sameAs = socialLinks
+    ? Object.values(socialLinks).filter((u): u is string => !!u)
+    : undefined;
+  return {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "@id": `${baseUrl}#organization`,
+    name: storeName,
+    url: baseUrl,
+    description,
+    logo: logoUrl,
+    sameAs,
+  };
+}
+
+export interface BuildWebsiteLdProps {
+  baseUrl: string;
+  storeName: string;
+}
+
+export function buildWebsiteLd({
+  baseUrl,
+  storeName,
+}: BuildWebsiteLdProps): Record<string, unknown> {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": `${baseUrl}#website`,
+    name: storeName,
+    url: baseUrl,
+    // SearchAction: Google's "sitelinks search box" feature. The URL
+    // template uses the same query param the storefront's /search
+    // route already accepts.
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate: `${baseUrl}/search?q={search_term_string}`,
+      },
+      "query-input": "required name=search_term_string",
+    },
+  };
+}
+
+/**
  * Render a JSON-LD object as a serialized `<script>` content. Strips
  * undefined keys (recursive) so the emitted JSON stays clean. Use the
  * return value as `dangerouslySetInnerHTML={{ __html: serialized }}`
