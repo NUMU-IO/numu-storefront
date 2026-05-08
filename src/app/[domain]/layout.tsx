@@ -125,6 +125,19 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
           subdomain prefix. Hoisted into <head> by Next.js automatically.
           Production (subdomain hosting) doesn't need this. */}
       <base href={`/${domain}/`} />
+      {/* Phase 5.7 WCAG-AA — skip-to-content link.
+          Keyboard users tab through the header before reaching the
+          page body; a skip link lets them jump straight to main
+          content. Hidden by default; reveals on focus. The href
+          targets `#main` — every page wraps its primary content in
+          <main id="main"> via the BYOT contract or via the built-in
+          PageTemplateRenderer (also in this PR). */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-black focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+      >
+        Skip to content
+      </a>
       {/* Preview bridge — only active when ?preview=true&editor=v3.
           Listens for postMessage updates from the dashboard editor. */}
       <PreviewBridge />
@@ -135,7 +148,12 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
           storeData={store}
         />
       )}
-      {children}
+      {/* Skip-link target. BYOT bundles that render their own <main>
+          win over this wrapper because the link's `#main` selector
+          finds the FIRST element with that id; bundles render after
+          this point, but a bundle without an id="main" falls back to
+          this anchor. */}
+      <div id="main">{children}</div>
       {!isByot && themeSettings.section_groups?.footer && (
         <SectionGroupRenderer
           group={themeSettings.section_groups.footer}
