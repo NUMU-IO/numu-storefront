@@ -264,17 +264,26 @@ export const fetchProducts = cache(async (storeId: string, limit = 20) => {
 
 export const fetchProductBySlug = cache(
   async (storeId: string, slug: string) => {
+    // Hit the single-product endpoint (not the list endpoint with
+    // ?slug=) — the list endpoint omits `variants[]` and `options[]`,
+    // which the PDP needs for the variant picker after Phase 8.1.
+    // The single endpoint wraps the result in `{ data: {...} }`.
     const wrapped = await apiFetch<Record<string, any>>(
-      `/storefront/store/${storeId}/products?slug=${encodeURIComponent(slug)}`,
+      `/storefront/store/${storeId}/products/${encodeURIComponent(slug)}`,
       { tags: [`product:${storeId}:${slug}`], revalidate: 60 },
     );
-    // The list endpoint always returns the paginated wrapper, even for
-    // single-slug lookups. Pull out the first item so the product
-    // detail page route gets a flat (normalized) product object.
     let raw: Record<string, any> | null;
-    if (wrapped && Array.isArray(wrapped.items)) raw = wrapped.items[0] ?? null;
-    else if (Array.isArray(wrapped)) raw = wrapped[0] ?? null;
-    else raw = wrapped ?? null;
+    if (wrapped && typeof wrapped === "object" && "data" in wrapped) {
+      raw = (wrapped as { data?: Record<string, any> }).data ?? null;
+    } else if (wrapped && Array.isArray(wrapped.items)) {
+      // Tolerate the old shape during rollout — if a deployment still
+      // returns the paginated wrapper, fall back to its first item.
+      raw = wrapped.items[0] ?? null;
+    } else if (Array.isArray(wrapped)) {
+      raw = wrapped[0] ?? null;
+    } else {
+      raw = wrapped ?? null;
+    }
     return normalizeProduct(raw);
   },
 );
