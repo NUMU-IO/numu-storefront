@@ -15,7 +15,29 @@ const POST_DOMAIN_SEGMENTS = new Set([
   "search",
   "pages",
   "blogs",
+  "policies",
+  "password",
 ]);
+
+// Phase 6 — locale URL prefixes. We accept any 2-character ISO 639-1
+// code in the first path segment; the SSR layer validates against the
+// store's actual locale list and falls back to default_language for
+// unknown codes. Two letters is the common shape today (`/ar/...`,
+// `/en/...`); regional sub-tags (`/zh-tw/...`) can ride the same
+// matcher if we extend to 2-5 chars later. We intentionally do NOT
+// hard-code a whitelist — themes / merchants may add locales over
+// time, and the SSR handles the fallback gracefully.
+const LOCALE_PREFIX_RE = /^[a-z]{2}$/i;
+
+function isLocalePrefix(segment: string): boolean {
+  if (!segment) return false;
+  if (!LOCALE_PREFIX_RE.test(segment)) return false;
+  // Defensive: a 2-char segment that happens to also be a known
+  // post-domain route shouldn't be treated as a locale prefix.
+  // No current 2-letter routes exist, but this keeps the matcher
+  // safe if we ever add one.
+  return !POST_DOMAIN_SEGMENTS.has(segment.toLowerCase());
+}
 
 function subdomainFromReferer(request: NextRequest): string | null {
   const referer = request.headers.get("referer");
@@ -130,8 +152,24 @@ export function proxy(request: NextRequest) {
       return NextResponse.redirect(fixed, 301);
     }
 
+    // Phase 6 — locale URL prefix detection. If the first segment
+    // looks like a locale code (e.g. `/ar/products/foo`), strip it
+    // before the [domain] rewrite and stamp the locale on the
+    // response headers + cookie. SSR layout reads x-numu-locale and
+    // hydrates the SDK with `initialLocale`.
+    //
+    // This runs *before* the [domain] rewrite so we don't end up
+    // with `/<subdomain>/ar/products/...` paths the [domain] page
+    // tries to parse as collection slugs.
+    let urlPathname = pathname;
+    let pathLocale: string | null = null;
+    if (isLocalePrefix(firstSeg)) {
+      pathLocale = firstSeg.toLowerCase();
+      urlPathname = pathname.slice(`/${firstSeg}`.length) || "/";
+    }
+
     const url = request.nextUrl.clone();
-    url.pathname = `/${storeIdentifier}${pathname}`;
+    url.pathname = `/${storeIdentifier}${urlPathname}`;
     const res = NextResponse.rewrite(url);
     // Forward the original hostname (without port) so api-client can
     // distinguish subdomain vs custom-domain lookups without re-parsing.
@@ -141,29 +179,40 @@ export function proxy(request: NextRequest) {
     // `<html lang>` / `<html dir>`.
     res.headers.set("x-numu-pathname", url.pathname);
 
-    // Phase 3.6 — locale resolution. Order of precedence:
-    //   1. ?locale=<code> querystring — explicit user choice. Persists
-    //      to cookie so subsequent navigation honors it without the
-    //      param. Reasonable for sharing a localized link.
-    //   2. numu_locale cookie — set by SDK's setLocale() or by step (1).
-    //   3. (none — fall through; layout uses store.default_language)
+    // Locale resolution (Phase 3.6 + Phase 6). Order of precedence:
+    //   1. URL prefix `/{locale}/...` — explicit, sharable. Stripped
+    //      from the rewritten pathname above.
+    //   2. ?locale=<code> querystring — also explicit, also persisted.
+    //   3. numu_locale cookie — sticky across navigations.
+    //   4. (none — layout uses store.default_language)
     //
     // We surface the resolved locale on x-numu-locale so the layout
     // can stamp <html lang> + pass into NuMuProvider as `initialLocale`.
     const queryLocale = request.nextUrl.searchParams.get("locale");
     const cookieLocale = request.cookies.get("numu_locale")?.value;
-    const resolvedLocale = queryLocale || cookieLocale || "";
+    const resolvedLocale =
+      pathLocale || queryLocale || cookieLocale || "";
     if (resolvedLocale) {
       res.headers.set("x-numu-locale", resolvedLocale);
     }
-    if (queryLocale && queryLocale !== cookieLocale) {
-      // Promote the querystring choice to a cookie so /products/abc
-      // works on the next click without re-appending ?locale=ar.
-      res.cookies.set("numu_locale", queryLocale, {
+    // Promote whichever explicit signal wins to the cookie so
+    // subsequent navigations honor it without re-providing the prefix
+    // or querystring.
+    const explicit = pathLocale || queryLocale;
+    if (explicit && explicit !== cookieLocale) {
+      res.cookies.set("numu_locale", explicit, {
         path: "/",
         maxAge: 60 * 60 * 24 * 365,
         sameSite: "lax",
       });
+    }
+
+    // Phase 6 — surface the selected presentment currency so SSR can
+    // hydrate <Money> in the merchant's chosen display currency
+    // without a client-side reflicker on first paint.
+    const currencyCookie = request.cookies.get("numu_currency")?.value;
+    if (currencyCookie && /^[A-Z]{3}$/i.test(currencyCookie)) {
+      res.headers.set("x-numu-currency", currencyCookie.toUpperCase());
     }
     return res;
   }
