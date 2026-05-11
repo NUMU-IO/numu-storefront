@@ -1,18 +1,14 @@
 /**
- * Checkout layout — Phase 1.2.
+ * Checkout layout — Phase 1.2 + Phase 7.1 BYOT fork.
  *
- * Frames every step (contact → shipping → payment → review →
- * processing) with the same chrome: a progress strip + a container
- * that resolves the store from `[domain]` and exposes its currency
- * to the step pages via context.
- *
- * Kept deliberately minimal — Shopify-style functional checkout, not
- * a BYOT-rendered surface. Merchants who want a branded checkout
- * customize via store settings (logo URL, accent colors) which the
- * future <CheckoutChrome> can read. For v1 we ship a clean default.
+ * Built-in chrome (logo header + Powered by NUMU footer) wraps the
+ * step pages only when the store does NOT have an external BYOT
+ * theme installed. When BYOT is active, the layout becomes a
+ * passthrough — themes own the full checkout document.
  */
 
 import { fetchStoreByDomain } from "@/lib/api-client";
+import { isByotActive } from "@/lib/byot-fork";
 import Link from "next/link";
 
 interface LayoutProps {
@@ -22,6 +18,13 @@ interface LayoutProps {
 
 export default async function CheckoutLayout({ children, params }: LayoutProps) {
   const { domain } = await params;
+
+  // Phase 7.1 — when BYOT is active, suppress all built-in chrome.
+  // The theme bundle owns the full page via the per-step BYOT fork.
+  if (await isByotActive(domain)) {
+    return <>{children}</>;
+  }
+
   let store;
   try {
     store = await fetchStoreByDomain(domain);

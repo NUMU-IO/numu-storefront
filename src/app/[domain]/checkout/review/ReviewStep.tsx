@@ -103,6 +103,7 @@ export function ReviewStep() {
       guest_email: state.email,
       cod_requested: state.cod_requested,
       deposit_gateway: state.deposit_gateway,
+      saved_payment_method_id: state.saved_payment_method_id,
       customer_notes: notes || null,
       coupon_code: coupon || null,
     };

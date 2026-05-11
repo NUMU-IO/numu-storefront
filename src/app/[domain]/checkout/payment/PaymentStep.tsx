@@ -29,6 +29,19 @@ interface CheckoutConfig {
   cod_deposit_policy?: { enabled?: boolean; allowed_gateways?: string[] };
 }
 
+interface SavedCard {
+  id: string;
+  gateway: string;
+  display_name: string | null;
+  card_brand: string | null;
+  last_four: string | null;
+}
+
+// Gateway codes whose saved cards we can charge token-only. Other
+// methods (Fawry/Fawaterak/InstaPay/COD) don't have re-chargeable
+// tokens — saved cards are skipped for them entirely.
+const SAVED_CARD_GATEWAYS = new Set(["paymob", "paymob_card", "kashier"]);
+
 const METHOD_LABELS: Record<string, string> = {
   paymob: "Credit / debit card (Paymob)",
   paymob_card: "Credit / debit card (Paymob)",
@@ -45,6 +58,8 @@ export function PaymentStep() {
   const [config, setConfig] = useState<CheckoutConfig | null>(null);
   const [method, setMethod] = useState<string | null>(null);
   const [depositGateway, setDepositGateway] = useState<string | null>(null);
+  const [savedCards, setSavedCards] = useState<SavedCard[] | null>(null);
+  const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -56,6 +71,10 @@ export function PaymentStep() {
     }
     setMethod(s.payment_method);
     setDepositGateway(s.deposit_gateway);
+    setSavedCardId(
+      (s as unknown as { saved_payment_method_id?: string | null })
+        .saved_payment_method_id || null,
+    );
 
     (async () => {
       try {
@@ -76,6 +95,35 @@ export function PaymentStep() {
       } finally {
         setLoading(false);
       }
+
+      // Phase 7.5 — load the customer's saved cards. Anonymous
+      // visitors get 401 here → we silently render the new-card flow
+      // only. The store_id query param is required by the backend
+      // for the per-store scope check; we resolve it via the store
+      // lookup hidden in the API proxy chain.
+      try {
+        const storeRes = await fetch("/api/storefront/store", {
+          cache: "no-store",
+        }).catch(() => null);
+        let storeId: string | null = null;
+        if (storeRes?.ok) {
+          const body = await storeRes.json();
+          storeId = (body?.data?.id || body?.id || null) as string | null;
+        }
+        if (storeId) {
+          const cardsRes = await fetch(
+            `/api/customer/saved-cards?store_id=${encodeURIComponent(storeId)}`,
+            { cache: "no-store" },
+          );
+          if (cardsRes.ok) {
+            const body = await cardsRes.json();
+            const list = (body?.data || body || []) as SavedCard[];
+            setSavedCards(Array.isArray(list) ? list : []);
+          }
+        }
+      } catch {
+        /* swallow — saved cards are optional UX */
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -93,10 +141,23 @@ export function PaymentStep() {
       setError("Pick a gateway for the COD deposit payment.");
       return;
     }
+    // Only forward the saved card when it actually matches the
+    // chosen gateway — picking a saved Paymob card then switching to
+    // Fawry must clear the saved-card binding so the backend doesn't
+    // 400 on the gateway mismatch.
+    const savedCardForMethod = savedCards?.find(
+      (c) =>
+        c.id === savedCardId &&
+        (c.gateway === method ||
+          (c.gateway === "paymob" && method === "paymob_card")),
+    );
     patchCheckoutState({
       payment_method: method,
       cod_requested: codSelected,
       deposit_gateway: depositRequired ? depositGateway : null,
+      ...({
+        saved_payment_method_id: savedCardForMethod?.id || null,
+      } as unknown as Record<string, never>),
     });
     router.push(`/${params.domain}/checkout/review`);
   }
@@ -104,6 +165,17 @@ export function PaymentStep() {
   const methods = config?.enabled_payment_methods || [];
   const showDepositPicker =
     method === "cod" && Boolean(config?.cod_deposit_policy?.enabled);
+  // Saved cards are only meaningful when:
+  //   1. The customer is logged in (savedCards is non-null)
+  //   2. The selected method is a token-charge-capable gateway
+  //   3. The customer has at least one saved card for that gateway
+  const savedCardsForMethod = (savedCards || []).filter(
+    (c) =>
+      method &&
+      SAVED_CARD_GATEWAYS.has(method) &&
+      (c.gateway === method ||
+        (c.gateway === "paymob" && method === "paymob_card")),
+  );
 
   return (
     <>
@@ -143,6 +215,45 @@ export function PaymentStep() {
             </ul>
           )}
         </section>
+
+        {savedCardsForMethod.length > 0 && (
+          <section className="bg-white p-6 rounded border">
+            <h2 className="text-lg font-semibold mb-2">Saved cards</h2>
+            <p className="text-sm text-gray-600 mb-3">
+              Pay faster with a card on file, or pick "Enter a new card" to
+              add another.
+            </p>
+            <ul className="space-y-2">
+              <li>
+                <label className="flex items-center gap-3 border rounded p-3 cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="saved-card"
+                    checked={savedCardId === null}
+                    onChange={() => setSavedCardId(null)}
+                  />
+                  <span className="text-sm">Enter a new card</span>
+                </label>
+              </li>
+              {savedCardsForMethod.map((c) => (
+                <li key={c.id}>
+                  <label className="flex items-center gap-3 border rounded p-3 cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="radio"
+                      name="saved-card"
+                      checked={savedCardId === c.id}
+                      onChange={() => setSavedCardId(c.id)}
+                    />
+                    <span className="text-sm">
+                      {c.display_name ||
+                        `${c.card_brand || "Card"} •••• ${c.last_four || "????"}`}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {showDepositPicker && (
           <section className="bg-white p-6 rounded border">
