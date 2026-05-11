@@ -43,6 +43,11 @@ export interface CheckoutState {
   // Step 4
   customer_notes: string;
   coupon_code: string;
+  // Phase 8.3 — gift card tender. Up to 5 codes can be redeemed
+  // against a single order; the backend FIFO-allocates the applied
+  // amount up to min(sum_of_balances, total). Order's amount_due is
+  // reduced by the applied amount; the gateway charges the remainder.
+  gift_card_codes: string[];
   // Attribution (read from URL on entry)
   utm_source: string | null;
   utm_medium: string | null;
@@ -62,6 +67,7 @@ export const EMPTY_CHECKOUT_STATE: CheckoutState = {
   saved_payment_method_id: null,
   customer_notes: "",
   coupon_code: "",
+  gift_card_codes: [],
   utm_source: null,
   utm_medium: null,
   utm_campaign: null,

@@ -278,6 +278,8 @@ export function PaymentStep() {
           </section>
         )}
 
+        <GiftCardSection />
+
         {error && (
           <div
             role="alert"
@@ -303,5 +305,145 @@ export function PaymentStep() {
         </div>
       </form>
     </>
+  );
+}
+
+/**
+ * Phase 8.3 — gift card tender input. Sits inside the payment-step
+ * form: the customer pastes a code, we hit the public balance check
+ * (which 404s on bad/depleted codes), and on success we stash the
+ * code in checkout state. The ReviewStep forwards them as
+ * `gift_card_codes` to /api/checkout, where the backend
+ * FIFO-allocates the applied amount and reduces what the gateway
+ * charges.
+ */
+function GiftCardSection() {
+  const [codes, setCodes] = useState<string[]>(
+    () => readCheckoutState().gift_card_codes || [],
+  );
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [applied, setApplied] = useState<
+    Array<{ code: string; last_four: string; balance_cents: number; currency: string }>
+  >([]);
+
+  async function add() {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    if (codes.includes(trimmed)) {
+      setError("That code is already added.");
+      return;
+    }
+    if (codes.length >= 5) {
+      setError("You can apply up to 5 gift cards per order.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/gift-cards/${encodeURIComponent(trimmed)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) {
+        setError(
+          res.status === 404
+            ? "That gift card isn't valid or has been used up."
+            : `Couldn't check the card (HTTP ${res.status}).`,
+        );
+        return;
+      }
+      const json = await res.json();
+      const data = json?.data;
+      if (!data) {
+        setError("Unexpected response from the server.");
+        return;
+      }
+      const next = [...codes, trimmed];
+      setCodes(next);
+      patchCheckoutState({ gift_card_codes: next });
+      setApplied((a) => [
+        ...a,
+        {
+          code: trimmed,
+          last_four: data.last_four,
+          balance_cents: data.current_balance_cents,
+          currency: data.currency,
+        },
+      ]);
+      setInput("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't check the card.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function remove(code: string) {
+    const next = codes.filter((c) => c !== code);
+    setCodes(next);
+    patchCheckoutState({ gift_card_codes: next });
+    setApplied((a) => a.filter((x) => x.code !== code));
+  }
+
+  return (
+    <section className="bg-white p-6 rounded border">
+      <h2 className="text-lg font-semibold mb-2">Gift card</h2>
+      <p className="text-sm text-gray-600 mb-3">
+        Apply a gift card to reduce what your payment method is charged.
+        You can stack up to 5 cards.
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="GC-XXXX-XXXX-XXXX-XXXX"
+          className="flex-1 border rounded px-3 py-2 text-sm font-mono"
+          aria-label="Gift card code"
+          disabled={busy}
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={busy || !input.trim()}
+          className="bg-gray-900 text-white px-4 rounded hover:bg-gray-800 disabled:opacity-50"
+        >
+          {busy ? "Checking…" : "Apply"}
+        </button>
+      </div>
+      {error && (
+        <p className="mt-2 text-sm text-red-700" role="alert">
+          {error}
+        </p>
+      )}
+      {applied.length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm">
+          {applied.map((a) => (
+            <li
+              key={a.code}
+              className="flex items-center justify-between rounded bg-emerald-50 border border-emerald-200 px-3 py-2"
+            >
+              <span>
+                •••{a.last_four} —{" "}
+                <span className="font-medium">
+                  {(a.balance_cents / 100).toFixed(2)} {a.currency}
+                </span>{" "}
+                available
+              </span>
+              <button
+                type="button"
+                onClick={() => remove(a.code)}
+                className="text-xs text-gray-500 hover:text-red-700"
+                aria-label={`Remove gift card ${a.last_four}`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

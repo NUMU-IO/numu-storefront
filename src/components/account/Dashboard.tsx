@@ -15,6 +15,7 @@
  */
 
 import { useState } from "react";
+import ReorderButton from "@/components/account/ReorderButton";
 
 const inputCls =
   "block w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black";
@@ -329,6 +330,9 @@ export function OrderDetail({
           <span className="font-bold text-base">
             {order.total} {order.currency}
           </span>
+        </div>
+        <div>
+          <ReorderButton orderId={order.id} />
         </div>
       </div>
     </AccountFrame>
