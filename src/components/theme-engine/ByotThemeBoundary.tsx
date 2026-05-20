@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
-import type { ThemeSettingsV3, StoreData } from "@/types";
+import type { ThemeSettingsV3, StoreData, Product, Collection } from "@/types";
 
 interface ByotThemeBoundaryProps {
   bundleUrl: string;
@@ -13,6 +13,11 @@ interface ByotThemeBoundaryProps {
   bundleChecksum?: string | null;
   themeSettings: ThemeSettingsV3;
   storeData: StoreData;
+  /** Pre-fetched catalog the host loaded server-side. Forwarded to the
+   *  bundle so theme sections that call useProducts() / useCollections()
+   *  see real data without each section round-tripping the API. */
+  products?: Product[];
+  collections?: Collection[];
   fallback?: ReactNode;
 }
 
@@ -22,6 +27,8 @@ export default function ByotThemeBoundary({
   bundleChecksum,
   themeSettings,
   storeData,
+  products,
+  collections,
   fallback,
 }: ByotThemeBoundaryProps) {
   const [ThemeComponent, setThemeComponent] = useState<unknown>(null);
@@ -81,6 +88,15 @@ export default function ByotThemeBoundary({
   const Cmp = ThemeComponent as React.ComponentType<{
     themeSettings: ThemeSettingsV3;
     storeData: StoreData;
+    products?: Product[];
+    collections?: Collection[];
   }>;
-  return <Cmp themeSettings={themeSettings} storeData={storeData} />;
+  return (
+    <Cmp
+      themeSettings={themeSettings}
+      storeData={storeData}
+      products={products}
+      collections={collections}
+    />
+  );
 }
