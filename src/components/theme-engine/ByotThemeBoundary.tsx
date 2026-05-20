@@ -18,6 +18,17 @@ interface ByotThemeBoundaryProps {
    *  see real data without each section round-tripping the API. */
   products?: Product[];
   collections?: Collection[];
+  /** Wave 5 — id of the active page template ("home" | "product" |
+   *  "collection" | "cart" | "checkout" | "order-confirmation" |
+   *  "profile" | "page" | "404"). Hosts pass this from the route so
+   *  the bundle's useCurrentTemplate() returns the right value
+   *  without scraping window.location. Defaults to "home". */
+  currentTemplate?: string;
+  /** Wave 5 — active product for the product template. Optional; only
+   *  populated on /products/[slug]. */
+  currentProduct?: unknown;
+  /** Wave 5 — active collection for the collection template. */
+  currentCollection?: unknown;
   fallback?: ReactNode;
 }
 
@@ -29,6 +40,9 @@ export default function ByotThemeBoundary({
   storeData,
   products,
   collections,
+  currentTemplate = "home",
+  currentProduct,
+  currentCollection,
   fallback,
 }: ByotThemeBoundaryProps) {
   const [ThemeComponent, setThemeComponent] = useState<unknown>(null);
@@ -90,6 +104,9 @@ export default function ByotThemeBoundary({
     storeData: StoreData;
     products?: Product[];
     collections?: Collection[];
+    currentTemplate?: string;
+    currentProduct?: unknown;
+    currentCollection?: unknown;
   }>;
   return (
     <Cmp
@@ -97,6 +114,9 @@ export default function ByotThemeBoundary({
       storeData={storeData}
       products={products}
       collections={collections}
+      currentTemplate={currentTemplate}
+      currentProduct={currentProduct}
+      currentCollection={currentCollection}
     />
   );
 }
