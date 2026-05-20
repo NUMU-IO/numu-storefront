@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
 import type { ThemeSettingsV3, StoreData, Product, Collection } from "@/types";
 
@@ -32,6 +32,173 @@ interface ByotThemeBoundaryProps {
   fallback?: ReactNode;
 }
 
+/**
+ * Loose shape every V3 imperative bundle returns from `mount()`.
+ * Legacy (pre-Wave 3) bundles return just a cleanup fn; Wave 3+
+ * return `{ cleanup, applyDraft }` so themeSettings changes flow
+ * through `applyDraft(next)` without an unmount/remount churn.
+ */
+type MountReturn =
+  | (() => void)
+  | { cleanup: () => void; applyDraft?: (next: unknown) => void };
+
+interface Wave3Handle {
+  cleanup: () => void;
+  applyDraft?: (next: unknown) => void;
+}
+
+function isWave3Handle(v: unknown): v is Wave3Handle {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    "cleanup" in (v as object) &&
+    typeof (v as { cleanup?: unknown }).cleanup === "function"
+  );
+}
+
+/**
+ * V3 bundles come in two flavours and we have to support both:
+ *
+ *   1. **Declarative** — `default export = React component`. The host
+ *      renders `<Cmp themeSettings={...} ... />`. Simpler bundles
+ *      (no shared React identity required) use this.
+ *
+ *   2. **Imperative** — `default export = { kind: "v3-mount", mount,
+ *      manifest, … }` (a "v3Handle"). The host calls `mount(el, ctx)`
+ *      and receives a `MountResult`. The bundle owns its own React
+ *      tree inside `el` (often via createRoot + StrictMode + its own
+ *      provider). Required for federated bundles that need to share
+ *      React identity with the host across the seam.
+ *
+ * `loadExternalTheme` returns `mod.default ?? mod`. We sniff the shape
+ * and dispatch — without this branch, an imperative bundle would crash
+ * the first render because React tries to render a plain object as a
+ * component.
+ */
+function isV3MountHandle(
+  mod: unknown,
+): mod is {
+  kind?: string;
+  mount: (el: HTMLElement, ctx: Record<string, unknown>) => MountReturn | Promise<MountReturn>;
+} {
+  if (!mod || typeof mod !== "object") return false;
+  const m = mod as { kind?: unknown; mount?: unknown };
+  return typeof m.mount === "function";
+}
+
+/**
+ * Imperative wrapper — mounts a v3Handle bundle into a host `<div>`
+ * and keeps it in sync via applyDraft on themeSettings change.
+ */
+function ImperativeBundleHost({
+  handle,
+  themeSettings,
+  storeData,
+  products,
+  collections,
+  currentTemplate,
+  currentProduct,
+  currentCollection,
+}: {
+  handle: {
+    mount: (el: HTMLElement, ctx: Record<string, unknown>) => MountReturn | Promise<MountReturn>;
+  };
+  themeSettings: ThemeSettingsV3;
+  storeData: StoreData;
+  products?: Product[];
+  collections?: Collection[];
+  currentTemplate: string;
+  currentProduct: unknown;
+  currentCollection: unknown;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const applyDraftRef = useRef<((next: unknown) => void) | null>(null);
+
+  // Re-mount only when the bundle handle or the identity (store, route,
+  // resource) changes — NOT when themeSettings changes. The latter is
+  // routed through applyDraft below for in-place reconciliation.
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return undefined;
+    let alive = true;
+
+    const ctx = {
+      store: storeData,
+      themeSettings,
+      products,
+      collections,
+      currentTemplate,
+      currentProduct,
+      currentCollection,
+      locale: storeData?.default_language,
+    };
+
+    Promise.resolve(handle.mount(el, ctx))
+      .then((result) => {
+        if (!alive) {
+          // Unmounted before mount() resolved — clean up immediately
+          if (typeof result === "function") {
+            try { result(); } catch { /* swallow */ }
+          } else if (isWave3Handle(result)) {
+            try { result.cleanup(); } catch { /* swallow */ }
+          }
+          return;
+        }
+        if (typeof result === "function") {
+          cleanupRef.current = result;
+          applyDraftRef.current = null;
+        } else if (isWave3Handle(result)) {
+          cleanupRef.current = result.cleanup;
+          applyDraftRef.current = result.applyDraft ?? null;
+        }
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[ByotThemeBoundary] bundle mount threw:", err);
+      });
+
+    return () => {
+      alive = false;
+      const fn = cleanupRef.current;
+      cleanupRef.current = null;
+      applyDraftRef.current = null;
+      if (fn) {
+        try { fn(); } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error("[ByotThemeBoundary] cleanup threw:", err);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    handle,
+    storeData,
+    currentTemplate,
+    currentProduct,
+    currentCollection,
+    // products/collections changes shouldn't remount — pass them through
+    // mount once and let the bundle re-fetch on its own if it cares.
+  ]);
+
+  // Live preview path — push themeSettings updates through applyDraft.
+  // No-op for legacy bundles (no applyDraft); they re-mount via the
+  // effect above if the host bumps a key on themeSettings change.
+  useEffect(() => {
+    const apply = applyDraftRef.current;
+    if (apply) {
+      try {
+        apply(themeSettings);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[ByotThemeBoundary] applyDraft threw:", err);
+      }
+    }
+  }, [themeSettings]);
+
+  return <div ref={hostRef} data-byot-host />;
+}
+
 export default function ByotThemeBoundary({
   bundleUrl,
   cssUrl,
@@ -45,7 +212,7 @@ export default function ByotThemeBoundary({
   currentCollection,
   fallback,
 }: ByotThemeBoundaryProps) {
-  const [ThemeComponent, setThemeComponent] = useState<unknown>(null);
+  const [themeModule, setThemeModule] = useState<unknown>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -59,7 +226,7 @@ export default function ByotThemeBoundary({
           expectedChecksum: bundleChecksum ?? null,
         });
         if (!cancelled) {
-          setThemeComponent(() => mod);
+          setThemeModule(() => mod);
           setLoading(false);
         }
       } catch (err) {
@@ -84,7 +251,7 @@ export default function ByotThemeBoundary({
     );
   }
 
-  if (error || !ThemeComponent) {
+  if (error || !themeModule) {
     return (
       fallback || (
         <div className="min-h-screen flex flex-col items-center justify-center gap-2">
@@ -99,7 +266,24 @@ export default function ByotThemeBoundary({
     );
   }
 
-  const Cmp = ThemeComponent as React.ComponentType<{
+  // Imperative bundle — sniff the shape and dispatch to the wrapper.
+  if (isV3MountHandle(themeModule)) {
+    return (
+      <ImperativeBundleHost
+        handle={themeModule}
+        themeSettings={themeSettings}
+        storeData={storeData}
+        products={products}
+        collections={collections}
+        currentTemplate={currentTemplate}
+        currentProduct={currentProduct}
+        currentCollection={currentCollection}
+      />
+    );
+  }
+
+  // Declarative bundle — render as a React component.
+  const Cmp = themeModule as React.ComponentType<{
     themeSettings: ThemeSettingsV3;
     storeData: StoreData;
     products?: Product[];
