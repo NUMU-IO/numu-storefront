@@ -80,10 +80,107 @@ interface LoadOptions {
   expectedChecksum?: string | null;
 }
 
+interface BundleImportMap {
+  plugin: string;
+  federate: boolean;
+  sdk_compat_major: number;
+  host_provided: string[];
+}
+
+interface HostRuntimeManifest {
+  sdk_version: string;
+  react_version: string;
+}
+
 /**
- * Load an external BYOT theme bundle. Returns the module's default export
- * (the theme component tree). Rejects if the URL is not on the allowlist
- * or if the optional checksum doesn't match.
+ * Fetch the import-map.json the plugin emits alongside theme.js. When
+ * federate=true, the bundle imports `react`, `@numu/theme-sdk`, etc.
+ * as bare specifiers — the host MUST provide compatible versions, or
+ * the bundle's hooks will throw on first call. We verify the major
+ * matches before evaluating any bundle JS.
+ *
+ * Failures (network, parse error, mismatch) reject the load with a
+ * clear message. Bundles with `federate: false` skip the check
+ * (self-contained — they don't depend on the host runtime).
+ */
+async function loadAndVerifyImportMap(
+  bundleUrl: string,
+): Promise<{ map: BundleImportMap | null; ok: boolean; reason?: string }> {
+  // import-map.json sits next to theme.js; replace the last segment.
+  const mapUrl = new URL(bundleUrl);
+  mapUrl.pathname = mapUrl.pathname.replace(/[^/]+$/, "import-map.json");
+  let bundleMap: BundleImportMap | null;
+  try {
+    const res = await fetch(mapUrl.toString(), { cache: "force-cache" });
+    if (!res.ok) {
+      // Older bundles built before plugin 0.2.0 don't ship one. Treat
+      // as self-contained — skip the check rather than refuse to load.
+      return { map: null, ok: true };
+    }
+    bundleMap = (await res.json()) as BundleImportMap;
+  } catch {
+    return { map: null, ok: true };
+  }
+
+  if (!bundleMap.federate) return { map: bundleMap, ok: true };
+
+  // Federated bundle — verify against host's runtime manifest.
+  let hostManifest: HostRuntimeManifest;
+  try {
+    const res = await fetch("/__numu-runtime/manifest.json", {
+      cache: "force-cache",
+    });
+    if (!res.ok) {
+      return {
+        map: bundleMap,
+        ok: false,
+        reason:
+          "Bundle was built with federate=true but the host runtime " +
+          "manifest is missing. Run `npm run build:runtime` on the storefront.",
+      };
+    }
+    hostManifest = (await res.json()) as HostRuntimeManifest;
+  } catch (err) {
+    return {
+      map: bundleMap,
+      ok: false,
+      reason: `Failed to fetch host runtime manifest: ${(err as Error).message}`,
+    };
+  }
+
+  const hostMajor = parseInt(
+    hostManifest.sdk_version.split(".")[0] ?? "0",
+    10,
+  );
+  if (
+    Number.isFinite(hostMajor) &&
+    bundleMap.sdk_compat_major !== hostMajor
+  ) {
+    return {
+      map: bundleMap,
+      ok: false,
+      reason:
+        `Bundle expects @numu/theme-sdk major ${bundleMap.sdk_compat_major}, ` +
+        `host serves ${hostManifest.sdk_version}. Rebuild the theme against ` +
+        `the current SDK before reactivating.`,
+    };
+  }
+
+  return { map: bundleMap, ok: true };
+}
+
+/**
+ * Load an external BYOT theme bundle. Returns the whole module so the
+ * caller can pick between two contracts:
+ *   - `mod.mount(el, props) -> () => void` — preferred. The bundle owns
+ *     the render cycle for its subtree using its own React, sidestepping
+ *     the "two copies of React" hooks-dispatcher null crash.
+ *   - `mod.default` — plain React component, rendered by the host's
+ *     React. Only safe when the bundle externalizes React and the host
+ *     supplies it via an import map (federate=true).
+ *
+ * Rejects if the URL is not on the allowlist or if the optional
+ * checksum doesn't match.
  */
 export async function loadExternalTheme(
   bundleUrl: string,
@@ -91,6 +188,15 @@ export async function loadExternalTheme(
 ): Promise<unknown> {
   if (!isAllowedBundleUrl(bundleUrl)) {
     throw new Error(`Refusing to load bundle from disallowed host: ${bundleUrl}`);
+  }
+
+  // Federation compat check: a bundle built against an incompatible
+  // SDK major would crash on first hook call with a confusing error.
+  // Catch it here with a clear message instead. Self-contained bundles
+  // (or older ones with no import-map.json) skip the check.
+  const verify = await loadAndVerifyImportMap(bundleUrl);
+  if (!verify.ok) {
+    throw new Error(verify.reason ?? "Bundle compatibility check failed");
   }
 
   // If we have a checksum, fetch the bundle bytes first, verify, then
@@ -114,16 +220,14 @@ export async function loadExternalTheme(
       new Blob([bytes], { type: "application/javascript" }),
     );
     try {
-      const mod = await dynamicImport(blobUrl);
-      return (mod as { default?: unknown })?.default ?? mod;
+      return await dynamicImport(blobUrl);
     } finally {
       URL.revokeObjectURL(blobUrl);
     }
   }
 
   // No checksum: still apply the allowlist gate above, then import directly.
-  const mod = await dynamicImport(bundleUrl);
-  return (mod as { default?: unknown })?.default ?? mod;
+  return await dynamicImport(bundleUrl);
 }
 
 /**
