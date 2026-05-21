@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { ShareButtons } from "./ShareButtons";
 
 interface ProductVariant {
   id: string;
@@ -331,6 +332,9 @@ export default function BuiltInProductDetail({ product }: Props) {
             {msg.text}
           </div>
         )}
+
+        {/* Feature 001 US4 — auto-tagged customer-share buttons. */}
+        <ShareButtons title={product.name} className="mt-6" />
       </div>
     </div>
   );
