@@ -23,6 +23,13 @@ interface ByotThemeBoundaryProps {
   storeData: StoreData;
   /** Tells the bundle which template to render. Omit for home. */
   page?: PageContextData;
+  /**
+   * Phase 3.6 — visitor-chosen locale (from `?locale=ar` querystring or
+   * the `numu_locale` cookie, resolved by the storefront proxy and
+   * forwarded via the `x-numu-locale` header). When omitted, the bundle's
+   * NuMuProvider falls back to `store.default_language`.
+   */
+  locale?: string;
   fallback?: ReactNode;
 }
 
@@ -49,6 +56,10 @@ interface BundleMountProps {
   themeSettings: ThemeSettingsV3;
   storeData: StoreData;
   page?: PageContextData;
+  /** Visitor's active locale (Phase 3.6). Bundles forward this into
+   *  NuMuProvider as `initialLocale`. Older bundles that don't read it
+   *  fall through to `store.default_language` as before. */
+  locale?: string;
 }
 
 type BundleModule = {
@@ -153,6 +164,7 @@ export default function ByotThemeBoundary({
   themeSettings,
   storeData,
   page,
+  locale,
   fallback,
 }: ByotThemeBoundaryProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -207,6 +219,7 @@ export default function ByotThemeBoundary({
           themeSettings,
           storeData,
           page,
+          locale,
         });
         setLoading(false);
       } catch (err) {
@@ -241,7 +254,7 @@ export default function ByotThemeBoundary({
     const handle = handleRef.current;
     if (!handle) return;
     try {
-      const ok = tryUpdate(handle, { themeSettings, storeData, page });
+      const ok = tryUpdate(handle, { themeSettings, storeData, page, locale });
       if (!ok) {
         // Legacy bundle (mount returned a cleanup function, no update
         // method). PreviewBridge already handles fine-grained settings
@@ -257,7 +270,7 @@ export default function ByotThemeBoundary({
     } catch (err) {
       console.warn("[ByotThemeBoundary] update threw:", err);
     }
-  }, [themeSettings, storeData, page]);
+  }, [themeSettings, storeData, page, locale]);
 
   const fallbackUI =
     fallback || (
