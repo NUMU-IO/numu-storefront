@@ -140,6 +140,31 @@ export function proxy(request: NextRequest) {
     // see [domain] params) can resolve the active store for setting
     // `<html lang>` / `<html dir>`.
     res.headers.set("x-numu-pathname", url.pathname);
+
+    // Phase 3.6 — locale resolution. Order of precedence:
+    //   1. ?locale=<code> querystring — explicit user choice. Persists
+    //      to cookie so subsequent navigation honors it without the
+    //      param. Reasonable for sharing a localized link.
+    //   2. numu_locale cookie — set by SDK's setLocale() or by step (1).
+    //   3. (none — fall through; layout uses store.default_language)
+    //
+    // We surface the resolved locale on x-numu-locale so the layout
+    // can stamp <html lang> + pass into NuMuProvider as `initialLocale`.
+    const queryLocale = request.nextUrl.searchParams.get("locale");
+    const cookieLocale = request.cookies.get("numu_locale")?.value;
+    const resolvedLocale = queryLocale || cookieLocale || "";
+    if (resolvedLocale) {
+      res.headers.set("x-numu-locale", resolvedLocale);
+    }
+    if (queryLocale && queryLocale !== cookieLocale) {
+      // Promote the querystring choice to a cookie so /products/abc
+      // works on the next click without re-appending ?locale=ar.
+      res.cookies.set("numu_locale", queryLocale, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+        sameSite: "lax",
+      });
+    }
     return res;
   }
 

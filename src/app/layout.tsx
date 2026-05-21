@@ -28,6 +28,18 @@ const RTL_LOCALES = new Set(["ar", "he", "fa", "ur"]);
 async function resolveLocale(): Promise<{ lang: string; dir: "ltr" | "rtl" }> {
   try {
     const h = await headers();
+    // Phase 3.6 — visitor-chosen locale wins over store default. The
+    // proxy resolves `?locale=<code>` querystring + `numu_locale`
+    // cookie and stamps the result on `x-numu-locale`. Empty header
+    // means "no override" — fall through to the store's
+    // default_language as before.
+    const visitorLocale = h.get("x-numu-locale");
+    if (visitorLocale) {
+      return {
+        lang: visitorLocale,
+        dir: RTL_LOCALES.has(visitorLocale) ? "rtl" : "ltr",
+      };
+    }
     const path = h.get("x-numu-pathname") || h.get("x-invoke-path") || "";
     const seg = path.split("/").filter(Boolean)[0];
     const POST_DOMAIN = new Set([
