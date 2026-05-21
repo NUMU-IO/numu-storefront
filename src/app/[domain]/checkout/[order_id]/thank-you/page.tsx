@@ -1,17 +1,12 @@
 /**
- * Step 6 — thank-you / confirmation.
+ * Step 6 — Thank-you confirmation. Phase 7.1 BYOT fork.
  *
- * Renders after a successful order. We fetch the order from
- * /api/customer/orders/{order_id} to display the line items + total.
- * Non-authenticated visitors (guest checkout) can still see this page
- * via the cart cookie scope — the backend uses the same session
- * cookie to authorize a "your order" read for the immediate post-
- * checkout window.
- *
- * No checkout state cleanup needed here — the review step already
- * called clearCheckoutState() before navigating.
+ * BYOT path passes the order_id through `page.handle` so themes can
+ * fetch + render the order details via `useOrder(handle)`.
  */
 
+import { resolveByotFork } from "@/lib/byot-fork";
+import { notFound } from "next/navigation";
 import { ThankYou } from "./ThankYou";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +20,15 @@ export default async function ThankYouPage({
   params,
   searchParams,
 }: PageProps) {
-  const { order_id } = await params;
+  const { domain, order_id } = await params;
   const { n } = await searchParams;
+  const fork = await resolveByotFork(domain, {
+    type: "checkout_thank_you",
+    title: "Order confirmed",
+    handle: order_id,
+    data: { order_id, order_number: n || null },
+  });
+  if (fork.kind === "missing-store") notFound();
+  if (fork.kind === "byot") return fork.element;
   return <ThankYou orderId={order_id} orderNumberFromUrl={n || null} />;
 }

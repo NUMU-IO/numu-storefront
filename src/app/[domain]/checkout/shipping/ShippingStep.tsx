@@ -11,6 +11,17 @@ import {
 } from "@/lib/checkout-state";
 import type { ShippingRateOption } from "@/types/checkout";
 
+interface PickupLocation {
+  id: string;
+  name: string;
+  name_ar?: string | null;
+  address: Record<string, unknown>;
+  pickup_instructions?: string | null;
+  pickup_instructions_ar?: string | null;
+}
+
+type FulfillmentMode = "ship" | "pickup";
+
 /**
  * Step 2 — shipping rate selection.
  *
@@ -38,8 +49,13 @@ function formatCurrency(cents: number, currency: string) {
 export function ShippingStep() {
   const router = useRouter();
   const params = useParams() as { domain: string };
+  const [mode, setMode] = useState<FulfillmentMode>("ship");
   const [rates, setRates] = useState<ShippingRateOption[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [pickupLocations, setPickupLocations] = useState<
+    PickupLocation[] | null
+  >(null);
+  const [pickupId, setPickupId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -50,42 +66,61 @@ export function ShippingStep() {
       return;
     }
     setSelected(s.selected_shipping_rate_id);
+    setPickupId(s.pickup_location_id);
+    setMode(s.pickup_location_id ? "pickup" : "ship");
     (async () => {
+      // Parallel: shipping rates + pickup locations. Pickup is
+      // resolved by store_id (not address) so it can fire immediately
+      // without blocking on the address. The merchant's hub config
+      // decides which locations are pickup-eligible.
+      const ratesP = fetch("/api/shipping/options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipping_address: s.shipping_address }),
+      });
+      const pickupP = fetch("/api/storefront/pickup-locations", {
+        cache: "no-store",
+      }).catch(() => null);
       try {
-        const res = await fetch("/api/shipping/options", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            shipping_address: s.shipping_address,
-          }),
-        });
-        if (!res.ok) {
-          setError(
-            res.status === 404
-              ? "We don't ship to that location yet."
-              : "Couldn't load shipping options. Please try again.",
-          );
-          setRates([]);
-          return;
+        const [ratesRes, pickupRes] = await Promise.all([ratesP, pickupP]);
+
+        // Shipping rates
+        if (!ratesRes.ok) {
+          if (ratesRes.status === 404) {
+            // Country not covered — only an error if pickup also empty.
+            setRates([]);
+          } else {
+            setError("Couldn't load shipping options. Please try again.");
+            setRates([]);
+          }
+        } else {
+          const body = await ratesRes.json();
+          const list: ShippingRateOption[] =
+            (body?.data?.options ||
+              body?.data ||
+              body?.options ||
+              []) as ShippingRateOption[];
+          setRates(list);
+          if (list.length && !s.selected_shipping_rate_id) {
+            const cheapest = [...list].sort(
+              (a, b) => a.amount_cents - b.amount_cents,
+            )[0];
+            setSelected(cheapest.id);
+          }
         }
-        const body = await res.json();
-        const list: ShippingRateOption[] =
-          (body?.data?.options ||
-            body?.data ||
-            body?.options ||
-            []) as ShippingRateOption[];
-        setRates(list);
-        // Auto-select the cheapest rate so the customer can hit
-        // continue without an extra click for the common case.
-        if (list.length && !s.selected_shipping_rate_id) {
-          const cheapest = [...list].sort(
-            (a, b) => a.amount_cents - b.amount_cents,
-          )[0];
-          setSelected(cheapest.id);
+
+        // Pickup locations
+        if (pickupRes && pickupRes.ok) {
+          const body = await pickupRes.json();
+          const list = (body?.data || body || []) as PickupLocation[];
+          setPickupLocations(Array.isArray(list) ? list : []);
+        } else {
+          setPickupLocations([]);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setRates([]);
+        setPickupLocations([]);
       } finally {
         setLoading(false);
       }
@@ -95,22 +130,134 @@ export function ShippingStep() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) {
-      setError("Pick a shipping option to continue.");
-      return;
+    if (mode === "ship") {
+      if (!selected) {
+        setError("Pick a shipping option to continue.");
+        return;
+      }
+      const rate = rates?.find((r) => r.id === selected);
+      patchCheckoutState({
+        selected_shipping_rate_id: selected,
+        shipping_method: rate?.name || null,
+        // Mutually exclusive with pickup.
+        pickup_location_id: null,
+      });
+    } else {
+      if (!pickupId) {
+        setError("Pick a pickup location to continue.");
+        return;
+      }
+      const loc = pickupLocations?.find((p) => p.id === pickupId);
+      patchCheckoutState({
+        pickup_location_id: pickupId,
+        // Pickup forces shipping to a synthetic "Pickup" with $0 cost.
+        selected_shipping_rate_id: null,
+        shipping_method: loc?.name ? `Pickup at ${loc.name}` : "Pickup",
+      });
     }
-    const rate = rates?.find((r) => r.id === selected);
-    patchCheckoutState({
-      selected_shipping_rate_id: selected,
-      shipping_method: rate?.name || null,
-    });
     router.push(`/${params.domain}/checkout/payment`);
   }
+
+  const showPickupTab = (pickupLocations?.length ?? 0) > 0;
 
   return (
     <>
       <StepIndicator current="shipping" />
       <form onSubmit={submit} className="space-y-6">
+        {showPickupTab && (
+          <div
+            role="tablist"
+            aria-label="Fulfillment method"
+            className="inline-flex border rounded overflow-hidden bg-white"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "ship" ? "true" : "false"}
+              onClick={() => setMode("ship")}
+              className={`px-4 py-2 text-sm ${
+                mode === "ship"
+                  ? "bg-gray-900 text-white"
+                  : "text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              Ship
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "pickup" ? "true" : "false"}
+              onClick={() => setMode("pickup")}
+              className={`px-4 py-2 text-sm ${
+                mode === "pickup"
+                  ? "bg-gray-900 text-white"
+                  : "text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              Pick up in store
+            </button>
+          </div>
+        )}
+
+        {mode === "pickup" ? (
+          <section
+            className="bg-white p-6 rounded border"
+            aria-labelledby="pickup-heading"
+          >
+            <h2 id="pickup-heading" className="text-lg font-semibold mb-4">
+              Pickup location
+            </h2>
+            {loading && (
+              <p className="text-sm text-gray-500">Loading locations…</p>
+            )}
+            {!loading && (!pickupLocations || pickupLocations.length === 0) && (
+              <p className="text-sm text-gray-700">
+                No pickup locations available.
+              </p>
+            )}
+            {!loading && pickupLocations && pickupLocations.length > 0 && (
+              <ul className="space-y-2">
+                {pickupLocations.map((l) => (
+                  <li key={l.id}>
+                    <label
+                      htmlFor={`pl-${l.id}`}
+                      className="flex items-start gap-3 border rounded p-3 hover:bg-gray-50 cursor-pointer"
+                    >
+                      <input
+                        id={`pl-${l.id}`}
+                        type="radio"
+                        name="pickup"
+                        checked={pickupId === l.id}
+                        onChange={() => setPickupId(l.id)}
+                        className="mt-1"
+                      />
+                      <span className="flex-1">
+                        <span className="font-medium block">{l.name}</span>
+                        {l.address && Object.keys(l.address).length > 0 && (
+                          <span className="text-xs text-gray-500 block">
+                            {[
+                              l.address.line1,
+                              l.address.city,
+                              l.address.country,
+                            ]
+                              .filter(Boolean)
+                              .join(", ")}
+                          </span>
+                        )}
+                        {l.pickup_instructions && (
+                          <span className="text-xs text-gray-600 mt-1 block">
+                            {l.pickup_instructions}
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-medium">Free</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : (
         <section
           className="bg-white p-6 rounded border"
           aria-labelledby="ship-heading"
@@ -166,6 +313,7 @@ export function ShippingStep() {
             </ul>
           )}
         </section>
+        )}
 
         {error && (
           <div
