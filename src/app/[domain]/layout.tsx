@@ -2,6 +2,7 @@ import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRenderer";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
+import { AttributionProvider } from "@/components/layout/AttributionProvider";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
 import { cookies, headers } from "next/headers";
@@ -138,29 +139,33 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
       >
         Skip to content
       </a>
-      {/* Preview bridge — only active when ?preview=true&editor=v3.
-          Listens for postMessage updates from the dashboard editor. */}
-      <PreviewBridge />
-      {!isByot && themeSettings.section_groups?.header && (
-        <SectionGroupRenderer
-          group={themeSettings.section_groups.header}
-          themeId={themeSettings.theme_id}
-          storeData={store}
-        />
-      )}
-      {/* Skip-link target. BYOT bundles that render their own <main>
-          win over this wrapper because the link's `#main` selector
-          finds the FIRST element with that id; bundles render after
-          this point, but a bundle without an id="main" falls back to
-          this anchor. */}
-      <div id="main">{children}</div>
-      {!isByot && themeSettings.section_groups?.footer && (
-        <SectionGroupRenderer
-          group={themeSettings.section_groups.footer}
-          themeId={themeSettings.theme_id}
-          storeData={store}
-        />
-      )}
+      {/* Feature 001 — captures numu_attribution cookie on first mount
+          and exposes window.__numu_attribution bridge for BYOT themes. */}
+      <AttributionProvider>
+        {/* Preview bridge — only active when ?preview=true&editor=v3.
+            Listens for postMessage updates from the dashboard editor. */}
+        <PreviewBridge />
+        {!isByot && themeSettings.section_groups?.header && (
+          <SectionGroupRenderer
+            group={themeSettings.section_groups.header}
+            themeId={themeSettings.theme_id}
+            storeData={store}
+          />
+        )}
+        {/* Skip-link target. BYOT bundles that render their own <main>
+            win over this wrapper because the link's `#main` selector
+            finds the FIRST element with that id; bundles render after
+            this point, but a bundle without an id="main" falls back to
+            this anchor. */}
+        <div id="main">{children}</div>
+        {!isByot && themeSettings.section_groups?.footer && (
+          <SectionGroupRenderer
+            group={themeSettings.section_groups.footer}
+            themeId={themeSettings.theme_id}
+            storeData={store}
+          />
+        )}
+      </AttributionProvider>
     </ThemeDataProvider>
   );
 }
