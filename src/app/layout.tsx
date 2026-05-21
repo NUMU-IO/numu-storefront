@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
-import { fetchStoreByDomain } from "@/lib/api-client";
+import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
+import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import { RuntimeImportMap } from "@/components/theme-engine/RuntimeImportMap";
 
 export const metadata: Metadata = {
@@ -65,14 +67,67 @@ async function resolveLocale(): Promise<{ lang: string; dir: "ltr" | "rtl" }> {
   }
 }
 
+/**
+ * Phase 7.3 — resolve the active theme's static template URLs (error
+ * + loading) and surface them on the <html> element via data
+ * attributes. The client-side error.tsx and loading.tsx routes read
+ * these on mount and fetch+inject the theme's HTML when present,
+ * falling back to the platform's hardcoded chrome when absent or on
+ * a fetch failure.
+ *
+ * Why data attrs (not React state): error.tsx fires when the bundle
+ * has thrown — we can't rely on a React provider being mounted. A
+ * vanilla `document.documentElement.dataset.*` read always works.
+ */
+async function resolveThemeStaticTemplates(): Promise<{
+  errorUrl: string | null;
+  loadingUrl: string | null;
+}> {
+  try {
+    const h = await headers();
+    const path = h.get("x-numu-pathname") || h.get("x-invoke-path") || "";
+    const seg = path.split("/").filter(Boolean)[0];
+    if (!seg) return { errorUrl: null, loadingUrl: null };
+    const store = await fetchStoreByDomain(seg).catch(() => null);
+    if (!store) return { errorUrl: null, loadingUrl: null };
+    const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
+    if (!themeRaw) return { errorUrl: null, loadingUrl: null };
+    const themeSettings = resolveThemeSettings(
+      themeRaw?.theme_settings || themeRaw || {},
+    );
+    if (
+      !themeSettings.external_theme?.bundle_url ||
+      isBuiltInTheme(themeSettings.theme_id)
+    ) {
+      return { errorUrl: null, loadingUrl: null };
+    }
+    const ext = themeSettings.external_theme as unknown as {
+      error_template_url?: string;
+      loading_template_url?: string;
+    };
+    return {
+      errorUrl: typeof ext.error_template_url === "string" ? ext.error_template_url : null,
+      loadingUrl: typeof ext.loading_template_url === "string" ? ext.loading_template_url : null,
+    };
+  } catch {
+    return { errorUrl: null, loadingUrl: null };
+  }
+}
+
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const { lang, dir } = await resolveLocale();
+  const { errorUrl, loadingUrl } = await resolveThemeStaticTemplates();
   return (
-    <html lang={lang} dir={dir}>
+    <html
+      lang={lang}
+      dir={dir}
+      data-numu-error-template-url={errorUrl || undefined}
+      data-numu-loading-template-url={loadingUrl || undefined}
+    >
       <head>
         {/*
           BYOT runtime import map. Federated theme bundles import

@@ -27,13 +27,27 @@ export interface CheckoutState {
   // Step 2
   selected_shipping_rate_id: string | null;
   shipping_method: string | null;
+  // Phase 7.2 — when set, the order is fulfilled as in-store pickup.
+  // Mutually exclusive with selected_shipping_rate_id (a pickup order
+  // has no shipping rate); PaymentStep clears one when the other is
+  // picked. Cleared whenever the address changes.
+  pickup_location_id: string | null;
   // Step 3
   payment_method: string | null;
   cod_requested: boolean;
   deposit_gateway: string | null;
+  // Phase 7.5 — when set, the gateway service charges the stored
+  // token instead of collecting a new card. Cleared whenever the
+  // payment method changes (the resolver in PaymentStep handles it).
+  saved_payment_method_id: string | null;
   // Step 4
   customer_notes: string;
   coupon_code: string;
+  // Phase 8.3 — gift card tender. Up to 5 codes can be redeemed
+  // against a single order; the backend FIFO-allocates the applied
+  // amount up to min(sum_of_balances, total). Order's amount_due is
+  // reduced by the applied amount; the gateway charges the remainder.
+  gift_card_codes: string[];
   // Attribution (read from URL on entry)
   utm_source: string | null;
   utm_medium: string | null;
@@ -46,11 +60,14 @@ export const EMPTY_CHECKOUT_STATE: CheckoutState = {
   shipping_address: {},
   selected_shipping_rate_id: null,
   shipping_method: null,
+  pickup_location_id: null,
   payment_method: null,
   cod_requested: false,
   deposit_gateway: null,
+  saved_payment_method_id: null,
   customer_notes: "",
   coupon_code: "",
+  gift_card_codes: [],
   utm_source: null,
   utm_medium: null,
   utm_campaign: null,
@@ -109,7 +126,12 @@ export function hasContactStep(s: CheckoutState): boolean {
 }
 
 export function hasShippingStep(s: CheckoutState): boolean {
-  return hasContactStep(s) && Boolean(s.selected_shipping_rate_id);
+  // Either a shipping rate OR a pickup-location is required to
+  // proceed — both fulfillment modes are valid for advancing.
+  return (
+    hasContactStep(s) &&
+    Boolean(s.selected_shipping_rate_id || s.pickup_location_id)
+  );
 }
 
 export function hasPaymentStep(s: CheckoutState): boolean {

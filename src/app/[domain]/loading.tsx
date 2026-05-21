@@ -1,17 +1,55 @@
+"use client";
+import { useEffect, useState } from "react";
+
 /**
- * Storefront loading state — Phase 5.7 WCAG-AA.
+ * Storefront loading state — Phase 5.7 WCAG-AA + Phase 7.3 static
+ * BYOT template.
  *
- * Accessibility decisions:
- *   - role="status" + aria-live="polite" announces the loading
- *     state to screen readers without interrupting their current
- *     task.
- *   - Visible spinner uses sufficient contrast (text-gray-600 on
- *     white = 5.74:1, exceeds AA 4.5:1).
- *   - The animation respects prefers-reduced-motion via Tailwind's
- *     motion-safe variant — assistive tech users with vestibular
- *     sensitivity see a static placeholder instead of a pulse.
+ * BYOT contract: themes that declare `external_theme.loading_template_url`
+ * in their `theme.json` get their static HTML/CSS injected here
+ * INSTEAD of the platform's spinner+text. Same SSR-stamped data attr
+ * mechanism as `error.tsx`.
+ *
+ * Accessibility (kept from Phase 5.7):
+ *   - role="status" + aria-live="polite" announces loading without
+ *     interrupting the screen reader's current task
+ *   - Visible spinner uses 5.74:1 contrast (text-gray-600 on white)
+ *   - motion-safe variant respects prefers-reduced-motion
  */
 export default function StoreLoading() {
+  const [themeHtml, setThemeHtml] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url =
+      typeof document !== "undefined"
+        ? document.documentElement.dataset.numuLoadingTemplateUrl
+        : undefined;
+    if (!url) return;
+    let cancelled = false;
+    fetch(url, { cache: "force-cache" })
+      .then((r) => (r.ok ? r.text() : null))
+      .then((html) => {
+        if (!cancelled && html) setThemeHtml(html);
+      })
+      .catch(() => {
+        /* swallow — built-in fallback renders */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (themeHtml) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        aria-label="Loading"
+        dangerouslySetInnerHTML={{ __html: themeHtml }}
+      />
+    );
+  }
+
   return (
     <div
       role="status"

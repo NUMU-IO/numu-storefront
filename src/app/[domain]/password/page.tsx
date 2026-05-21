@@ -1,18 +1,20 @@
 /**
  * /password — pre-launch unlock gate.
  *
- * Renders a single password input. The form posts JSON to
- * /api/storefront/unlock; on 204 we hard-reload the previous URL
- * (or "/" if there's no return path), at which point the layout's
- * gate sees the unlock cookie and lets the visitor through.
+ * Phase 7.3 BYOT fork: themes that ship a `password` template
+ * render the gate themselves (logo + tagline + custom form) using
+ * `page.type="password"` and `page.data.next`. The form still POSTs
+ * to /api/storefront/unlock and the BYOT theme uses
+ * `<Form action="/api/storefront/unlock" method="POST">` from the SDK.
  *
- * If a visitor lands here when the store ISN'T locked, we redirect
- * them to "/" — no point showing a form for a non-existent gate.
+ * Built-in fallback ships when the theme doesn't have a password
+ * template OR when the active theme isn't BYOT.
  */
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { fetchStoreByDomain } from "@/lib/api-client";
 import { readPasswordProtection } from "@/lib/store-lock";
+import { resolveByotFork } from "@/lib/byot-fork";
 import { PasswordForm } from "@/components/account/PasswordGateForm";
 import type { Metadata } from "next";
 
@@ -61,6 +63,17 @@ export default async function PasswordPage({
     !rawNext.startsWith("//")
       ? rawNext
       : "/";
+
+  // Phase 7.3 — let BYOT themes own the password gate UI completely.
+  // Theme's `password` template reads `page.data.next` and renders
+  // whatever form layout it wants; submit still goes to
+  // /api/storefront/unlock so the platform owns auth.
+  const fork = await resolveByotFork(domain, {
+    type: "password",
+    title: "Coming soon",
+    data: { next },
+  });
+  if (fork.kind === "byot") return fork.element;
 
   // Surface the merchant's brand even on the locked page — visitors
   // who landed here from a marketing campaign should see the store

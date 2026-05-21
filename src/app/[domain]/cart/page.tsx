@@ -20,6 +20,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import BuiltInCart from "@/components/storefront/BuiltInCart";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -88,12 +89,5 @@ export default async function CartPage({ params }: PageProps) {
     );
   }
 
-  return (
-    <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-3xl font-bold">Cart</h1>
-      <p className="text-gray-600 mt-4">
-        No cart template configured.
-      </p>
-    </div>
-  );
+  return <BuiltInCart storeCurrency={store?.currency} />;
 }

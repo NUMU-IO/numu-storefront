@@ -3,6 +3,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import BuiltInProductDetail from "@/components/storefront/BuiltInProductDetail";
 import {
   buildBreadcrumbLd,
   buildProductLd,
@@ -133,15 +134,28 @@ export default async function ProductPage({ params }: PageProps) {
     );
   }
 
-  // Fallback product page
+  // Fallback PDP — variant picker + qty + add-to-cart. Lands when the
+  // store has no PDP template configured (vanilla bazar / fresh stores)
+  // and no BYOT bundle. Anything more elaborate is the theme's job.
+  if (!product) {
+    return (
+      <>
+        {ldScripts}
+        <div className="max-w-4xl mx-auto p-8 text-center text-gray-500">
+          This product is no longer available.
+        </div>
+      </>
+    );
+  }
   return (
     <>
       {ldScripts}
-      <div className="max-w-4xl mx-auto p-8">
-        <h1 className="text-3xl font-bold">{product?.name || "Product"}</h1>
-        <p className="text-gray-600 mt-4">{product?.description || ""}</p>
-        <p className="text-2xl font-bold mt-4">{product?.price || 0} {product?.currency || store?.currency}</p>
-      </div>
+      <BuiltInProductDetail
+        product={{
+          ...product,
+          currency: product.currency || store?.currency,
+        }}
+      />
     </>
   );
 }
