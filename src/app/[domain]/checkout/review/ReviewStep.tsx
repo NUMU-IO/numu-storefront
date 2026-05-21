@@ -9,6 +9,7 @@ import {
   hasPaymentStep,
   readCheckoutState,
 } from "@/lib/checkout-state";
+import { useAttribution } from "@/components/layout/AttributionProvider";
 import type { CheckoutResponse } from "@/types/checkout";
 
 /**
@@ -51,6 +52,10 @@ function formatCents(cents: number, currency = "EGP") {
 export function ReviewStep() {
   const router = useRouter();
   const params = useParams() as { domain: string };
+  // Feature 001 — full attribution envelope from numu_attribution cookie.
+  // Sent in the checkout body when present so the backend can resolve
+  // campaign_id + stamp orders.attribution JSONB + seed customer first_touch.
+  const attribution = useAttribution();
   const [cart, setCart] = useState<{ items: CartLine[]; total?: number; currency?: string } | null>(
     null,
   );
@@ -110,6 +115,12 @@ export function ReviewStep() {
       // the backend tolerates omission too but sending an explicit []
       // keeps the wire shape consistent across paths.
       gift_card_codes: state.gift_card_codes || [],
+      // Feature 001 — campaign attribution. Backend reads attribution.last_touch
+      // for raw UTM stamping, resolves campaign_id via the trailing Crockford
+      // short_code (SEC-006 store-scoped), writes the snapshot to
+      // orders.attribution JSONB, and seeds customer.first_touch_attribution
+      // on first attributed order.
+      ...(attribution ? { attribution } : {}),
     };
 
     try {
