@@ -27,6 +27,12 @@ import { fetchStoreByHost } from "@/lib/api-client";
  */
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
+// Upstream call budget. Set conservatively because /track is fire-
+// and-forget — the SDK has already moved on by the time we reach
+// this proxy, so there's no human waiting on the answer. A hung
+// backend pinning serverless workers is a worse outcome than a few
+// dropped analytics events.
+const UPSTREAM_TIMEOUT_MS = 3_000;
 
 interface TrackBody {
   // Strict funnel-event shape (SDK >= feat/sdk-funnel-tracking).
@@ -91,6 +97,16 @@ export async function POST(req: NextRequest) {
   }
 
   const upstream = `${API_URL}/storefront/store/${store.id}/track`;
+  // Bound the upstream call. Without this, a hung backend would
+  // hold the serverless worker open until the runtime's default
+  // timeout (often 30+ s) and could exhaust the worker pool under
+  // sustained traffic — a much worse outcome than dropping the
+  // analytics event.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    UPSTREAM_TIMEOUT_MS,
+  );
   try {
     await fetch(upstream, {
       method: "POST",
@@ -100,9 +116,19 @@ export async function POST(req: NextRequest) {
       // proxy hop; the proxy -> upstream hop is server-to-server and
       // doesn't need it.
       cache: "no-store",
+      signal: controller.signal,
     });
-  } catch {
-    /* analytics outage must not surface to the customer */
+  } catch (err) {
+    // Distinguish timeout from other failures in the server log so
+    // we have a chance of noticing if the backend slows down. The
+    // SDK still gets a 204 either way.
+    if (err instanceof Error && err.name === "AbortError") {
+      console.warn(`[/api/storefront/track] upstream timed out after ${UPSTREAM_TIMEOUT_MS}ms`);
+    } else {
+      console.warn("[/api/storefront/track] upstream failed:", err);
+    }
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   // Always 204 to the SDK. We don't care what the upstream said —
