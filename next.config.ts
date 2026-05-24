@@ -53,6 +53,27 @@ const nextConfig: NextConfig = {
     // Enable PPR (partial prerendering) once stable on Next 16.
     // ppr: true,
   },
+
+  // Allow the merchant hub's theme editor to iframe the storefront for live
+  // preview. Cloudflare's "Add security headers" managed transform stamps
+  // `X-Frame-Options: SAMEORIGIN` on every numueg.app response, which would
+  // otherwise block the cross-subdomain embed. Setting a CSP `frame-ancestors`
+  // directive overrides X-Frame-Options per CSP Level 2 spec (browsers ignore
+  // XFO when frame-ancestors is present in an enforced policy).
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value:
+              "frame-ancestors 'self' https://numueg.app https://*.numueg.app http://localhost:* http://127.0.0.1:*",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
