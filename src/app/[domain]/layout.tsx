@@ -3,6 +3,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRenderer";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
 import { AttributionProvider } from "@/components/layout/AttributionProvider";
+import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvider";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
 import { cookies, headers } from "next/headers";
@@ -142,6 +143,11 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
       {/* Feature 001 — captures numu_attribution cookie on first mount
           and exposes window.__numu_attribution bridge for BYOT themes. */}
       <AttributionProvider>
+      {/* Sibling bridge for the authenticated customer's ID. Lets the
+          SDK include customer_id on funnel events without re-fetching
+          /api/customer/me on every track call. Anonymous sessions
+          leave the bridge returning null. */}
+      <CustomerBridgeProvider>
         {/* Preview bridge — only active when ?preview=true&editor=v3.
             Listens for postMessage updates from the dashboard editor. */}
         <PreviewBridge />
@@ -165,6 +171,7 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             storeData={store}
           />
         )}
+      </CustomerBridgeProvider>
       </AttributionProvider>
     </ThemeDataProvider>
   );
