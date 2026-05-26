@@ -33,6 +33,11 @@ export function ContactStep() {
   const [state, setState] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [country, setCountry] = useState("EG");
+  // backend-030 / FR-007: WhatsApp marketing consent. Default OFF —
+  // GDPR Recital 47 requires an unticked, freely-given opt-in. The
+  // checkbox is rendered next to the phone field and the opt-in is
+  // fired (best-effort) on Continue.
+  const [whatsappConsent, setWhatsappConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +80,21 @@ export function ContactStep() {
       return;
     }
     setSubmitting(true);
+
+    // backend-030 / FR-007: fire-and-forget WhatsApp opt-in. The proxy
+    // route does the 2-step checkout-session → opt-in dance server-side.
+    // Failures are swallowed — a consent recording problem must never
+    // block the customer from moving to shipping.
+    if (whatsappConsent && phone) {
+      void fetch("/api/whatsapp/opt-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      }).catch(() => {
+        /* best-effort */
+      });
+    }
+
     patchCheckoutState({
       email,
       phone,
@@ -132,6 +152,26 @@ export function ContactStep() {
               />
             </label>
           </div>
+          {/* WhatsApp marketing consent. Default unticked per GDPR
+              Recital 47. Disabled until a phone is typed — there's
+              nothing to record an opt-in against without one. */}
+          <label
+            htmlFor="wa_consent"
+            className="mt-3 flex items-start gap-2 text-sm text-gray-700 cursor-pointer select-none"
+          >
+            <input
+              id="wa_consent"
+              type="checkbox"
+              checked={whatsappConsent}
+              disabled={!phone}
+              onChange={(e) => setWhatsappConsent(e.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span className="text-xs text-gray-600 leading-tight">
+              Send me WhatsApp updates from this store (offers, restocks).
+              You can reply STOP at any time to opt out.
+            </span>
+          </label>
         </section>
 
         <section
