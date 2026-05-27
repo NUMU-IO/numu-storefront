@@ -43,6 +43,11 @@ interface TrackBody {
   event_id?: string;
   referrer?: string;
   attribution?: unknown;
+  // Meta browser-side identifiers — server-side enriched from the
+  // theme's `_fbp` / `_fbc` cookies below. SDKs that already supply
+  // them in the body win; we only fill the blanks.
+  fbp?: string;
+  fbc?: string;
 
   // Legacy / non-funnel shape — the SDK still posts these for pixel-
   // fanout events. We forward them but the backend's funnel_events
@@ -79,21 +84,31 @@ export async function POST(req: NextRequest) {
     return new NextResponse(null, { status: 204 });
   }
 
-  // Server-side attribution fallback: if the SDK didn't include the
-  // envelope in the body (older SDK version), read the cookie
-  // server-side. Same-origin to the theme runtime so the cookie is
-  // visible here even when it isn't visible to the cross-origin
-  // backend.
-  if (!body.attribution) {
-    try {
-      const cookieStore = await cookies();
+  // Server-side attribution + Meta-cookie fallback. The theme is
+  // same-origin to this route, so `_fbp` / `_fbc` / `numu_attribution`
+  // are all visible here even when they aren't visible to the cross-
+  // origin FastAPI backend. SDKs that supply these in the body win;
+  // we only fill the blanks. Meta's `_fbp` and `_fbc` are the highest-
+  // quality non-PII match keys after hashed user data — Events
+  // Manager penalizes coverage below ~75%.
+  try {
+    const cookieStore = await cookies();
+    if (!body.attribution) {
       const raw = cookieStore.get("numu_attribution")?.value;
       if (raw) {
         body.attribution = JSON.parse(decodeURIComponent(raw));
       }
-    } catch {
-      /* malformed cookie — leave attribution absent */
     }
+    if (!body.fbp) {
+      const fbp = cookieStore.get("_fbp")?.value;
+      if (fbp) body.fbp = fbp;
+    }
+    if (!body.fbc) {
+      const fbc = cookieStore.get("_fbc")?.value;
+      if (fbc) body.fbc = fbc;
+    }
+  } catch {
+    /* malformed cookie — leave fields absent */
   }
 
   const upstream = `${API_URL}/storefront/store/${store.id}/track`;
