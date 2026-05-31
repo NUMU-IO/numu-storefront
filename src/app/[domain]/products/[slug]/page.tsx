@@ -9,6 +9,7 @@ import {
   buildProductLd,
   serializeLd,
 } from "@/lib/json-ld";
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -64,9 +65,33 @@ export default async function ProductPage({ params }: PageProps) {
   const { domain, slug } = await params;
 
   const store = await fetchStoreByDomain(domain);
-  const product = await fetchProductBySlug(store.id, slug);
+  // A missing/invalid slug must NOT crash the Server Components render, but a
+  // transient 5xx/network blip must NOT masquerade as a missing product
+  // either (that would wrongly serve a 404 + noindex for a real, live
+  // product). fetchProductBySlug throws "API error: <status> …" for every
+  // non-OK response — only treat a genuine 404 as "no such product"; rethrow
+  // anything else so the error boundary shows a retryable error instead.
+  let product = null;
+  try {
+    product = await fetchProductBySlug(store.id, slug);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("API error: 404")) throw err;
+  }
   const themeRaw = await fetchThemeSettings(store.id);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
+
+  const isByotTheme =
+    !!themeSettings.external_theme?.bundle_url &&
+    !isBuiltInTheme(themeSettings.theme_id);
+
+  // BYOT: a genuinely-missing product → the theme's styled `404` template
+  // (via [domain]/not-found.tsx), not a ghost placeholder PDP and not a
+  // crash. Built-in themes keep their inline "no longer available" fallback
+  // below.
+  if (isByotTheme && !product) {
+    notFound();
+  }
 
   // JSON-LD for product + breadcrumb. We render the script tag
   // alongside whatever template the store uses (BYOT or built-in)

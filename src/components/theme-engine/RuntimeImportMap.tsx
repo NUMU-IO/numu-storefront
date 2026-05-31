@@ -74,6 +74,14 @@ export function RuntimeImportMap() {
       "react/jsx-dev-runtime": urlFor(manifest, "react-jsx-dev-runtime.js"),
       "react-dom": urlFor(manifest, "react-dom.js"),
       "react-dom/client": urlFor(manifest, "react-dom-client.js"),
+      // The published SDK package is `@numueg/theme-sdk` — that's the bare
+      // specifier federate:true bundles import (the plugin externalizes it,
+      // see numu-theme-plugin src/index.ts). The map previously only keyed
+      // `@numu/theme-sdk` (missing "eg"), so federated bundles would throw
+      // "Failed to resolve module specifier @numueg/theme-sdk" (Session G
+      // finding F2). Publish BOTH keys → same module, so either specifier
+      // resolves and no bundle breaks regardless of which it imports.
+      "@numueg/theme-sdk": urlFor(manifest, "sdk.js"),
       "@numu/theme-sdk": urlFor(manifest, "sdk.js"),
     },
   };

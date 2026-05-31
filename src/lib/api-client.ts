@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { headers } from "next/headers";
 import type { StoreData } from "@/types";
 
 /**
@@ -61,8 +62,17 @@ async function apiFetch<T>(
  * custom domain and looked up by full hostname.
  */
 export const fetchStoreByHost = cache(async (rawHost: string) => {
-  const host = rawHost.toLowerCase();
-  const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
+  // Compare host vs platform domain with the port stripped from BOTH. The
+  // proxy stamps `x-numu-host` without a port (e.g. `testlocal.localhost`)
+  // while NUMU_PLATFORM_DOMAIN in dev carries one (`localhost:3100`); a raw
+  // `.endsWith` then fails and a valid subdomain store is misrouted to the
+  // custom-domain lookup → 404 (this is why the themed 404 fell back to the
+  // generic one on localhost). Port-insensitive matching fixes dev and is a
+  // no-op in prod (subdomain.numueg.app vs numueg.app, no ports).
+  const host = rawHost.toLowerCase().split(":")[0];
+  const platformDomain = (process.env.NUMU_PLATFORM_DOMAIN || "numueg.app")
+    .toLowerCase()
+    .split(":")[0];
   const isSubdomain =
     host.endsWith(`.${platformDomain}`) && host !== platformDomain;
   if (isSubdomain) {
@@ -101,7 +111,148 @@ export const fetchStoreByDomain = cache(async (domainOrSubdomain: string) => {
 
 // ── Theme Resolution ──────────────────────────────────────────────────────────
 
+// ── Marketplace preview override ──────────────────────────────────────────
+//
+// Session E (2026-05-28). When the request arrived through the
+// `?preview_theme_slug=<slug>` channel (proxy.ts forwards it as an
+// `x-numu-preview-slug` header), we override the active theme with the
+// marketplace theme's latest published bundle. This is the "Try theme"
+// flow from file 06 §5.
+//
+// Read-only by construction:
+//   - We never POST to /stores/{id}/marketplace/install or activate.
+//   - We never write to store_themes, store_theme_snapshots, or
+//     marketplace_theme_installations.
+//   - The preview fetch uses `cache: "no-store"` so it can't bleed
+//     into another visitor's ISR-cached response.
+//
+// Graceful fallback: if the preview slug doesn't resolve (theme
+// unpublished / no version yet), we log a warning and fall through to
+// the active store theme. The merchant sees the iframe still load
+// against their live theme rather than a crash.
+//
+// Cache wrapper: the React `cache(...)` deduper is per-request, so the
+// layout and each page that calls fetchThemeSettings within one render
+// pass share the same preview result. Different requests get different
+// caches so preview state never leaks across visitors.
+
+interface PreviewThemeMetadata {
+  bundle_url: string | null;
+  css_url: string | null;
+  section_schemas: unknown;
+  settings_schema: unknown;
+  presets: unknown;
+}
+
+interface PreviewThemeDetail {
+  id: string;
+  slug: string;
+  name: string;
+  latest_version: PreviewThemeMetadata | null;
+}
+
+async function readPreviewSlug(): Promise<string | null> {
+  try {
+    const h = await headers();
+    const slug = h.get("x-numu-preview-slug");
+    return slug && slug.trim() ? slug.trim() : null;
+  } catch {
+    // headers() throws when called outside a request scope (e.g. tests).
+    // Falling through to the normal fetch is the safe default.
+    return null;
+  }
+}
+
+async function buildPreviewThemePayload(
+  storeId: string,
+  slug: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    // Direct fetch (no React Query): the preview endpoint is anonymous
+    // and we explicitly opt out of caching so each preview hit re-reads
+    // the marketplace metadata. Server logs the fall-through so a
+    // future debugging session can correlate "preview rendered with
+    // active theme" with the slug that didn't resolve.
+    const res = await fetch(
+      `${API_URL}/marketplace/catalog/themes/${encodeURIComponent(slug)}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) {
+      console.warn(
+        `[preview] could not load marketplace theme '${slug}' for preview (HTTP ${res.status}); falling back to active theme.`,
+      );
+      return null;
+    }
+    const wrapped = await res.json();
+    const detail = (wrapped && "data" in wrapped ? wrapped.data : wrapped) as
+      | PreviewThemeDetail
+      | null;
+    const bundle = detail?.latest_version?.bundle_url ?? null;
+    if (!detail || !bundle) {
+      console.warn(
+        `[preview] marketplace theme '${slug}' has no published bundle; falling back to active theme.`,
+      );
+      return null;
+    }
+
+    // Synthesise a minimal `themeRaw`-shaped payload. resolveThemeSettings
+    // looks for either `theme_settings` (nested V3) or a top-level
+    // `external_theme`. We provide both so the layout's `isByot`
+    // detection (which reads from the resolved settings) lights up
+    // regardless of which branch resolveThemeSettings takes.
+    const externalTheme = {
+      bundle_url: bundle,
+      css_url: detail.latest_version!.css_url,
+      mode: "preview",
+      settings_schema: detail.latest_version!.settings_schema,
+      section_schemas: detail.latest_version!.section_schemas,
+      presets: detail.latest_version!.presets,
+      theme_id: detail.slug,
+    };
+
+    return {
+      // Top-level `external_theme` for the V1/V2 normalisation branch
+      // in resolve-theme.ts (lines 131-133).
+      external_theme: externalTheme,
+      // Nested V3 customization so the layout sees the preview as a
+      // fully-formed V3 store. Empty templates + section_groups let the
+      // bundle's own built-in presets take over via main.tsx's
+      // BUILTIN_TEMPLATES fallback.
+      theme_settings: {
+        schema_version: 3,
+        theme_id: detail.slug,
+        global_settings: {},
+        templates: {},
+        section_groups: {},
+        external_theme: externalTheme,
+      },
+      // Marker so future consumers (a "Previewing" banner inside the
+      // storefront, for instance) can branch. Nothing reads this yet.
+      _is_preview: true,
+      _preview_theme_slug: slug,
+      _preview_store_id: storeId,
+    };
+  } catch (err) {
+    console.warn(
+      `[preview] error loading marketplace theme '${slug}' for preview: ${(err as Error).message}; falling back to active theme.`,
+    );
+    return null;
+  }
+}
+
 export const fetchThemeSettings = cache(async (storeId: string) => {
+  // Preview override comes first — when the proxy forwarded a slug we
+  // try to substitute the marketplace bundle's metadata. Any failure
+  // here logs + falls through to the merchant's real active theme.
+  const previewSlug = await readPreviewSlug();
+  if (previewSlug) {
+    const previewPayload = await buildPreviewThemePayload(storeId, previewSlug);
+    if (previewPayload) return previewPayload;
+    // else: fall through silently — the storefront renders the active
+    // theme. ThemePreviewPage surfaces a "no published version" banner
+    // independently using the same getThemeDetail call.
+  }
+
   return apiFetch<Record<string, unknown>>(
     `/storefront/theme/${storeId}`,
     { tags: [`theme-${storeId}`], revalidate: 60 },

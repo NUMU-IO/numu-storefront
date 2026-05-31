@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=2048 next dev --turbopack",
-    "dev:webpack": "cross-env NODE_OPTIONS=--max-old-space-size=2048 next dev",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next dev -p 3100",
+    "dev:turbopack": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next dev --turbopack -p 3100",
     "predev": "node scripts/build-runtime.mjs",
     "prebuild": "node scripts/build-runtime.mjs",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=6144 next build",
     "build:runtime": "node scripts/build-runtime.mjs",
-    "start": "next start",
+    "prestart": "node scripts/build-runtime.mjs",
+    "start": "next start -p 3100",
     "lint": "next lint",
     "clean": "rimraf .next .turbo node_modules/.cache public/__numu-runtime"
   },

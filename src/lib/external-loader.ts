@@ -19,15 +19,22 @@
 
 const PROD_HOST_SUFFIXES_BUILTIN = ["numueg.app", "numu.io"];
 const DEV_HOSTS = new Set(["localhost", "127.0.0.1"]);
+// Session G (file 08): the dev R2 canary serves theme bundles over the
+// managed r2.dev subdomain (pub-<hash>.r2.dev). DEV-ONLY allow-list —
+// production theme delivery uses cdn.numueg.app via
+// NEXT_PUBLIC_BYOT_BUNDLE_HOSTS, never r2.dev.
+const DEV_HOST_SUFFIXES = ["r2.dev"];
 
 function isProdEnv(): boolean {
   // We treat "production" as any environment where dev-only hosts are
-  // forbidden. Use NEXT_PUBLIC_NUMU_ENV to override (e.g., for staging
-  // smoke tests that want to allow localhost).
-  return (
-    process.env.NEXT_PUBLIC_NUMU_ENV === "production" ||
-    process.env.NODE_ENV === "production"
-  );
+  // forbidden. Explicit NEXT_PUBLIC_NUMU_ENV always wins so a built
+  // bundle can be served on a dev machine for smoke tests without
+  // rebuilding (set NEXT_PUBLIC_NUMU_ENV=development or =staging in
+  // the host's env). Otherwise fall back to NODE_ENV.
+  const explicit = process.env.NEXT_PUBLIC_NUMU_ENV;
+  if (explicit === "production") return true;
+  if (explicit === "development" || explicit === "staging") return false;
+  return process.env.NODE_ENV === "production";
 }
 
 function allowedHostSuffixes(): string[] {
@@ -55,7 +62,12 @@ export function isAllowedBundleUrl(url: string): boolean {
   const host = parsed.hostname.toLowerCase();
   const inDev = !isProdEnv();
 
-  if (inDev && DEV_HOSTS.has(host)) return true;
+  if (inDev) {
+    if (DEV_HOSTS.has(host)) return true;
+    // r2.dev canary bundles (https) are allowed in dev only.
+    if (DEV_HOST_SUFFIXES.some((s) => host === s || host.endsWith("." + s)))
+      return true;
+  }
 
   if (parsed.protocol !== "https:") return false;
   return allowedHostSuffixes().some(
