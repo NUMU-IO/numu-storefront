@@ -143,7 +143,12 @@ export default async function RootLayout({
         */}
         <RuntimeImportMap />
       </head>
-      <body>{children}</body>
+      {/* suppressHydrationWarning: browser extensions (Grammarly,
+          LastPass, etc.) inject data-* attributes onto <body> before
+          React hydrates, producing noisy mismatch warnings that are
+          out of our control. Suppression here is scoped to body's own
+          attributes — children still hydrate strictly. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }
