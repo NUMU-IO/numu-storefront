@@ -10,6 +10,7 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { useAttribution } from "@/components/layout/AttributionProvider";
+import { formatCents } from "@/lib/money";
 import type { CheckoutResponse } from "@/types/checkout";
 
 /**
@@ -36,17 +37,6 @@ interface CartLine {
   unit_price?: number;
   subtotal?: number;
   product_name?: string;
-}
-
-function formatCents(cents: number, currency = "EGP") {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-    }).format(cents / 100);
-  } catch {
-    return `${(cents / 100).toFixed(2)} ${currency}`;
-  }
 }
 
 export function ReviewStep() {

@@ -46,6 +46,7 @@ const METHOD_LABELS: Record<string, string> = {
   paymob: "Credit / debit card (Paymob)",
   paymob_card: "Credit / debit card (Paymob)",
   kashier: "Credit / debit card (Kashier)",
+  moyasar: "Card / mada / Apple Pay (Moyasar)",
   fawry: "Fawry",
   fawaterak: "Fawaterak",
   instapay: "InstaPay",
