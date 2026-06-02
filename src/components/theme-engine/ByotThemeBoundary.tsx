@@ -2,6 +2,7 @@
 
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
+import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
 import type { ThemeSettingsV3, StoreData } from "@/types";
 
 interface PageContextData {
@@ -71,6 +72,10 @@ interface BundleMountProps {
    *  "Try theme" preview, false for editor/installed/public (see computeDemo).
    *  Bundles read it as `ctx.demo`. */
   demo?: boolean;
+  /** Phase 2.4 — store navigation menus keyed by handle, resolved
+   *  server-side and forwarded so the bundle's NuMuProvider populates
+   *  `useNavigation(handle)` without a client round-trip. */
+  navigation?: Record<string, unknown[]>;
 }
 
 type BundleModule = {
@@ -218,6 +223,9 @@ export default function ByotThemeBoundary({
   const handleRef = useRef<BundleHandle | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
+  // Phase 2.4 — store nav menus injected once by the layout. Stable per
+  // session; read here (non-throwing) and forwarded into every mount ctx.
+  const navigation = useThemeDataOptional()?.navigation;
 
   // ── Bundle lifecycle ──────────────────────────────────────────────────────
   //
@@ -268,6 +276,7 @@ export default function ByotThemeBoundary({
           page,
           locale,
           demo: computeDemo(),
+          navigation,
         });
         setLoading(false);
       } catch (err) {
@@ -308,6 +317,7 @@ export default function ByotThemeBoundary({
         page,
         locale,
         demo: computeDemo(),
+        navigation,
       });
       if (!ok) {
         // Legacy bundle (mount returned a cleanup function, no update
@@ -324,7 +334,7 @@ export default function ByotThemeBoundary({
     } catch (err) {
       console.warn("[ByotThemeBoundary] update threw:", err);
     }
-  }, [themeSettings, storeData, page, locale]);
+  }, [themeSettings, storeData, page, locale, navigation]);
 
   // Live-preview edits (editor only). The dashboard's LivePreview posts
   // `numu:theme:update` on every change; PreviewBridge re-dispatches it as a
@@ -349,6 +359,7 @@ export default function ByotThemeBoundary({
           page,
           locale,
           demo: computeDemo(),
+          navigation,
         });
       } catch (err) {
         console.warn("[ByotThemeBoundary] live update threw:", err);
@@ -360,7 +371,7 @@ export default function ByotThemeBoundary({
         "numu:theme-update",
         onThemeUpdate as EventListener,
       );
-  }, [storeData, page, locale]);
+  }, [storeData, page, locale, navigation]);
 
   const fallbackUI =
     fallback || (

@@ -47,7 +47,11 @@ export async function proxyCartMutation(
   if (cookie) headers.cookie = cookie;
   const idempotency = req.headers.get("x-numu-idempotency-key");
   if (idempotency) headers["x-numu-idempotency-key"] = idempotency;
-  const subdomain = req.headers.get("x-numu-host");
+  // Fall back to the request's own Host when the proxy didn't stamp
+  // `x-numu-host` — otherwise guest cart writes 400 on store resolution.
+  const subdomain =
+    req.headers.get("x-numu-host") ||
+    (req.headers.get("host") || "").split(":")[0];
   if (subdomain) headers["x-numu-host"] = subdomain;
 
   const res = await fetch(`${API_URL}${backendPath}`, {

@@ -40,6 +40,43 @@ export type ByotForkResult =
   | { kind: "byot"; element: ReactElement; store: StoreData; theme: ThemeSettingsV3 }
   | { kind: "builtin"; store: StoreData; theme: ThemeSettingsV3 | null };
 
+/**
+ * Whether the active external theme has EXPLICITLY taken ownership of the
+ * checkout document.
+ *
+ * Checkout is platform-owned by default (the Shopify model): payment
+ * gateways, server-priced shipping, PII handling and order placement all
+ * live in the host, so every store — including BYOT — gets a complete,
+ * secure, V2-parity checkout for free. Themes generally do NOT (and must
+ * not be forced to) re-implement payment integrations, so handing them an
+ * empty `checkout_*` page type just renders a blank page. That was the
+ * "checkout has no sections" bug: bon-younes (and every current theme)
+ * ships no checkout section, so the bundle drew nothing.
+ *
+ * Ownership is signalled ONLY by an explicit manifest opt-in:
+ *   `external_theme.capabilities.checkout === true`.
+ *
+ * We deliberately do NOT infer ownership from the presence of a `checkout`
+ * template: EVERY theme ships a `checkout` template carrying the
+ * header/footer CHROME (its page content empty), so a "non-empty template"
+ * heuristic false-positives and hands the blank bundle the checkout — the
+ * exact bug this fix removes. Explicit opt-in is the contract; no current
+ * theme sets it, so the built-in checkout always renders.
+ */
+function themeClaimsCheckout(theme: ThemeSettingsV3): boolean {
+  const ext = theme.external_theme as
+    | (NonNullable<ThemeSettingsV3["external_theme"]> & {
+        capabilities?: { checkout?: boolean } | null;
+      })
+    | undefined;
+  return ext?.capabilities?.checkout === true;
+}
+
+/** A checkout fork point (vs. password / error / other future forks). */
+function isCheckoutPageType(type: string | undefined): boolean {
+  return typeof type === "string" && type.startsWith("checkout");
+}
+
 export async function resolveByotFork(
   domain: string,
   page: PageContextData,
@@ -62,7 +99,12 @@ export async function resolveByotFork(
 
   if (
     themeSettings.external_theme?.bundle_url &&
-    !isBuiltInTheme(themeSettings.theme_id)
+    !isBuiltInTheme(themeSettings.theme_id) &&
+    // Checkout is platform-owned unless the theme explicitly claims it
+    // (see themeClaimsCheckout). Non-checkout fork points (e.g. the
+    // storefront password gate) keep the original "any BYOT theme owns
+    // the page" behaviour.
+    (!isCheckoutPageType(page.type) || themeClaimsCheckout(themeSettings))
   ) {
     return {
       kind: "byot",
@@ -99,6 +141,33 @@ export async function isByotActive(domain: string): Promise<boolean> {
     return Boolean(
       themeSettings.external_theme?.bundle_url &&
         !isBuiltInTheme(themeSettings.theme_id),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True only when the active theme OWNS the checkout document (an external
+ * theme that explicitly claims checkout — see themeClaimsCheckout). The
+ * checkout layout uses this to decide chrome:
+ *   - theme owns checkout  → passthrough (the bundle draws the whole page)
+ *   - otherwise (default)  → wrap the host's built-in checkout steps in the
+ *     platform chrome (logo header + secure footer + trust strip), INCLUDING
+ *     for BYOT stores. This is what stops BYOT checkout from rendering blank.
+ */
+export async function themeOwnsCheckout(domain: string): Promise<boolean> {
+  try {
+    const store = await fetchStoreByDomain(domain);
+    const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
+    if (!themeRaw) return false;
+    const themeSettings = resolveThemeSettings(
+      themeRaw?.theme_settings || themeRaw || {},
+    );
+    return Boolean(
+      themeSettings.external_theme?.bundle_url &&
+        !isBuiltInTheme(themeSettings.theme_id) &&
+        themeClaimsCheckout(themeSettings),
     );
   } catch {
     return false;

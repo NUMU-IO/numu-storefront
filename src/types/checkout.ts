@@ -17,6 +17,16 @@ export interface CheckoutAddress {
   postal_code?: string | null;
   country: string; // ISO 3166-1 alpha-2 (EG, US, etc.)
   phone?: string | null;
+  // Cluster 2 — Google-Maps delivery pin. Captured by the checkout's
+  // location picker and forwarded to the backend, which accepts these on
+  // OrderAddressRequest (latitude/longitude/location_accuracy/
+  // location_source/geocoded_address). Optional — checkout works without
+  // a pin (manual entry), so they're only sent when the customer pins.
+  latitude?: number;
+  longitude?: number;
+  location_accuracy?: number;
+  location_source?: string; // "gps" | "manual_pin"
+  geocoded_address?: string;
 }
 
 export interface ShippingRateOption {
