@@ -10,6 +10,7 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import type { ShippingRateOption } from "@/types/checkout";
+import { formatCents } from "@/lib/money";
 
 interface PickupLocation {
   id: string;
@@ -36,14 +37,7 @@ type FulfillmentMode = "ship" | "pickup";
  */
 
 function formatCurrency(cents: number, currency: string) {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-    }).format(cents / 100);
-  } catch {
-    return `${(cents / 100).toFixed(2)} ${currency}`;
-  }
+  return formatCents(cents, currency);
 }
 
 export function ShippingStep() {

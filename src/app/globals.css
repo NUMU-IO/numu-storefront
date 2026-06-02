@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+/* New Saudi Riyal symbol (Unicode 17.0, U+20C1). Self-hosted OFL font;
+   `unicode-range` scopes it to that one codepoint so trailing it on the
+   sans stack only ever renders the riyal glyph — nothing else changes. */
+@font-face {
+  font-family: "saudi_riyal";
+  src: url("/fonts/saudi_riyal.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20C1;
+}
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", "saudi_riyal";
+}

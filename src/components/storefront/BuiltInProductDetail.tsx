@@ -14,6 +14,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ShareButtons } from "./ShareButtons";
+import { formatMajor } from "@/lib/money";
 
 interface ProductVariant {
   id: string;
@@ -218,11 +219,11 @@ export default function BuiltInProductDetail({ product }: Props) {
         <h1 className="text-2xl md:text-3xl font-semibold">{product.name}</h1>
         <div className="mt-3 flex items-baseline gap-3">
           <span className="text-2xl font-bold">
-            {displayPriceNum.toFixed(2)} {currency}
+            {formatMajor(displayPriceNum, currency)}
           </span>
           {displayCompareAt && displayCompareAt > displayPriceNum && (
             <span className="text-base text-gray-400 line-through">
-              {Number(displayCompareAt).toFixed(2)} {currency}
+              {formatMajor(Number(displayCompareAt), currency)}
             </span>
           )}
         </div>
