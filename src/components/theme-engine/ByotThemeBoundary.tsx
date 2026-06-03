@@ -2,6 +2,7 @@
 
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
+import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
 import type { ThemeSettingsV3, StoreData } from "@/types";
 
 interface PageContextData {
@@ -48,8 +49,15 @@ interface ByotThemeBoundaryProps {
 type BundleHandle =
   | (() => void)
   | {
-      unmount: () => void;
+      // Modern contract (scaffolded by `numu-theme init`).
+      unmount?: () => void;
       update?: (props: BundleMountProps) => void;
+      // Legacy / SDK MountResult contract (bon-younes et al.): `cleanup`
+      // instead of `unmount`, `applyDraft(themeSettings)` instead of
+      // `update(props)`. The host accepts both so unmount + live-preview
+      // edits work regardless of which contract a bundle shipped with.
+      cleanup?: () => void;
+      applyDraft?: (themeSettings: ThemeSettingsV3) => void;
     };
 
 interface BundleMountProps {
@@ -60,6 +68,14 @@ interface BundleMountProps {
    *  NuMuProvider as `initialLocale`. Older bundles that don't read it
    *  fall through to `store.default_language` as before. */
   locale?: string;
+  /** AUTHORITATIVE marketplace-preview flag — true ONLY for the catalog
+   *  "Try theme" preview, false for editor/installed/public (see computeDemo).
+   *  Bundles read it as `ctx.demo`. */
+  demo?: boolean;
+  /** Phase 2.4 — store navigation menus keyed by handle, resolved
+   *  server-side and forwarded so the bundle's NuMuProvider populates
+   *  `useNavigation(handle)` without a client round-trip. */
+  navigation?: Record<string, unknown[]>;
 }
 
 type BundleModule = {
@@ -73,15 +89,51 @@ function callUnmount(handle: BundleHandle | null): void {
     handle();
     return;
   }
-  handle.unmount();
+  // Modern bundles expose `unmount`; legacy/SDK MountResult exposes `cleanup`.
+  if (typeof handle.unmount === "function") handle.unmount();
+  else if (typeof handle.cleanup === "function") handle.cleanup();
+}
+
+/**
+ * AUTHORITATIVE marketplace-preview signal, passed to every V3 bundle as
+ * `ctx.demo`. The hub opens the catalog "Try theme" preview iframe at the
+ * storefront with `?preview_theme_slug=<slug>` (proxy.ts forwards it as a
+ * header AND, being an internal rewrite, keeps it in the client URL). The
+ * editor preview (`?preview=true&editor=v3`), installed/activated stores, and
+ * public SSR NEVER carry `preview_theme_slug` → demo=false.
+ *
+ * This replaces the bundle's own fragile empty-templates inference as the
+ * demo trigger: a real installed store whose stored customization diverges
+ * from the active bundle's schemas can have its `templates` emptied by the
+ * storefront sanitiser, which would otherwise flip the bundle into demo mode
+ * and render demo (coffee) imagery on a live merchant store. Keying demo on
+ * the preview marker — never on store data — makes that impossible by design.
+ * Bundles built with `typeof ctx.demo === "boolean" ? ctx.demo : …` honour
+ * this; older bundles fall back to their own inference (harmless).
+ */
+function computeDemo(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return Boolean(
+      new URLSearchParams(window.location.search).get("preview_theme_slug"),
+    );
+  } catch {
+    return false;
+  }
 }
 
 function tryUpdate(
   handle: BundleHandle | null,
   props: BundleMountProps,
 ): boolean {
-  if (handle && typeof handle === "object" && typeof handle.update === "function") {
+  if (!handle || typeof handle !== "object") return false;
+  // Modern contract: update(props). Legacy/SDK MountResult: applyDraft(settings).
+  if (typeof handle.update === "function") {
     handle.update(props);
+    return true;
+  }
+  if (typeof handle.applyDraft === "function") {
+    handle.applyDraft(props.themeSettings);
     return true;
   }
   return false;
@@ -171,6 +223,9 @@ export default function ByotThemeBoundary({
   const handleRef = useRef<BundleHandle | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
+  // Phase 2.4 — store nav menus injected once by the layout. Stable per
+  // session; read here (non-throwing) and forwarded into every mount ctx.
+  const navigation = useThemeDataOptional()?.navigation;
 
   // ── Bundle lifecycle ──────────────────────────────────────────────────────
   //
@@ -220,6 +275,8 @@ export default function ByotThemeBoundary({
           storeData,
           page,
           locale,
+          demo: computeDemo(),
+          navigation,
         });
         setLoading(false);
       } catch (err) {
@@ -254,7 +311,14 @@ export default function ByotThemeBoundary({
     const handle = handleRef.current;
     if (!handle) return;
     try {
-      const ok = tryUpdate(handle, { themeSettings, storeData, page, locale });
+      const ok = tryUpdate(handle, {
+        themeSettings,
+        storeData,
+        page,
+        locale,
+        demo: computeDemo(),
+        navigation,
+      });
       if (!ok) {
         // Legacy bundle (mount returned a cleanup function, no update
         // method). PreviewBridge already handles fine-grained settings
@@ -270,7 +334,44 @@ export default function ByotThemeBoundary({
     } catch (err) {
       console.warn("[ByotThemeBoundary] update threw:", err);
     }
-  }, [themeSettings, storeData, page, locale]);
+  }, [themeSettings, storeData, page, locale, navigation]);
+
+  // Live-preview edits (editor only). The dashboard's LivePreview posts
+  // `numu:theme:update` on every change; PreviewBridge re-dispatches it as a
+  // `numu:theme-update` window event. The `themeSettings` PROP is server-
+  // rendered and never changes on the client, so the update effect above
+  // can't carry live edits — apply them straight to the bundle handle here via
+  // update()/applyDraft(). Inert on the public storefront: nothing fires
+  // `numu:theme-update` outside the editor iframe.
+  useEffect(() => {
+    // Editor iframe only — never wire this on the public storefront (a real
+    // shopper's page is top-level). PreviewBridge (the sole emitter of
+    // numu:theme-update) is already editor-gated; this is defense-in-depth so
+    // the listener isn't even registered for shoppers.
+    if (typeof window === "undefined" || window.parent === window) return;
+    function onThemeUpdate(e: Event) {
+      const next = (e as CustomEvent).detail as ThemeSettingsV3 | undefined;
+      if (!next) return;
+      try {
+        tryUpdate(handleRef.current, {
+          themeSettings: next,
+          storeData,
+          page,
+          locale,
+          demo: computeDemo(),
+          navigation,
+        });
+      } catch (err) {
+        console.warn("[ByotThemeBoundary] live update threw:", err);
+      }
+    }
+    window.addEventListener("numu:theme-update", onThemeUpdate as EventListener);
+    return () =>
+      window.removeEventListener(
+        "numu:theme-update",
+        onThemeUpdate as EventListener,
+      );
+  }, [storeData, page, locale, navigation]);
 
   const fallbackUI =
     fallback || (

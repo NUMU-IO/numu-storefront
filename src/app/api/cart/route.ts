@@ -19,7 +19,13 @@ function backendHeaders(req: NextRequest): HeadersInit {
   const headers: HeadersInit = { "Content-Type": "application/json" };
   const cookie = req.headers.get("cookie");
   if (cookie) (headers as Record<string, string>).cookie = cookie;
-  const subdomain = req.headers.get("x-numu-host");
+  // Fall back to the request's own Host when the proxy didn't stamp
+  // `x-numu-host` (the SDK's browser fetch to /api/cart doesn't set it).
+  // Without this the backend can't resolve the store for a guest cart and
+  // returns 400 "Unable to identify store" — so the cart never loads.
+  const subdomain =
+    req.headers.get("x-numu-host") ||
+    (req.headers.get("host") || "").split(":")[0];
   if (subdomain) (headers as Record<string, string>)["x-numu-host"] = subdomain;
   return headers;
 }

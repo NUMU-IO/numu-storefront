@@ -41,6 +41,15 @@ export interface ExternalThemeMetadata {
   mode?: string;
   settings_schema?: Record<string, any> | null;
   section_schemas?: Record<string, any> | null;
+  /**
+   * Preset templates declared in the theme's `theme.json.presets.templates`.
+   * Used as a fallback when the saved customization's templates are stripped
+   * empty (e.g. all sections were from a previously-active theme and don't
+   * exist in the new bundle's section registry).
+   */
+  presets?: Record<string, any> | null;
+  /** Theme id from the manifest, used to detect theme switches. */
+  theme_id?: string | null;
 }
 
 // Store data from API

@@ -2,8 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import { StepIndicator } from "@/components/checkout/StepIndicator";
+import {
+  BackLink,
+  CheckoutCard,
+  ErrorBanner,
+  OptionRow,
+  PrimaryButton,
+  Select,
+  TextInput,
+} from "@/components/checkout/ui";
 import {
   hasShippingStep,
   patchCheckoutState,
@@ -13,15 +21,10 @@ import {
 /**
  * Step 3 — payment method picker.
  *
- * Only displays methods the merchant has enabled. We read the
- * checkout config from /api/storefront/checkout-config to know which
- * gateways are live (Paymob / Kashier / Fawry / Fawaterak / InstaPay
- * / COD). COD picks an extra "deposit gateway" sub-form when the
- * store's deposit policy is active.
- *
- * Picking the method here doesn't commit anything — only the review
- * step posts /api/checkout. Returning here from review preserves the
- * choice via sessionStorage.
+ * Only displays methods the merchant has enabled (read from
+ * /api/storefront/checkout-config). COD picks an extra "deposit gateway"
+ * sub-form when the store's deposit policy is active. Picking the method
+ * here doesn't commit anything — only the review step posts /api/checkout.
  */
 
 interface CheckoutConfig {
@@ -37,21 +40,51 @@ interface SavedCard {
   last_four: string | null;
 }
 
-// Gateway codes whose saved cards we can charge token-only. Other
-// methods (Fawry/Fawaterak/InstaPay/COD) don't have re-chargeable
-// tokens — saved cards are skipped for them entirely.
 const SAVED_CARD_GATEWAYS = new Set(["paymob", "paymob_card", "kashier"]);
 
-const METHOD_LABELS: Record<string, string> = {
-  paymob: "Credit / debit card (Paymob)",
-  paymob_card: "Credit / debit card (Paymob)",
-  kashier: "Credit / debit card (Kashier)",
-  moyasar: "Card / mada / Apple Pay (Moyasar)",
-  fawry: "Fawry",
-  fawaterak: "Fawaterak",
-  instapay: "InstaPay",
-  cod: "Cash on Delivery",
-};
+function methodLabel(m: string, isAr: boolean): string {
+  const labels: Record<string, [string, string]> = {
+    paymob: ["Credit / debit card (Paymob)", "بطاقة ائتمان / خصم (Paymob)"],
+    paymob_card: ["Credit / debit card (Paymob)", "بطاقة ائتمان / خصم (Paymob)"],
+    kashier: ["Credit / debit card (Kashier)", "بطاقة ائتمان / خصم (Kashier)"],
+    moyasar: ["Card / mada / Apple Pay (Moyasar)", "بطاقة / مدى / Apple Pay (Moyasar)"],
+    fawry: ["Fawry", "فوري"],
+    fawaterak: ["Fawaterak", "فواتيرك"],
+    instapay: ["InstaPay", "إنستاباي"],
+    cod: ["Cash on Delivery", "الدفع عند الاستلام"],
+  };
+  const entry = labels[m];
+  if (!entry) return m;
+  return isAr ? entry[1] : entry[0];
+}
+
+const T = {
+  payment: { en: "Payment", ar: "الدفع" },
+  loading: { en: "Loading payment options…", ar: "جارٍ تحميل خيارات الدفع…" },
+  none: {
+    en: "No payment methods configured for this store.",
+    ar: "لا توجد طرق دفع مفعّلة لهذا المتجر.",
+  },
+  savedCards: { en: "Saved cards", ar: "البطاقات المحفوظة" },
+  savedHint: {
+    en: "Pay faster with a card on file, or pick \"Enter a new card\".",
+    ar: "ادفع أسرع ببطاقة محفوظة، أو اختر «إدخال بطاقة جديدة».",
+  },
+  newCard: { en: "Enter a new card", ar: "إدخال بطاقة جديدة" },
+  codTitle: { en: "COD deposit", ar: "عربون الدفع عند الاستلام" },
+  codHint: {
+    en: "This store requires a small upfront deposit for COD orders. Pick the gateway to charge:",
+    ar: "المتجر ده بيطلب عربون بسيط لطلبات الدفع عند الاستلام. اختر بوابة الدفع:",
+  },
+  pickGateway: { en: "— pick gateway —", ar: "— اختر بوابة —" },
+  pickMethod: { en: "Pick a payment method to continue.", ar: "اختر طريقة دفع للمتابعة." },
+  pickDeposit: {
+    en: "Pick a gateway for the COD deposit payment.",
+    ar: "اختر بوابة دفع للعربون.",
+  },
+  back: { en: "Back to shipping", ar: "العودة للشحن" },
+  review: { en: "Review order", ar: "مراجعة الطلب" },
+} as const;
 
 export function PaymentStep() {
   const router = useRouter();
@@ -63,8 +96,15 @@ export function PaymentStep() {
   const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [locale, setLocale] = useState("en");
+
+  const isAr = locale === "ar";
+  const t = (k: keyof typeof T) => (isAr ? T[k].ar : T[k].en);
 
   useEffect(() => {
+    if (typeof document !== "undefined") {
+      setLocale(document.documentElement.lang === "ar" ? "ar" : "en");
+    }
     const s = readCheckoutState();
     if (!hasShippingStep(s)) {
       router.replace(`/${params.domain}/checkout/shipping`);
@@ -86,9 +126,6 @@ export function PaymentStep() {
           const body = await res.json();
           setConfig((body?.data || body) as CheckoutConfig);
         } else {
-          // Backend without the config endpoint → fall back to a
-          // sensible default list. Keeps checkout usable on dev
-          // stacks that haven't deployed the config route yet.
           setConfig({ enabled_payment_methods: ["paymob", "cod"] });
         }
       } catch {
@@ -97,11 +134,6 @@ export function PaymentStep() {
         setLoading(false);
       }
 
-      // Phase 7.5 — load the customer's saved cards. Anonymous
-      // visitors get 401 here → we silently render the new-card flow
-      // only. The store_id query param is required by the backend
-      // for the per-store scope check; we resolve it via the store
-      // lookup hidden in the API proxy chain.
       try {
         const storeRes = await fetch("/api/storefront/store", {
           cache: "no-store",
@@ -132,20 +164,16 @@ export function PaymentStep() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!method) {
-      setError("Pick a payment method to continue.");
+      setError(t("pickMethod"));
       return;
     }
     const codSelected = method === "cod";
     const depositRequired =
       codSelected && Boolean(config?.cod_deposit_policy?.enabled);
     if (depositRequired && !depositGateway) {
-      setError("Pick a gateway for the COD deposit payment.");
+      setError(t("pickDeposit"));
       return;
     }
-    // Only forward the saved card when it actually matches the
-    // chosen gateway — picking a saved Paymob card then switching to
-    // Fawry must clear the saved-card binding so the backend doesn't
-    // 400 on the gateway mismatch.
     const savedCardForMethod = savedCards?.find(
       (c) =>
         c.id === savedCardId &&
@@ -166,10 +194,6 @@ export function PaymentStep() {
   const methods = config?.enabled_payment_methods || [];
   const showDepositPicker =
     method === "cod" && Boolean(config?.cod_deposit_policy?.enabled);
-  // Saved cards are only meaningful when:
-  //   1. The customer is logged in (savedCards is non-null)
-  //   2. The selected method is a token-charge-capable gateway
-  //   3. The customer has at least one saved card for that gateway
   const savedCardsForMethod = (savedCards || []).filter(
     (c) =>
       method &&
@@ -180,129 +204,99 @@ export function PaymentStep() {
 
   return (
     <>
-      <StepIndicator current="payment" />
-      <form onSubmit={submit} className="space-y-6">
-        <section className="bg-white p-6 rounded border">
-          <h2 className="text-lg font-semibold mb-4">Payment</h2>
-          {loading && (
-            <p className="text-sm text-gray-500">Loading payment options…</p>
-          )}
+      <StepIndicator current="payment" locale={locale} />
+      <form onSubmit={submit} className="space-y-5">
+        <CheckoutCard title={t("payment")}>
+          {loading && <p className="text-sm text-gray-500">{t("loading")}</p>}
           {!loading && methods.length === 0 && (
-            <p className="text-sm text-red-700">
-              No payment methods configured for this store.
-            </p>
+            <p className="text-sm text-red-700">{t("none")}</p>
           )}
           {!loading && methods.length > 0 && (
-            <ul className="space-y-2">
+            <ul className="space-y-2.5">
               {methods.map((m) => (
                 <li key={m}>
-                  <label
-                    htmlFor={`m-${m}`}
-                    className="flex items-center gap-3 border rounded p-3 hover:bg-gray-50 cursor-pointer"
-                  >
+                  <OptionRow htmlFor={`m-${m}`} selected={method === m}>
                     <input
                       id={`m-${m}`}
                       type="radio"
                       name="payment"
                       checked={method === m}
                       onChange={() => setMethod(m)}
+                      className="h-4 w-4 accent-gray-900"
                     />
-                    <span className="font-medium">
-                      {METHOD_LABELS[m] || m}
+                    <span className="font-medium text-gray-900">
+                      {methodLabel(m, isAr)}
                     </span>
-                  </label>
+                  </OptionRow>
                 </li>
               ))}
             </ul>
           )}
-        </section>
+        </CheckoutCard>
 
         {savedCardsForMethod.length > 0 && (
-          <section className="bg-white p-6 rounded border">
-            <h2 className="text-lg font-semibold mb-2">Saved cards</h2>
-            <p className="text-sm text-gray-600 mb-3">
-              Pay faster with a card on file, or pick "Enter a new card" to
-              add another.
-            </p>
-            <ul className="space-y-2">
+          <CheckoutCard title={t("savedCards")} description={t("savedHint")}>
+            <ul className="space-y-2.5">
               <li>
-                <label className="flex items-center gap-3 border rounded p-3 cursor-pointer hover:bg-gray-50">
+                <OptionRow selected={savedCardId === null}>
                   <input
                     type="radio"
                     name="saved-card"
                     checked={savedCardId === null}
                     onChange={() => setSavedCardId(null)}
+                    className="h-4 w-4 accent-gray-900"
                   />
-                  <span className="text-sm">Enter a new card</span>
-                </label>
+                  <span className="text-sm text-gray-900">{t("newCard")}</span>
+                </OptionRow>
               </li>
               {savedCardsForMethod.map((c) => (
                 <li key={c.id}>
-                  <label className="flex items-center gap-3 border rounded p-3 cursor-pointer hover:bg-gray-50">
+                  <OptionRow selected={savedCardId === c.id}>
                     <input
                       type="radio"
                       name="saved-card"
                       checked={savedCardId === c.id}
                       onChange={() => setSavedCardId(c.id)}
+                      className="h-4 w-4 accent-gray-900"
                     />
-                    <span className="text-sm">
+                    <span className="text-sm text-gray-900">
                       {c.display_name ||
                         `${c.card_brand || "Card"} •••• ${c.last_four || "????"}`}
                     </span>
-                  </label>
+                  </OptionRow>
                 </li>
               ))}
             </ul>
-          </section>
+          </CheckoutCard>
         )}
 
         {showDepositPicker && (
-          <section className="bg-white p-6 rounded border">
-            <h2 className="text-lg font-semibold mb-2">COD deposit</h2>
-            <p className="text-sm text-gray-600 mb-3">
-              This store requires a small upfront deposit for COD orders. Pick
-              the gateway to charge:
-            </p>
-            <select
+          <CheckoutCard title={t("codTitle")} description={t("codHint")}>
+            <Select
               required
               value={depositGateway || ""}
               onChange={(e) => setDepositGateway(e.target.value)}
-              className="border rounded px-3 py-2 bg-white"
+              className="max-w-xs"
             >
-              <option value="">— pick gateway —</option>
+              <option value="">{t("pickGateway")}</option>
               {(config?.cod_deposit_policy?.allowed_gateways || []).map((g) => (
                 <option key={g} value={g}>
-                  {METHOD_LABELS[g] || g}
+                  {methodLabel(g, isAr)}
                 </option>
               ))}
-            </select>
-          </section>
+            </Select>
+          </CheckoutCard>
         )}
 
-        <GiftCardSection />
+        <GiftCardSection locale={locale} />
 
-        {error && (
-          <div
-            role="alert"
-            className="bg-red-50 border border-red-200 text-red-700 text-sm rounded p-3"
-          >
-            {error}
-          </div>
-        )}
+        {error && <ErrorBanner>{error}</ErrorBanner>}
 
-        <div className="flex justify-between items-center">
-          <Link
-            href={`/${params.domain}/checkout/shipping`}
-            className="text-sm underline text-gray-700"
-          >
-            ‹ Back to shipping
-          </Link>
-          <button
-            type="submit"
-            className="bg-gray-900 text-white px-6 py-2 rounded hover:bg-gray-800 disabled:opacity-50"
-          >
-            Review order
-          </button>
+        <div className="flex items-center justify-between gap-3">
+          <BackLink href={`/${params.domain}/checkout/shipping`}>
+            {t("back")}
+          </BackLink>
+          <PrimaryButton type="submit">{t("review")}</PrimaryButton>
         </div>
       </form>
     </>
@@ -310,15 +304,12 @@ export function PaymentStep() {
 }
 
 /**
- * Phase 8.3 — gift card tender input. Sits inside the payment-step
- * form: the customer pastes a code, we hit the public balance check
- * (which 404s on bad/depleted codes), and on success we stash the
- * code in checkout state. The ReviewStep forwards them as
- * `gift_card_codes` to /api/checkout, where the backend
- * FIFO-allocates the applied amount and reduces what the gateway
- * charges.
+ * Phase 8.3 — gift card tender input. The customer pastes a code, we hit
+ * the public balance check, and on success stash the code in checkout
+ * state. ReviewStep forwards them as `gift_card_codes`.
  */
-function GiftCardSection() {
+function GiftCardSection({ locale }: { locale: string }) {
+  const isAr = locale === "ar";
   const [codes, setCodes] = useState<string[]>(
     () => readCheckoutState().gift_card_codes || [],
   );
@@ -329,29 +320,48 @@ function GiftCardSection() {
     Array<{ code: string; last_four: string; balance_cents: number; currency: string }>
   >([]);
 
+  const G = {
+    title: { en: "Gift card", ar: "بطاقة هدايا" },
+    hint: {
+      en: "Apply a gift card to reduce what your payment method is charged. Stack up to 5 cards.",
+      ar: "استخدم بطاقة هدايا لتقليل المبلغ المدفوع. يمكنك إضافة حتى 5 بطاقات.",
+    },
+    apply: { en: "Apply", ar: "تطبيق" },
+    checking: { en: "Checking…", ar: "جارٍ التحقق…" },
+    dup: { en: "That code is already added.", ar: "الكود ده مضاف بالفعل." },
+    max: {
+      en: "You can apply up to 5 gift cards per order.",
+      ar: "يمكنك إضافة حتى 5 بطاقات للطلب الواحد.",
+    },
+    invalid: {
+      en: "That gift card isn't valid or has been used up.",
+      ar: "بطاقة الهدايا دي غير صالحة أو تم استخدامها بالكامل.",
+    },
+    available: { en: "available", ar: "متاح" },
+    remove: { en: "Remove", ar: "إزالة" },
+  };
+  const g = (k: keyof typeof G) => (isAr ? G[k].ar : G[k].en);
+
   async function add() {
     const trimmed = input.trim();
     if (!trimmed) return;
     if (codes.includes(trimmed)) {
-      setError("That code is already added.");
+      setError(g("dup"));
       return;
     }
     if (codes.length >= 5) {
-      setError("You can apply up to 5 gift cards per order.");
+      setError(g("max"));
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/gift-cards/${encodeURIComponent(trimmed)}`,
-        { cache: "no-store" },
-      );
+      const res = await fetch(`/api/gift-cards/${encodeURIComponent(trimmed)}`, {
+        cache: "no-store",
+      });
       if (!res.ok) {
         setError(
-          res.status === 404
-            ? "That gift card isn't valid or has been used up."
-            : `Couldn't check the card (HTTP ${res.status}).`,
+          res.status === 404 ? g("invalid") : `Couldn't check the card (HTTP ${res.status}).`,
         );
         return;
       }
@@ -389,30 +399,26 @@ function GiftCardSection() {
   }
 
   return (
-    <section className="bg-white p-6 rounded border">
-      <h2 className="text-lg font-semibold mb-2">Gift card</h2>
-      <p className="text-sm text-gray-600 mb-3">
-        Apply a gift card to reduce what your payment method is charged.
-        You can stack up to 5 cards.
-      </p>
+    <CheckoutCard title={g("title")} description={g("hint")}>
       <div className="flex gap-2">
-        <input
+        <TextInput
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="GC-XXXX-XXXX-XXXX-XXXX"
-          className="flex-1 border rounded px-3 py-2 text-sm font-mono"
-          aria-label="Gift card code"
+          className="flex-1 font-mono"
+          aria-label={g("title")}
           disabled={busy}
+          dir="ltr"
         />
-        <button
+        <PrimaryButton
           type="button"
           onClick={add}
           disabled={busy || !input.trim()}
-          className="bg-gray-900 text-white px-4 rounded hover:bg-gray-800 disabled:opacity-50"
+          className="px-4"
         >
-          {busy ? "Checking…" : "Apply"}
-        </button>
+          {busy ? g("checking") : g("apply")}
+        </PrimaryButton>
       </div>
       {error && (
         <p className="mt-2 text-sm text-red-700" role="alert">
@@ -420,31 +426,31 @@ function GiftCardSection() {
         </p>
       )}
       {applied.length > 0 && (
-        <ul className="mt-3 space-y-1 text-sm">
+        <ul className="mt-3 space-y-1.5 text-sm">
           {applied.map((a) => (
             <li
               key={a.code}
-              className="flex items-center justify-between rounded bg-emerald-50 border border-emerald-200 px-3 py-2"
+              className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"
             >
-              <span>
+              <span dir="ltr">
                 •••{a.last_four} —{" "}
                 <span className="font-medium">
                   {(a.balance_cents / 100).toFixed(2)} {a.currency}
                 </span>{" "}
-                available
+                {g("available")}
               </span>
               <button
                 type="button"
                 onClick={() => remove(a.code)}
                 className="text-xs text-gray-500 hover:text-red-700"
-                aria-label={`Remove gift card ${a.last_four}`}
+                aria-label={`${g("remove")} ${a.last_four}`}
               >
-                Remove
+                {g("remove")}
               </button>
             </li>
           ))}
         </ul>
       )}
-    </section>
+    </CheckoutCard>
   );
 }

@@ -19,13 +19,13 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 interface PageProps {
-  params: Promise<{ domain: string; handle: string }>;
+  params: Promise<{ domain: string; blog: string }>;
 }
 
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
-  const { domain, handle } = await params;
+  const { domain, blog: handle } = await params;
   try {
     const store = await fetchStoreByDomain(domain);
     const blog = await fetchBlogByHandle(store.id, handle).catch(() => null);
@@ -38,7 +38,7 @@ export async function generateMetadata({
 }
 
 export default async function BlogPage({ params }: PageProps) {
-  const { domain, handle } = await params;
+  const { domain, blog: handle } = await params;
 
   let store;
   try {

@@ -168,9 +168,34 @@ export function proxy(request: NextRequest) {
       urlPathname = pathname.slice(`/${firstSeg}`.length) || "/";
     }
 
+    // Session E (2026-05-28) — marketplace "Try theme" preview. When
+    // the merchant clicks Preview on a catalog card, the hub opens an
+    // iframe at the storefront with `?preview_theme_slug=<slug>` and
+    // `?editor=v3`. Forward both as request headers so the resolved
+    // server-component tree (layout + pages) can branch on them
+    // without each one re-parsing the URL — Next.js 15 layouts don't
+    // see searchParams, so a header is the only common channel.
+    //
+    // The preview is read-only by construction: `fetchThemeSettings`
+    // in api-client.ts substitutes the marketplace bundle's metadata
+    // into the resolved theme settings but never writes to
+    // store_themes, store_theme_snapshots, or
+    // marketplace_theme_installations.
+    const previewSlug = request.nextUrl.searchParams.get("preview_theme_slug");
+    const editorFlavor = request.nextUrl.searchParams.get("editor");
+    const requestHeaders = new Headers(request.headers);
+    if (previewSlug) {
+      requestHeaders.set("x-numu-preview-slug", previewSlug);
+    }
+    if (editorFlavor) {
+      requestHeaders.set("x-numu-editor", editorFlavor);
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = `/${storeIdentifier}${urlPathname}`;
-    const res = NextResponse.rewrite(url);
+    const res = NextResponse.rewrite(url, {
+      request: { headers: requestHeaders },
+    });
     // Forward the original hostname (without port) so api-client can
     // distinguish subdomain vs custom-domain lookups without re-parsing.
     res.headers.set("x-numu-host", hostname);

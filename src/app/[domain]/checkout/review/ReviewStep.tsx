@@ -5,29 +5,38 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { StepIndicator } from "@/components/checkout/StepIndicator";
 import {
+  BackLink,
+  CheckoutCard,
+  ErrorBanner,
+  Field,
+  PrimaryButton,
+  TextInput,
+  Textarea,
+} from "@/components/checkout/ui";
+import {
   clearCheckoutState,
   hasPaymentStep,
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { useAttribution } from "@/components/layout/AttributionProvider";
-import { formatCents } from "@/lib/money";
 import type { CheckoutResponse } from "@/types/checkout";
 
 /**
  * Step 4 — review + place order.
  *
- * Displays a summary of the collected info, lets the customer add an
- * order note + coupon, and on submit posts the full payload to
- * /api/checkout. The backend creates the order and returns either a
- * payment_url (redirect to gateway) or null (COD / completed). We
- * route to the appropriate next page:
- *   - payment_url present → /checkout/processing?next=<url>&order=<id>
+ * The live order summary (items + subtotal) is shown by the checkout
+ * layout's sticky panel, so this step focuses on confirming the shipping
+ * destination + collecting an order note / coupon, then placing the order.
+ *
+ * On submit we POST the full payload to /api/checkout. The backend creates
+ * the order and returns either a payment_url (redirect to gateway) or null
+ * (COD / completed):
+ *   - payment_url present → window.assign(payment_url)
  *   - else (COD / paid)  → /checkout/{order_id}/thank-you
  *
  * Cart line items live on the backend (Redis); the checkout endpoint
- * resolves them from the customer's session cookie. We send an empty
- * line_items list since the spec requires the field — server-side
- * the cart's contents take precedence over a stale client list.
+ * resolves them from the session cookie. We send the client list as a hint
+ * but the server's cart takes precedence.
  */
 
 interface CartLine {
@@ -39,26 +48,43 @@ interface CartLine {
   product_name?: string;
 }
 
+const T = {
+  shipTo: { en: "Shipping to", ar: "التوصيل إلى" },
+  notesCoupon: { en: "Notes & coupon", ar: "ملاحظات وكوبون" },
+  orderNotes: { en: "Order notes (optional)", ar: "ملاحظات الطلب (اختياري)" },
+  couponCode: { en: "Coupon code", ar: "كود الخصم" },
+  secure: {
+    en: "Your data is fully protected and encrypted",
+    ar: "بياناتك محمية ومشفّرة بالكامل",
+  },
+  backPayment: { en: "Back to payment", ar: "العودة للدفع" },
+  place: { en: "Place order", ar: "تأكيد الطلب" },
+  placing: { en: "Placing order…", ar: "جارٍ تأكيد الطلب…" },
+  emptyCart: { en: "Your cart is empty.", ar: "سلة التسوق فارغة." },
+  continueShopping: { en: "Continue shopping", ar: "متابعة التسوق" },
+} as const;
+
 export function ReviewStep() {
   const router = useRouter();
   const params = useParams() as { domain: string };
-  // Feature 001 — full attribution envelope from numu_attribution cookie.
-  // Sent in the checkout body when present so the backend can resolve
-  // campaign_id + stamp orders.attribution JSONB + seed customer first_touch.
   const attribution = useAttribution();
-  const [cart, setCart] = useState<{ items: CartLine[]; total?: number; currency?: string } | null>(
-    null,
-  );
+  const [cart, setCart] = useState<{ items: CartLine[] } | null>(null);
+  const [locale, setLocale] = useState("en");
   const [notes, setNotes] = useState("");
   const [coupon, setCoupon] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [state] = useState(() => readCheckoutState());
 
+  const t = (k: keyof typeof T) => (locale === "ar" ? T[k].ar : T[k].en);
+
   useEffect(() => {
     if (!hasPaymentStep(state)) {
       router.replace(`/${params.domain}/checkout/payment`);
       return;
+    }
+    if (typeof document !== "undefined") {
+      setLocale(document.documentElement.lang === "ar" ? "ar" : "en");
     }
     setNotes(state.customer_notes || "");
     setCoupon(state.coupon_code || "");
@@ -68,10 +94,10 @@ export function ReviewStep() {
         const res = await fetch("/api/cart", { cache: "no-store" });
         if (res.ok) {
           const body = await res.json();
-          setCart((body?.data || body) as typeof cart);
+          setCart((body?.data || body) as { items: CartLine[] });
         }
       } catch {
-        /* swallow — review still renders without summary */
+        /* swallow — review still renders without the line items */
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -82,9 +108,11 @@ export function ReviewStep() {
     setError(null);
     setSubmitting(true);
 
-    // Build the CheckoutRequest payload from collected state.
-    // line_items is required by the schema but the backend resolves
-    // from the cart anyway. We pass through whatever the cart has.
+    // Build the CheckoutRequest payload from collected state. The whole
+    // shipping_address is forwarded verbatim — including the Cluster 2
+    // location fields (latitude/longitude/location_accuracy/
+    // location_source/geocoded_address) when the customer pinned a
+    // delivery location. The backend's OrderAddressRequest accepts them.
     const payload = {
       line_items: (cart?.items || []).map((l) => ({
         product_id: l.product_id,
@@ -101,15 +129,7 @@ export function ReviewStep() {
       saved_payment_method_id: state.saved_payment_method_id,
       customer_notes: notes || null,
       coupon_code: coupon || null,
-      // Phase 8.3 — gift card tender. Empty list when no cards applied;
-      // the backend tolerates omission too but sending an explicit []
-      // keeps the wire shape consistent across paths.
       gift_card_codes: state.gift_card_codes || [],
-      // Feature 001 — campaign attribution. Backend reads attribution.last_touch
-      // for raw UTM stamping, resolves campaign_id via the trailing Crockford
-      // short_code (SEC-006 store-scoped), writes the snapshot to
-      // orders.attribution JSONB, and seeds customer.first_touch_attribution
-      // on first attributed order.
       ...(attribution ? { attribution } : {}),
     };
 
@@ -118,7 +138,6 @@ export function ReviewStep() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Idempotency-Key prevents a double-click from charging twice.
           "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify(payload),
@@ -133,8 +152,6 @@ export function ReviewStep() {
       }
       const data = (body?.data || body) as CheckoutResponse;
       if (data.payment_url) {
-        // Save order_id so the processing page can poll for completion
-        // and the thank-you page can render after the gateway redirect.
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(
             "numu_checkout_pending_order",
@@ -144,12 +161,9 @@ export function ReviewStep() {
             }),
           );
         }
-        // Off to the gateway. The provider redirects back to
-        // /checkout/processing or directly to thank-you.
         window.location.assign(data.payment_url);
         return;
       }
-      // COD or already-completed → done. Clear state + thank-you.
       clearCheckoutState();
       router.replace(
         `/${params.domain}/checkout/${data.order_id}/thank-you?n=${encodeURIComponent(data.order_number)}`,
@@ -160,123 +174,115 @@ export function ReviewStep() {
     }
   }
 
+  const a = state.shipping_address;
+  const cartEmpty = cart !== null && cart.items.length === 0;
+
   return (
     <>
-      <StepIndicator current="review" />
-      <form onSubmit={placeOrder} className="space-y-6">
-        <section
-          className="bg-white p-6 rounded border"
-          aria-labelledby="cart-heading"
-        >
-          <h2 id="cart-heading" className="text-lg font-semibold mb-4">
-            Order summary
-          </h2>
-          {!cart ? (
-            <p className="text-sm text-gray-500">Loading cart…</p>
-          ) : cart.items.length === 0 ? (
-            <p className="text-sm text-red-700">
-              Your cart is empty.{" "}
-              <Link href={`/${params.domain}`} className="underline">
-                Continue shopping
-              </Link>
-            </p>
-          ) : (
-            <ul className="divide-y">
-              {cart.items.map((l, i) => (
-                <li
-                  key={`${l.product_id}-${l.variant_id || ""}-${i}`}
-                  className="py-2 flex justify-between text-sm"
-                >
-                  <span>
-                    <span className="font-medium">
-                      {l.product_name || `Item ${l.product_id.slice(0, 8)}`}
-                    </span>
-                    <span className="text-gray-500"> × {l.quantity}</span>
-                  </span>
-                  <span>
-                    {formatCents(l.subtotal ?? 0, cart.currency || "EGP")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="bg-white p-6 rounded border space-y-3">
-          <h2 className="text-lg font-semibold">Shipping to</h2>
-          <p className="text-sm text-gray-700">
-            {state.shipping_address.first_name}{" "}
-            {state.shipping_address.last_name}
-            <br />
-            {state.shipping_address.line1}
-            {state.shipping_address.line2 && (
-              <>
-                <br />
-                {state.shipping_address.line2}
-              </>
-            )}
-            <br />
-            {state.shipping_address.city}
-            {state.shipping_address.state
-              ? `, ${state.shipping_address.state}`
-              : ""}
-            {state.shipping_address.postal_code
-              ? ` ${state.shipping_address.postal_code}`
-              : ""}
-            <br />
-            {state.shipping_address.country}
-          </p>
-          <p className="text-sm text-gray-700">
-            {state.shipping_method} · {state.email}
-          </p>
-        </section>
-
-        <section className="bg-white p-6 rounded border space-y-3">
-          <h2 className="text-lg font-semibold">Notes &amp; coupon</h2>
-          <label className="block">
-            <span className="text-sm text-gray-700">Order notes (optional)</span>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              maxLength={1000}
-              rows={3}
-              className="mt-1 block w-full border rounded px-3 py-2"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm text-gray-700">Coupon code</span>
-            <input
-              value={coupon}
-              onChange={(e) => setCoupon(e.target.value.toUpperCase())}
-              maxLength={50}
-              className="mt-1 block w-full border rounded px-3 py-2"
-            />
-          </label>
-        </section>
-
-        {error && (
-          <div
-            role="alert"
-            className="bg-red-50 border border-red-200 text-red-700 text-sm rounded p-3 whitespace-pre-wrap"
-          >
-            {error}
-          </div>
+      <StepIndicator current="review" locale={locale} />
+      <form onSubmit={placeOrder} className="space-y-5">
+        {cartEmpty && (
+          <ErrorBanner>
+            {t("emptyCart")}{" "}
+            <Link href={`/${params.domain}`} className="underline">
+              {t("continueShopping")}
+            </Link>
+          </ErrorBanner>
         )}
 
-        <div className="flex justify-between items-center">
-          <Link
-            href={`/${params.domain}/checkout/payment`}
-            className="text-sm underline text-gray-700"
+        <CheckoutCard title={t("shipTo")}>
+          <div className="text-sm leading-relaxed text-gray-700" dir="auto">
+            <p className="font-medium text-gray-900">
+              {a.first_name} {a.last_name}
+            </p>
+            <p>{a.line1}</p>
+            {a.line2 && <p>{a.line2}</p>}
+            <p>
+              {a.city}
+              {a.state ? `, ${a.state}` : ""}
+              {a.postal_code ? ` ${a.postal_code}` : ""}
+            </p>
+            <p>{a.country}</p>
+          </div>
+          {a.geocoded_address && (
+            <p className="mt-3 flex items-start gap-1.5 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="mt-0.5 shrink-0"
+              >
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+              <span dir="auto">{a.geocoded_address}</span>
+            </p>
+          )}
+          <p className="mt-3 border-t border-gray-100 pt-3 text-sm text-gray-500">
+            {state.shipping_method} · {state.email}
+          </p>
+        </CheckoutCard>
+
+        <CheckoutCard title={t("notesCoupon")}>
+          <div className="space-y-4">
+            <Field label={t("orderNotes")} htmlFor="notes">
+              <Textarea
+                id="notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={1000}
+                rows={3}
+                dir="auto"
+              />
+            </Field>
+            <Field label={t("couponCode")} htmlFor="coupon">
+              <TextInput
+                id="coupon"
+                value={coupon}
+                onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+                maxLength={50}
+                dir="ltr"
+              />
+            </Field>
+          </div>
+        </CheckoutCard>
+
+        {error && <ErrorBanner>{error}</ErrorBanner>}
+
+        <p className="flex items-center justify-center gap-1.5 text-xs text-gray-500">
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            ‹ Back to payment
-          </Link>
-          <button
+            <rect width="18" height="11" x="3" y="11" rx="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span>{t("secure")}</span>
+        </p>
+
+        <div className="flex items-center justify-between gap-3">
+          <BackLink href={`/${params.domain}/checkout/payment`}>
+            {t("backPayment")}
+          </BackLink>
+          <PrimaryButton
             type="submit"
-            disabled={submitting || !cart || cart.items.length === 0}
-            className="bg-gray-900 text-white px-6 py-2 rounded hover:bg-gray-800 disabled:opacity-50"
+            disabled={submitting || cartEmpty || cart === null}
           >
-            {submitting ? "Placing order…" : "Place order"}
-          </button>
+            {submitting ? t("placing") : t("place")}
+          </PrimaryButton>
         </div>
       </form>
     </>

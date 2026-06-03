@@ -1,4 +1,8 @@
-import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
+import {
+  fetchStoreByDomain,
+  fetchThemeSettings,
+  fetchStoreMenus,
+} from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRenderer";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
@@ -118,8 +122,18 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
   const isByot = !!themeSettings.external_theme?.bundle_url && !isBuiltInTheme(themeSettings.theme_id);
 
+  // Phase 2.4 — store navigation menus, fetched once here and shared with
+  // every page's BYOT bundle via ThemeDataProvider → ByotThemeBoundary
+  // (header/footer render on every route, so this can't live per-page).
+  // Best-effort: a failure leaves the bundle on its DEFAULT_NAV fallback.
+  const navigation = await fetchStoreMenus(store.id).catch(() => ({}));
+
   return (
-    <ThemeDataProvider themeSettings={themeSettings} storeData={store}>
+    <ThemeDataProvider
+      themeSettings={themeSettings}
+      storeData={store}
+      navigation={navigation}
+    >
       {/* Path-segment routing in dev: when the storefront is reached at
           `/<subdomain>/...` (rather than `<subdomain>.numueg.app`),
           relative anchors like `/collections/all` would otherwise hit
