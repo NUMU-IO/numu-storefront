@@ -69,6 +69,9 @@ same way the existing renewals do.
 **3. Runtime env file** — `/opt/numu/.env.v3.test` (chmod 600). ✅ Already
 created on this droplet (NUMU_API_URL, NUMU_PLATFORM_DOMAIN, NUMU_IMAGE_HOSTS,
 and REVALIDATION_SECRET reused from `.env.test`).
+> ⚠️ `NUMU_API_URL` **must include `/api/v1`** (e.g. `https://test.numueg.app/api/v1`).
+> numu-storefront uses it verbatim; omitting the prefix → every API call 404s and
+> the store silently renders the "NUMU Store" fallback instead of resolving.
 
 **4. nginx** — `/opt/numu/docker/nginx/nginx.conf` is one monolithic file (no
 conf.d include), edited in place with timestamped `.bak` backups. Back it up,

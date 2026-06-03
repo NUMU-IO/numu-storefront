@@ -21,8 +21,9 @@ services:
     image: ${NUMU_STOREFRONT_V3_IMAGE:?NUMU_STOREFRONT_V3_IMAGE must be set (e.g. ghcr.io/numu-io/numu-storefront:dev)}
     container_name: numu-storefront-v3-test
     restart: unless-stopped
-    # Server-side runtime env (NUMU_API_URL must be the API ROOT, NOT /api/v1 —
-    # the app appends /api/v1 itself). See deploy/DEPLOY-V3.md for the keys.
+    # Server-side runtime env. NUMU_API_URL must INCLUDE /api/v1 — numu-storefront
+    # uses it as-is (api-client.ts: `process.env.NUMU_API_URL || ".../api/v1"`),
+    # it does NOT append the prefix. See deploy/DEPLOY-V3.md for the keys.
     env_file:
       - /opt/numu/.env.v3.test
     environment:
