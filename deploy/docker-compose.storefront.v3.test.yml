@@ -36,8 +36,9 @@ services:
       - numu-edge
     healthcheck:
       # `/` 404s (all routes under /[domain]); probe the always-present BYOT
-      # runtime manifest instead.
-      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:3000/__numu-runtime/manifest.json"]
+      # runtime manifest. Use 127.0.0.1 not localhost — the container resolves
+      # localhost to ::1 too and busybox wget tries IPv6 first (server is IPv4).
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/__numu-runtime/manifest.json"]
       interval: 10s
       timeout: 5s
       start_period: 25s
