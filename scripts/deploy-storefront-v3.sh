@@ -57,8 +57,8 @@ wait_until_healthy() {
 }
 
 [[ -f "${COMPOSE_FILE}" ]] || die "compose file not found: ${COMPOSE_FILE}"
-docker network inspect numu-test >/dev/null 2>&1 \
-    || die "docker network 'numu-test' missing — bring up the API test stack first"
+docker network inspect numu-edge >/dev/null 2>&1 \
+    || die "docker network 'numu-edge' missing — the shared edge network nginx uses"
 
 export NUMU_STOREFRONT_V3_IMAGE
 log "Image=${NUMU_STOREFRONT_V3_IMAGE}"
@@ -76,5 +76,5 @@ fi
 log "Pruning dangling images..."
 docker image prune -f >/dev/null || true
 
-log "Deploy complete — ${CONTAINER} is live on the numu-test network."
+log "Deploy complete — ${CONTAINER} is live on the numu-edge network."
 log "nginx (numu-nginx-staging) routes v3.test.numueg.app + *.v3.test.numueg.app here."
