@@ -387,11 +387,12 @@ export default function ByotThemeBoundary({
 
   return (
     <ThemeRenderBoundary onError={postBundleError} fallback={fallbackUI}>
-      {loading && !error && (
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="animate-pulse text-gray-400">Loading theme...</div>
-        </div>
-      )}
+      {/* No visible "Loading theme..." flash during the brief client-side
+          bundle mount — SSR is covered by the host's static loading template
+          (layout.tsx data-numu-loading-template-url), and the container below
+          fills in as soon as the bundle mounts. Render a reserved-height blank
+          frame to avoid layout shift, without dev-y placeholder text. */}
+      {loading && !error && <div className="min-h-screen" aria-busy="true" />}
       {error && fallbackUI}
       <div ref={containerRef} />
     </ThemeRenderBoundary>
