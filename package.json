@@ -15,6 +15,7 @@
     "clean": "rimraf .next .turbo node_modules/.cache public/__numu-runtime"
   },
   "dependencies": {
+    "@googlemaps/js-api-loader": "^2.0.2",
     "next": "^16.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

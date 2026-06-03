@@ -464,3 +464,69 @@ export const fetchCollectionBySlug = cache(
     );
   },
 );
+
+// ── Navigation menus (Phase 2.4) ────────────────────────────────────────────
+
+/**
+ * Fetch the store's navigation menus (header/footer link lists) and key
+ * them by handle for injection into the BYOT mount context.
+ *
+ * ISR-tagged `menus-${storeId}` — the exact tag the backend posts to
+ * `/api/revalidate` from `revalidate_on_menu_change` when a merchant
+ * saves a menu in the Navigation manager, so affected pages regenerate.
+ *
+ * Returns a `{ [handle]: items[] }` map. Items keep the raw bilingual
+ * shape (`{id, label:{en,ar}, url, type, resource_id, children}`); the
+ * SDK's `useNavigation` localizes them per the visitor's active locale.
+ * Any failure resolves to `{}` so the bundle falls back to DEFAULT_NAV.
+ */
+export const fetchStoreMenus = cache(
+  async (storeId: string): Promise<Record<string, any[]>> => {
+    const wrapped = await apiFetch<any>(`/storefront/store/${storeId}/menus`, {
+      tags: [`menus-${storeId}`],
+      revalidate: 120,
+    });
+    const list: any[] = Array.isArray(wrapped)
+      ? wrapped
+      : wrapped && Array.isArray(wrapped.items)
+        ? wrapped.items
+        : [];
+    const map: Record<string, any[]> = {};
+    for (const menu of list) {
+      if (menu && typeof menu.handle === "string") {
+        map[menu.handle] = Array.isArray(menu.items) ? menu.items : [];
+      }
+    }
+    return map;
+  },
+);
+
+// ── Content pages (Phase 4.4b) ──────────────────────────────────────────────
+
+export interface StorefrontPage {
+  id: string;
+  handle: string;
+  title: Record<string, string>;
+  body: Record<string, string>;
+  seo: Record<string, unknown>;
+  template: string;
+}
+
+/**
+ * Fetch a single PUBLISHED content page by handle for `/pages/<handle>`.
+ * ISR-tagged `pages-{storeId}` so a publish/edit busts it. Resolves to
+ * `null` when the page doesn't exist or isn't published — the route then
+ * falls back to a humanized placeholder (BYOT links never hard-404).
+ */
+export const fetchStorePage = cache(
+  async (storeId: string, handle: string): Promise<StorefrontPage | null> => {
+    try {
+      return await apiFetch<StorefrontPage>(
+        `/storefront/store/${storeId}/pages/${encodeURIComponent(handle)}`,
+        { tags: [`pages-${storeId}`], revalidate: 120 },
+      );
+    } catch {
+      return null;
+    }
+  },
+);

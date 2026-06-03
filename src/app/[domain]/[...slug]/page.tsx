@@ -54,6 +54,33 @@ function humanize(handle: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Standard storefront content pages that themes link to from their default
+// nav/footer. Until the CMS-pages backend (Pages model) lands, a path whose
+// first segment is one of these renders a themed placeholder PAGE (HTTP 200)
+// so expected nav links are never dead ends. ANY other unmatched path is
+// treated as genuinely missing → the theme's 404 template with a real HTTP
+// 404 status (no soft-404 at 200). When the Pages model ships, replace this
+// allowlist with a real page lookup: found → 200, missing → notFound().
+const KNOWN_PAGE_HANDLES = new Set([
+  "about", "about-us", "our-story", "story",
+  "contact", "contact-us",
+  "shipping", "shipping-policy", "delivery", "delivery-policy",
+  "returns", "returns-policy", "refund-policy", "refunds", "exchanges",
+  "faq", "faqs",
+  "track", "track-order", "order-tracking",
+  "terms", "terms-of-service", "terms-and-conditions", "terms-conditions",
+  "privacy", "privacy-policy",
+  "size-guide", "sizing", "size-chart",
+  "lookbook",
+  "stores", "locations", "store-locator", "our-stores",
+  "wholesale",
+  "careers",
+  "gift-cards", "gift-card",
+  "testimonial", "testimonials", "reviews",
+  "blogs", "blog", "news", "journal",
+  "pages",
+]);
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { domain, slug } = await params;
   const handle = (slug ?? []).join("/");
@@ -78,6 +105,15 @@ export default async function CatchAllPage({ params }: PageProps) {
   // Bound crafted/garbage inputs: very deep or very long paths aren't real
   // content pages → themed 404 rather than an unbounded cached render.
   if ((slug?.length ?? 0) > 3 || handle.length > 120) {
+    notFound();
+  }
+
+  // Soft-404 guard: only known content-page handles render a themed
+  // placeholder page (HTTP 200). Everything else is genuinely missing →
+  // notFound() renders the theme's 404 template with a real HTTP 404 status
+  // (and is excluded from indexing by the 404), instead of a 200 placeholder.
+  const topHandle = (slug?.[0] ?? "").toLowerCase();
+  if (!KNOWN_PAGE_HANDLES.has(topHandle)) {
     notFound();
   }
 
