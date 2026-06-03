@@ -68,7 +68,9 @@ EXPOSE 3000
 # Healthcheck hits a tenant-independent static asset. `/` 404s here — every
 # page lives under /[domain] — so we probe the always-present BYOT runtime
 # manifest instead.
+# Probe 127.0.0.1 (not localhost) — the container's /etc/hosts maps localhost
+# to ::1 too, and busybox wget tries IPv6 first while the server binds IPv4.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD wget --quiet --spider http://localhost:3000/__numu-runtime/manifest.json || exit 1
+    CMD wget --quiet --spider http://127.0.0.1:3000/__numu-runtime/manifest.json || exit 1
 
 CMD ["node", "server.js"]
