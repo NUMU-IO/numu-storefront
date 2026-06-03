@@ -1,0 +1,54 @@
+# =============================================================================
+# NUMU V3 BYOT storefront — test/dev env (v3.test.numueg.app)
+# =============================================================================
+# Runs as a SINGLE container alongside the existing bazaar storefront on the
+# dev env. The shared nginx (numu-nginx-staging) routes v3.test.numueg.app +
+# *.v3.test.numueg.app to this container by name over the external `numu-test`
+# docker network (proxy_pass via Docker DNS — see deploy/nginx/v3.test.conf).
+#
+# Test/dev intentionally skips blue/green (a brief blip on redeploy is fine
+# here). When this graduates to staging/prod it should adopt the two-color
+# pattern from numu-egyptian-bazaar/deploy/docker-compose.storefront.*.yml.
+#
+# Deploy:  NUMU_STOREFRONT_V3_IMAGE=<image:tag> scripts/deploy-storefront-v3.sh
+# =============================================================================
+
+name: numu-storefront-v3-test
+
+services:
+  storefront_v3:
+    image: ${NUMU_STOREFRONT_V3_IMAGE:?NUMU_STOREFRONT_V3_IMAGE must be set (e.g. ghcr.io/numu-io/numu-storefront:dev)}
+    container_name: numu-storefront-v3-test
+    restart: unless-stopped
+    # Server-side runtime env (NUMU_API_URL must be the API ROOT, NOT /api/v1 —
+    # the app appends /api/v1 itself). See deploy/DEPLOY-V3.md for the keys.
+    env_file:
+      - /opt/numu/.env.v3.test
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    # No host port mapping — nginx reaches us by container name on the shared net.
+    expose:
+      - "3000"
+    networks:
+      - numu-test
+    healthcheck:
+      # `/` 404s (all routes under /[domain]); probe the always-present BYOT
+      # runtime manifest instead.
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:3000/__numu-runtime/manifest.json"]
+      interval: 10s
+      timeout: 5s
+      start_period: 25s
+      retries: 6
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+
+networks:
+  # Created by the API test stack (compose project numu-test). external:true
+  # so this compose never tries to own/recreate it.
+  numu-test:
+    external: true
