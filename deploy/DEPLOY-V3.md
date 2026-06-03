@@ -28,47 +28,63 @@ browser ── CF (TLS, Flexible) ──► droplet :80 nginx (numu-nginx-stagin
 
 ## One-time setup (per droplet)
 
-**1. Cloudflare DNS** — add two **proxied** A records → `188.166.156.151`:
-```
-v3.test     A  188.166.156.151   (proxied)
-*.v3.test   A  188.166.156.151   (proxied)
-```
+The droplet serves these hosts on **443 with Let's Encrypt origin certs**
+(the existing `<store>-test` block uses `/etc/letsencrypt/live/numueg.app`),
+not CF-Flexible HTTP. numu-storefront's middleware (`proxy.ts`) derives the
+tenant as `host.slice(0, -(PLATFORM_DOMAIN+1))`, so the host scheme must be
+`<store>.v3.test.numueg.app` (dot) with `NUMU_PLATFORM_DOMAIN=v3.test.numueg.app`.
 
-**2. TLS** — CF SSL/TLS mode is *Flexible*, so the browser↔CF leg uses CF's
-edge cert. CF Universal SSL only covers `numueg.app` + `*.numueg.app` (one
-label), so the 2-/3-label `v3.test` names need either:
-- Cloudflare **Total TLS / Advanced Certificate Manager** for `*.v3.test.numueg.app`, **or**
-- a Let's Encrypt cert via DNS-01 like the other deep wildcards
-  (`certbot/dns-cloudflare` + `/root/.cloudflare-credentials.ini`) if you later
-  switch CF to Full. For Flexible mode the origin block is plain HTTP, so no
-  origin cert is required to start testing.
-
-**3. Runtime env file** — create `/opt/numu/.env.v3.test` (chmod 600):
-```dotenv
-# API ROOT — the app appends /api/v1 itself. Do NOT include /api/v1 here.
-NUMU_API_URL=https://test.numueg.app
-# Platform domain so the storefront middleware extracts <store> from
-# <store>.v3.test.numueg.app correctly.
-NUMU_PLATFORM_DOMAIN=v3.test.numueg.app
-NUMU_IMAGE_HOSTS=**.numueg.app,**.r2.cloudflarestorage.com
-REVALIDATION_SECRET=<same secret the test API uses for ISR revalidation>
-```
-
-**4. nginx** — copy `deploy/nginx/v3.test.conf` into the shared nginx config
-(`/opt/numu/docker/nginx/` as a conf.d include, or paste into `nginx.conf`),
-then:
+**1. Cloudflare DNS** — add two **proxied** A records → `188.166.156.151`
+(`*.numueg.app` only matches one label, so `v3.test` needs its own records).
+Use the CF token already on the droplet:
 ```bash
-docker exec numu-nginx-staging nginx -t && \
-docker exec numu-nginx-staging nginx -s reload
+# extract the value programmatically; do not print it
+CF_TOKEN=$(grep -i 'token' /root/.cloudflare-credentials.ini | cut -d= -f2- | tr -d ' ')
+ZONE=$(curl -s -H "Authorization: Bearer $CF_TOKEN" \
+  "https://api.cloudflare.com/client/v4/zones?name=numueg.app" | python3 -c "import sys,json;print(json.load(sys.stdin)['result'][0]['id'])")
+for name in v3.test '*.v3.test'; do
+  curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records" \
+    -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" \
+    --data "{\"type\":\"A\",\"name\":\"$name\",\"content\":\"188.166.156.151\",\"proxied\":true}" \
+    | python3 -c "import sys,json;r=json.load(sys.stdin);print('ok' if r['success'] else r['errors'])"
+done
 ```
-> The nginx.conf file is CRLF and bind-mounted (not git-tracked). Edit in place
-> with an inode-safe method (`cp`/`>`), not `mv`/`sed -i`, or the container keeps
-> the old content even after reload.
 
-**5. Backend tenancy** (optional) — to let the bare apex `v3.test.numueg.app`
-bypass tenant resolution, add it to `RESERVED_HOST_SUBDOMAINS` in the API
-(`src/infrastructure/tenancy/middleware.py`). Per-store hosts
-(`<store>.v3.test.numueg.app`) work without this.
+**2. TLS** — issue a cert for `v3.test` + `*.v3.test` via the same DNS-01 flow
+used for `*.test`/`*.staging`:
+```bash
+docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt \
+  -v /var/lib/letsencrypt:/var/lib/letsencrypt \
+  -v /root/.cloudflare-credentials.ini:/cf.ini:ro \
+  certbot/dns-cloudflare certonly --dns-cloudflare \
+  --dns-cloudflare-credentials /cf.ini --dns-cloudflare-propagation-seconds 30 \
+  -d v3.test.numueg.app -d '*.v3.test.numueg.app' \
+  --non-interactive --agree-tos -m noreply@numueg.app
+```
+This creates `/etc/letsencrypt/live/v3.test.numueg.app/` (the path the nginx
+block references). The certbot container must reach `/etc/letsencrypt` the
+same way the existing renewals do.
+
+**3. Runtime env file** — `/opt/numu/.env.v3.test` (chmod 600). ✅ Already
+created on this droplet (NUMU_API_URL, NUMU_PLATFORM_DOMAIN, NUMU_IMAGE_HOSTS,
+and REVALIDATION_SECRET reused from `.env.test`).
+
+**4. nginx** — `/opt/numu/docker/nginx/nginx.conf` is one monolithic file (no
+conf.d include), edited in place with timestamped `.bak` backups. Back it up,
+insert the two server blocks from `deploy/nginx/v3.test.conf` next to the other
+`-test` blocks, validate, reload — inode-safe (no `mv`/`sed -i`; the file is
+bind-mounted, so a rotated inode keeps the container on the old content):
+```bash
+cp -a /opt/numu/docker/nginx/nginx.conf /opt/numu/docker/nginx/nginx.conf.bak.v3.$(date +%s)
+# paste the two blocks (or append before the http{} closing brace), then:
+docker exec numu-nginx-staging nginx -t \
+  && docker exec numu-nginx-staging nginx -s reload
+```
+
+**5. Backend tenancy** (optional) — to let the bare `v3.test.numueg.app` bypass
+tenant resolution, add it to `RESERVED_HOST_SUBDOMAINS` in the API
+(`src/infrastructure/tenancy/middleware.py`). Per-store hosts work without it.
 
 ---
 
