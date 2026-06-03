@@ -61,7 +61,14 @@ export interface StoreData {
   subdomain?: string;
   logo_url?: string;
   description?: string;
+  /**
+   * Capture currency, normalized from the API's `default_currency` at the
+   * fetch boundary (see normalizeStore in api-client). The app reads this
+   * field; the backend never sends a bare `currency`.
+   */
   currency: string;
+  /** ISO 3166-1 alpha-2 market code (e.g. "EG", "SA"). */
+  country?: string;
   default_language: string;
   use_nextjs_storefront: boolean;
 }

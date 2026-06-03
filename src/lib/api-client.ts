@@ -61,6 +61,23 @@ async function apiFetch<T>(
  * a subdomain (the prefix is the slug); everything else is treated as a
  * custom domain and looked up by full hostname.
  */
+/**
+ * Reconcile the API's store payload with the app's StoreData shape.
+ *
+ * The backend exposes the capture currency as `default_currency` (a
+ * Currency enum value), but the rest of the storefront reads
+ * `store.currency`. Without this mapping `store.currency` was always
+ * undefined and every price silently fell back to "EGP" — wrong for a
+ * Saudi (SAR) store. Also surfaces `country` for locale selection.
+ */
+function normalizeStore(raw: StoreData & { default_currency?: string }): StoreData {
+  return {
+    ...raw,
+    currency: raw?.default_currency ?? raw?.currency ?? "EGP",
+    country: raw?.country ?? "EG",
+  };
+}
+
 export const fetchStoreByHost = cache(async (rawHost: string) => {
   // Compare host vs platform domain with the port stripped from BOTH. The
   // proxy stamps `x-numu-host` without a port (e.g. `testlocal.localhost`)
@@ -77,14 +94,18 @@ export const fetchStoreByHost = cache(async (rawHost: string) => {
     host.endsWith(`.${platformDomain}`) && host !== platformDomain;
   if (isSubdomain) {
     const subdomain = host.slice(0, -(platformDomain.length + 1));
-    return apiFetch<StoreData>(
-      `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
-      { tags: [`store-${subdomain}`], revalidate: 300 },
+    return normalizeStore(
+      await apiFetch<StoreData>(
+        `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
+        { tags: [`store-${subdomain}`], revalidate: 300 },
+      ),
     );
   }
-  return apiFetch<StoreData>(
-    `/storefront/store-by-domain/${encodeURIComponent(host)}`,
-    { tags: [`store-${host}`], revalidate: 300 },
+  return normalizeStore(
+    await apiFetch<StoreData>(
+      `/storefront/store-by-domain/${encodeURIComponent(host)}`,
+      { tags: [`store-${host}`], revalidate: 300 },
+    ),
   );
 });
 
@@ -98,9 +119,11 @@ export const fetchStoreByDomain = cache(async (domainOrSubdomain: string) => {
   // the platform domain; treat it as a subdomain.
   const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
   if (!domainOrSubdomain.includes(".")) {
-    return apiFetch<StoreData>(
-      `/storefront/store-by-subdomain/${encodeURIComponent(domainOrSubdomain)}`,
-      { tags: [`store-${domainOrSubdomain}`], revalidate: 300 },
+    return normalizeStore(
+      await apiFetch<StoreData>(
+        `/storefront/store-by-subdomain/${encodeURIComponent(domainOrSubdomain)}`,
+        { tags: [`store-${domainOrSubdomain}`], revalidate: 300 },
+      ),
     );
   }
   // Otherwise it's a full hostname (possibly a subdomain we left intact,

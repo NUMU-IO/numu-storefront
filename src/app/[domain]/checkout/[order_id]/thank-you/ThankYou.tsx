@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { formatCents as formatCentsMoney } from "@/lib/money";
 
 interface OrderLine {
   product_id: string;
@@ -26,14 +27,7 @@ interface Order {
 
 function formatCents(cents?: number, currency = "EGP") {
   if (cents == null) return "";
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-    }).format(cents / 100);
-  } catch {
-    return `${(cents / 100).toFixed(2)} ${currency}`;
-  }
+  return formatCentsMoney(cents, currency);
 }
 
 export function ThankYou({
