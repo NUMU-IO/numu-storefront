@@ -20,7 +20,7 @@ browser ── CF (TLS, Flexible) ──► droplet :80 nginx (numu-nginx-stagin
 |------|---------|
 | `Dockerfile` | Standalone Next image (lean runtime, BYOT runtime baked in) |
 | `.dockerignore` | Keeps the build context lean |
-| `deploy/docker-compose.storefront.v3.test.yml` | Single-container service on the `numu-test` network |
+| `deploy/docker-compose.storefront.v3.test.yml` | Single-container service on the shared `numu-edge` network |
 | `scripts/deploy-storefront-v3.sh` | Pull → recreate → health-gate deploy |
 | `deploy/nginx/v3.test.conf` | nginx server block for `v3.test` + `*.v3.test` |
 

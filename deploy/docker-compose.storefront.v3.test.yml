@@ -3,8 +3,9 @@
 # =============================================================================
 # Runs as a SINGLE container alongside the existing bazaar storefront on the
 # dev env. The shared nginx (numu-nginx-staging) routes v3.test.numueg.app +
-# *.v3.test.numueg.app to this container by name over the external `numu-test`
-# docker network (proxy_pass via Docker DNS — see deploy/nginx/v3.test.conf).
+# *.v3.test.numueg.app to this container by name over the external `numu-edge`
+# docker network — the same network nginx and numu-storefront-test share
+# (proxy_pass via Docker DNS — see deploy/nginx/v3.test.conf).
 #
 # Test/dev intentionally skips blue/green (a brief blip on redeploy is fine
 # here). When this graduates to staging/prod it should adopt the two-color
@@ -32,7 +33,7 @@ services:
     expose:
       - "3000"
     networks:
-      - numu-test
+      - numu-edge
     healthcheck:
       # `/` 404s (all routes under /[domain]); probe the always-present BYOT
       # runtime manifest instead.
@@ -48,7 +49,8 @@ services:
           memory: 512M
 
 networks:
-  # Created by the API test stack (compose project numu-test). external:true
-  # so this compose never tries to own/recreate it.
-  numu-test:
+  # The shared edge network that numu-nginx-staging + all storefront
+  # containers attach to (so nginx resolves us by name). external:true so
+  # this compose never tries to own/recreate it.
+  numu-edge:
     external: true
