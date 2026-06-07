@@ -11,6 +11,7 @@ const POST_DOMAIN_SEGMENTS = new Set([
   "products",
   "cart",
   "checkout",
+  "pay",
   "account",
   "search",
   "pages",
