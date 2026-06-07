@@ -407,12 +407,22 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
   if (!raw) return raw;
   const price = Number(raw.price ?? 0);
   const compareAt = raw.compare_at_price != null ? Number(raw.compare_at_price) : undefined;
+  // The API returns `images` as a plain string[] of URLs, but the SDK
+  // contract (ProductImage[]) — and every theme — reads `images[i].url`.
+  // Coerce string entries into { id, url } objects so themes render images;
+  // pass through entries that are already objects.
+  const images = Array.isArray(raw.images)
+    ? raw.images.map((img: unknown, i: number) =>
+        typeof img === "string" ? { id: String(i), url: img } : img,
+      )
+    : [];
   return {
     ...raw,
     price: Number.isFinite(price) ? price : 0,
     ...(compareAt !== undefined && Number.isFinite(compareAt)
       ? { compare_at_price: compareAt }
       : {}),
+    images,
     currency: raw.currency ?? raw.price_currency ?? "USD",
     in_stock: raw.in_stock ?? raw.is_in_stock ?? false,
   };
