@@ -73,6 +73,9 @@ export function ReviewStep() {
   const [notes, setNotes] = useState("");
   const [coupon, setCoupon] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // COD-trust gate: true when the backend blocked COD for this buyer, so we
+  // surface a "pay online instead" path rather than a dead-end error.
+  const [codBlocked, setCodBlocked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [state] = useState(() => readCheckoutState());
 
@@ -106,6 +109,7 @@ export function ReviewStep() {
   async function placeOrder(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setCodBlocked(false);
     setSubmitting(true);
 
     // Build the CheckoutRequest payload from collected state. The whole
@@ -144,9 +148,27 @@ export function ReviewStep() {
       });
       const body = await res.json();
       if (!res.ok) {
-        const detail =
-          body?.detail || body?.error || `Checkout failed (${res.status})`;
-        setError(typeof detail === "string" ? detail : JSON.stringify(detail));
+        const detail = body?.detail;
+        // COD-trust gate (403 cod_trust_blocked / 400 phone_required_for_cod):
+        // the backend returns a localized message + prepaid fallbacks. Show the
+        // friendly message and, for a hard block, surface a pay-online path —
+        // never dump the raw error object on the buyer.
+        if (detail && typeof detail === "object" && detail.code) {
+          setError(
+            (locale === "ar" ? detail.message_ar : detail.message_en) ||
+              detail.message_en ||
+              detail.message_ar ||
+              `Checkout failed (${res.status})`,
+          );
+          setCodBlocked(detail.code === "cod_trust_blocked");
+          setSubmitting(false);
+          return;
+        }
+        const fallback =
+          detail || body?.error || `Checkout failed (${res.status})`;
+        setError(
+          typeof fallback === "string" ? fallback : JSON.stringify(fallback),
+        );
         setSubmitting(false);
         return;
       }
@@ -254,6 +276,18 @@ export function ReviewStep() {
         </CheckoutCard>
 
         {error && <ErrorBanner>{error}</ErrorBanner>}
+        {codBlocked && (
+          <PrimaryButton
+            type="button"
+            onClick={() =>
+              router.replace(`/${params.domain}/checkout/payment`)
+            }
+          >
+            {locale === "ar"
+              ? "ادفع أونلاين بدلاً من ذلك"
+              : "Pay online instead"}
+          </PrimaryButton>
+        )}
 
         <p className="flex items-center justify-center gap-1.5 text-xs text-gray-500">
           <svg
