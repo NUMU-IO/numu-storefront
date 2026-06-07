@@ -74,12 +74,28 @@ export function proxy(request: NextRequest) {
   const hostname = rawHost.split(":")[0];
   const pathname = request.nextUrl.pathname;
 
-  // Skip API routes and static assets
-  if (
-    pathname.startsWith("/api/") ||
-    pathname.startsWith("/_next/") ||
-    pathname.includes(".")
-  ) {
+  // Client API calls (cart add/get, etc.) resolve the store from the
+  // `x-numu-host` header. The backend reduces it via removesuffix(".numueg.app"),
+  // so a DEEP platform host like `<store>.v3.test.numueg.app` would resolve to
+  // `<store>.v3.test` → no store → 400 ("Unable to identify store for guest
+  // cart"). Inject the apex-form host (`<store>.numueg.app`) so the backend
+  // extracts `<store>` correctly. On the 1-level bazaar host
+  // (PLATFORM_DOMAIN=numueg.app) this branch is a no-op.
+  if (pathname.startsWith("/api/")) {
+    if (
+      PLATFORM_DOMAIN !== "numueg.app" &&
+      hostname.endsWith(`.${PLATFORM_DOMAIN}`)
+    ) {
+      const sub = hostname.slice(0, -(PLATFORM_DOMAIN.length + 1));
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set("x-numu-host", `${sub}.numueg.app`);
+      return NextResponse.next({ request: { headers: requestHeaders } });
+    }
+    return NextResponse.next();
+  }
+
+  // Skip static assets.
+  if (pathname.startsWith("/_next/") || pathname.includes(".")) {
     return NextResponse.next();
   }
 

@@ -416,6 +416,22 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
         typeof img === "string" ? { id: String(i), url: img } : img,
       )
     : [];
+  // The API serializes the PRODUCT price in MAJOR units ("110.00") but
+  // VARIANT prices in CENTS ("11000.00") — an inconsistency. Themes prefer
+  // `variant.price ?? product.price`, so without this they render variant
+  // prices ×100. Convert variant money cents→major to match the product
+  // price (major end-to-end). NOTE: bandaid for a backend serialization bug
+  // — if the backend starts serializing variant prices as major, drop this.
+  const variants = Array.isArray(raw.variants)
+    ? raw.variants.map((v: Record<string, any>) => {
+        if (!v || typeof v !== "object") return v;
+        const out: Record<string, any> = { ...v };
+        if (v.price != null) out.price = Number(v.price) / 100;
+        if (v.compare_at_price != null)
+          out.compare_at_price = Number(v.compare_at_price) / 100;
+        return out;
+      })
+    : raw.variants;
   return {
     ...raw,
     price: Number.isFinite(price) ? price : 0,
@@ -423,6 +439,7 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
       ? { compare_at_price: compareAt }
       : {}),
     images,
+    ...(variants !== undefined ? { variants } : {}),
     currency: raw.currency ?? raw.price_currency ?? "USD",
     in_stock: raw.in_stock ?? raw.is_in_stock ?? false,
   };
