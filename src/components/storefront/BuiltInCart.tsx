@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { formatCents } from "@/lib/money";
 
 /**
  * Wire format the backend's `_build_cart_response` emits — see
@@ -67,8 +68,8 @@ function readCsrf(): string {
 
 /** Backend serializes prices as integer cents. */
 function fmtCents(cents: number, currency: string): string {
-  if (!Number.isFinite(cents)) return `0.00 ${currency}`;
-  return `${(cents / 100).toFixed(2)} ${currency}`;
+  if (!Number.isFinite(cents)) return formatCents(0, currency);
+  return formatCents(cents, currency);
 }
 
 export default function BuiltInCart({

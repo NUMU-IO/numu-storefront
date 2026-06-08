@@ -45,8 +45,13 @@ const require = createRequire(import.meta.url);
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
 const OUT_DIR = path.join(REPO_ROOT, "public", "__numu-runtime");
-const SDK_ROOT = path.resolve(REPO_ROOT, "..", "numu-theme-sdk");
-const SDK_DIST = path.join(SDK_ROOT, "dist", "index.mjs");
+// Source for the federation `sdk.js`. Prefer a sibling checkout for fast
+// local iteration; otherwise fall back to the published @numueg/theme-sdk
+// installed in node_modules so the build works in isolation (Docker / CI)
+// without the sibling repo present. Both are resolved in ensureSdkBuilt().
+const SIBLING_SDK_ROOT = path.resolve(REPO_ROOT, "..", "numu-theme-sdk");
+let SDK_ROOT;
+let SDK_DIST;
 
 function resolveFromStorefront(specifier) {
   // `paths: [REPO_ROOT]` so we hit numu-storefront/node_modules even
@@ -68,12 +73,35 @@ function rmrfSafe(dir) {
 }
 
 function ensureSdkBuilt() {
-  if (!fs.existsSync(SDK_DIST)) {
-    throw new Error(
-      `[build-runtime] @numu/theme-sdk dist not found at ${SDK_DIST}. ` +
-        `Run \`npm --prefix ../numu-theme-sdk run build\` first.`,
-    );
+  // 1. Sibling checkout (dev): ../numu-theme-sdk/dist/index.mjs
+  const siblingDist = path.join(SIBLING_SDK_ROOT, "dist", "index.mjs");
+  if (fs.existsSync(siblingDist)) {
+    SDK_ROOT = SIBLING_SDK_ROOT;
+    SDK_DIST = siblingDist;
+    console.log("[build-runtime] bundling SDK from sibling checkout (../numu-theme-sdk)");
+    return;
   }
+  // 2. Published package (Docker / CI): @numueg/theme-sdk in node_modules.
+  try {
+    const pkgPath = resolveFromStorefront("@numueg/theme-sdk/package.json");
+    const root = path.dirname(pkgPath);
+    const dist = path.join(root, "dist", "index.mjs");
+    if (fs.existsSync(dist)) {
+      SDK_ROOT = root;
+      SDK_DIST = dist;
+      console.log(
+        `[build-runtime] bundling SDK from @numueg/theme-sdk@${pkgVersion(root)} (node_modules)`,
+      );
+      return;
+    }
+  } catch {
+    /* not installed — fall through to the error below */
+  }
+  throw new Error(
+    "[build-runtime] could not locate the theme SDK. Either check out " +
+      "../numu-theme-sdk and build it, or add @numueg/theme-sdk as a " +
+      "dependency (`npm i @numueg/theme-sdk`).",
+  );
 }
 
 async function main() {

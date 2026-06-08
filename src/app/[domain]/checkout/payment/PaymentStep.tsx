@@ -47,6 +47,7 @@ function methodLabel(m: string, isAr: boolean): string {
     paymob: ["Credit / debit card (Paymob)", "بطاقة ائتمان / خصم (Paymob)"],
     paymob_card: ["Credit / debit card (Paymob)", "بطاقة ائتمان / خصم (Paymob)"],
     kashier: ["Credit / debit card (Kashier)", "بطاقة ائتمان / خصم (Kashier)"],
+    moyasar: ["Card / mada / Apple Pay (Moyasar)", "بطاقة / مدى / Apple Pay (Moyasar)"],
     fawry: ["Fawry", "فوري"],
     fawaterak: ["Fawaterak", "فواتيرك"],
     instapay: ["InstaPay", "إنستاباي"],

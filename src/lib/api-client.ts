@@ -61,6 +61,23 @@ async function apiFetch<T>(
  * a subdomain (the prefix is the slug); everything else is treated as a
  * custom domain and looked up by full hostname.
  */
+/**
+ * Reconcile the API's store payload with the app's StoreData shape.
+ *
+ * The backend exposes the capture currency as `default_currency` (a
+ * Currency enum value), but the rest of the storefront reads
+ * `store.currency`. Without this mapping `store.currency` was always
+ * undefined and every price silently fell back to "EGP" — wrong for a
+ * Saudi (SAR) store. Also surfaces `country` for locale selection.
+ */
+function normalizeStore(raw: StoreData & { default_currency?: string }): StoreData {
+  return {
+    ...raw,
+    currency: raw?.default_currency ?? raw?.currency ?? "EGP",
+    country: raw?.country ?? "EG",
+  };
+}
+
 export const fetchStoreByHost = cache(async (rawHost: string) => {
   // Compare host vs platform domain with the port stripped from BOTH. The
   // proxy stamps `x-numu-host` without a port (e.g. `testlocal.localhost`)
@@ -77,14 +94,18 @@ export const fetchStoreByHost = cache(async (rawHost: string) => {
     host.endsWith(`.${platformDomain}`) && host !== platformDomain;
   if (isSubdomain) {
     const subdomain = host.slice(0, -(platformDomain.length + 1));
-    return apiFetch<StoreData>(
-      `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
-      { tags: [`store-${subdomain}`], revalidate: 300 },
+    return normalizeStore(
+      await apiFetch<StoreData>(
+        `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
+        { tags: [`store-${subdomain}`], revalidate: 300 },
+      ),
     );
   }
-  return apiFetch<StoreData>(
-    `/storefront/store-by-domain/${encodeURIComponent(host)}`,
-    { tags: [`store-${host}`], revalidate: 300 },
+  return normalizeStore(
+    await apiFetch<StoreData>(
+      `/storefront/store-by-domain/${encodeURIComponent(host)}`,
+      { tags: [`store-${host}`], revalidate: 300 },
+    ),
   );
 });
 
@@ -98,9 +119,11 @@ export const fetchStoreByDomain = cache(async (domainOrSubdomain: string) => {
   // the platform domain; treat it as a subdomain.
   const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
   if (!domainOrSubdomain.includes(".")) {
-    return apiFetch<StoreData>(
-      `/storefront/store-by-subdomain/${encodeURIComponent(domainOrSubdomain)}`,
-      { tags: [`store-${domainOrSubdomain}`], revalidate: 300 },
+    return normalizeStore(
+      await apiFetch<StoreData>(
+        `/storefront/store-by-subdomain/${encodeURIComponent(domainOrSubdomain)}`,
+        { tags: [`store-${domainOrSubdomain}`], revalidate: 300 },
+      ),
     );
   }
   // Otherwise it's a full hostname (possibly a subdomain we left intact,
@@ -385,52 +408,42 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
   const price = Number(raw.price ?? 0);
   const basePrice = Number.isFinite(price) ? price : 0;
   const compareAt = raw.compare_at_price != null ? Number(raw.compare_at_price) : undefined;
-  const baseCompare =
-    compareAt !== undefined && Number.isFinite(compareAt) ? compareAt : null;
-
-  // ── ENG-1: unify the PDP price with the listing price ──────────────────
-  //
-  // The list endpoint omits variants, so listing cards render `product.price`
-  // (the base). The single-product endpoint ships `variants[]`, and the PDP
-  // (via the SDK's useVariantSelection → auto-selected default variant) renders
-  // `variant.price`. When a product has NO real option axes, that "variant" is
-  // just the implicit default unit, so its price MUST equal the base — but the
-  // backend can ship a diverged value (e.g. base 30.00 / variant 3000.00 on a
-  // single no-option product). That makes browse show 30 and detail show 3000
-  // for the same product. Reconcile here, at the one normalization boundary:
-  //
-  //   * No options  → force every variant's price/compare_at to the base, so
-  //                   the PDP's default variant == the listing price.
-  //   * Has options → leave per-variant prices (legitimate "from {min}" multi-
-  //                   variant pricing), but still COERCE string→number: themes
-  //                   gate the sale badge on `typeof compare_at_price ===
-  //                   "number"`, which a Decimal-as-string ("5000.00") fails,
-  //                   silently dropping the discount UI.
-  const hasOptions = Array.isArray(raw.options) && raw.options.length > 0;
+  // The API returns `images` as a plain string[] of URLs, but the SDK
+  // contract (ProductImage[]) — and every theme — reads `images[i].url`.
+  // Coerce string entries into { id, url } objects so themes render images;
+  // pass through entries that are already objects.
+  const images = Array.isArray(raw.images)
+    ? raw.images.map((img: unknown, i: number) =>
+        typeof img === "string" ? { id: String(i), url: img } : img,
+      )
+    : [];
+  // ── Variant price normalization (supersedes the earlier ENG-1 fix) ──────
+  // The API serializes the PRODUCT price in MAJOR units ("110.00") but
+  // VARIANT prices in CENTS ("11000.00") — an inconsistency. Themes prefer
+  // `variant.price ?? product.price`, so without this they render variant
+  // prices ×100. Converting variant money cents→major makes prices major
+  // end-to-end AND reconciles the no-option case (a single product's implicit
+  // variant came back as 3000.00 cents → 30.00 == base, so listing and PDP
+  // agree) — i.e. this also covers what ENG-1's reconcile-to-base did, without
+  // double-transforming. NOTE: bandaid for a backend serialization bug — if
+  // variant prices start arriving as major, drop this.
   const variants = Array.isArray(raw.variants)
     ? raw.variants.map((v: Record<string, any>) => {
-        const vp = Number(v?.price);
-        const vc = v?.compare_at_price != null ? Number(v.compare_at_price) : null;
-        return {
-          ...v,
-          price: !hasOptions
-            ? basePrice
-            : Number.isFinite(vp)
-              ? vp
-              : basePrice,
-          compare_at_price: !hasOptions
-            ? baseCompare
-            : vc !== null && Number.isFinite(vc)
-              ? vc
-              : null,
-        };
+        if (!v || typeof v !== "object") return v;
+        const out: Record<string, any> = { ...v };
+        if (v.price != null) out.price = Number(v.price) / 100;
+        if (v.compare_at_price != null)
+          out.compare_at_price = Number(v.compare_at_price) / 100;
+        return out;
       })
     : raw.variants;
-
   return {
     ...raw,
-    price: basePrice,
-    ...(baseCompare !== null ? { compare_at_price: baseCompare } : {}),
+    price: Number.isFinite(price) ? price : 0,
+    ...(compareAt !== undefined && Number.isFinite(compareAt)
+      ? { compare_at_price: compareAt }
+      : {}),
+    images,
     currency: raw.currency ?? raw.price_currency ?? "USD",
     in_stock: raw.in_stock ?? raw.is_in_stock ?? false,
     ...(variants !== undefined ? { variants } : {}),
