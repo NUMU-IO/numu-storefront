@@ -14,6 +14,16 @@ interface ThemeDataContextValue {
    * absent when the store has no menus or the fetch failed.
    */
   navigation?: Record<string, unknown[]>;
+  /**
+   * ENG-3 R1 — the request's resolved visitor locale (from the proxy's
+   * `x-numu-locale` header: `/{locale}/…` prefix › `?locale=` › `numu_locale`
+   * cookie › store default). Threaded here so `ByotThemeBoundary` can forward
+   * it into every bundle mount ctx even though individual page routes don't
+   * pass a `locale` prop. Without this an explicit `?locale=ar` flips the host
+   * `<html dir>` but leaves the bundle on its default-language copy. Optional:
+   * absent when no locale was resolved (bundle falls back to store default).
+   */
+  locale?: string;
 }
 
 const ThemeDataContext = createContext<ThemeDataContextValue | null>(null);
@@ -22,10 +32,13 @@ export function ThemeDataProvider({
   themeSettings,
   storeData,
   navigation,
+  locale,
   children,
 }: ThemeDataContextValue & { children: ReactNode }) {
   return (
-    <ThemeDataContext.Provider value={{ themeSettings, storeData, navigation }}>
+    <ThemeDataContext.Provider
+      value={{ themeSettings, storeData, navigation, locale }}
+    >
       {children}
     </ThemeDataContext.Provider>
   );

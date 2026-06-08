@@ -54,6 +54,10 @@ interface Props {
   storeCurrency?: string;
   cartUrl?: string;
   checkoutUrl?: string;
+  /** Visitor locale ("ar" → Arabic + RTL). ENG-3: this built-in cart is the
+   *  no-blank fallback for themes that ship no cart template, so it must be
+   *  bilingual too (it would otherwise show English on an Arabic store). */
+  locale?: string;
 }
 
 function readCsrf(): string {
@@ -71,7 +75,11 @@ export default function BuiltInCart({
   storeCurrency = "EGP",
   cartUrl = "/api/cart",
   checkoutUrl = "/checkout",
+  locale,
 }: Props) {
+  const ar = (locale || "").toLowerCase().startsWith("ar");
+  const dir = ar ? "rtl" : "ltr";
+  const T = (en: string, arText: string) => (ar ? arText : en);
   const [cart, setCart] = useState<CartResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,32 +151,34 @@ export default function BuiltInCart({
 
   if (loading && !cart) {
     return (
-      <div className="max-w-4xl mx-auto p-8 text-center text-gray-500">
-        Loading cart…
+      <div dir={dir} className="max-w-4xl mx-auto p-8 text-center text-gray-500">
+        {T("Loading cart…", "جاري تحميل السلة…")}
       </div>
     );
   }
   if (error) {
     return (
-      <div className="max-w-4xl mx-auto p-8 text-center text-red-700">
+      <div dir={dir} className="max-w-4xl mx-auto p-8 text-center text-red-700">
         {error}
       </div>
     );
   }
   if (!cart || cart.items.length === 0) {
     return (
-      <div className="max-w-4xl mx-auto p-8 text-center">
-        <h1 className="text-3xl font-bold mb-2">Your cart is empty</h1>
+      <div dir={dir} className="max-w-4xl mx-auto p-8 text-center">
+        <h1 className="text-3xl font-bold mb-2">
+          {T("Your cart is empty", "سلتك فاضية")}
+        </h1>
         <p className="text-gray-500">
-          Add a product to see it here.
+          {T("Add a product to see it here.", "ضيف منتج علشان يظهر هنا.")}
         </p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <h1 className="text-3xl font-bold mb-6">Cart</h1>
+    <div dir={dir} className="max-w-4xl mx-auto p-4 md:p-8">
+      <h1 className="text-3xl font-bold mb-6">{T("Cart", "السلة")}</h1>
       <ul className="divide-y divide-gray-200">
         {cart.items.map((li) => {
           const sold = li.sold_out_now;
@@ -231,7 +241,7 @@ export default function BuiltInCart({
                     className="text-sm text-gray-500 hover:text-red-700"
                     onClick={() => removeItem(li.id)}
                   >
-                    Remove
+                    {T("Remove", "إزالة")}
                   </button>
                 </div>
               </div>
@@ -240,7 +250,7 @@ export default function BuiltInCart({
                   {fmtCents(li.total_price, currency)}
                 </div>
                 <div className="text-xs text-gray-500">
-                  {fmtCents(li.unit_price, currency)} each
+                  {fmtCents(li.unit_price, currency)} {T("each", "للوحدة")}
                 </div>
               </div>
             </li>
@@ -250,7 +260,7 @@ export default function BuiltInCart({
 
       <div className="mt-6 border-t border-gray-200 pt-4 space-y-2">
         <div className="flex justify-between text-sm">
-          <span>Subtotal</span>
+          <span>{T("Subtotal", "الإجمالي الفرعي")}</span>
           <span>{fmtCents(cart.subtotal, currency)}</span>
         </div>
         {cart.applied_promotion && (
@@ -264,11 +274,14 @@ export default function BuiltInCart({
           </div>
         )}
         <div className="flex justify-between text-base font-semibold pt-2 border-t border-gray-200">
-          <span>Total</span>
+          <span>{T("Total", "الإجمالي")}</span>
           <span>{fmtCents(cart.subtotal, currency)}</span>
         </div>
         <p className="text-xs text-gray-500 mt-2">
-          Shipping, taxes, and any gift cards apply at checkout.
+          {T(
+            "Shipping, taxes, and any gift cards apply at checkout.",
+            "الشحن والضرائب وكروت الهدايا بتتحسب عند الدفع.",
+          )}
         </p>
       </div>
 
@@ -276,7 +289,7 @@ export default function BuiltInCart({
         href={checkoutUrl}
         className="mt-6 block text-center bg-black text-white py-3 rounded-md font-medium hover:bg-gray-800"
       >
-        Checkout
+        {T("Checkout", "إتمام الشراء")}
       </a>
     </div>
   );

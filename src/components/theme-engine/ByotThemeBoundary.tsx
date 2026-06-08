@@ -32,6 +32,17 @@ interface ByotThemeBoundaryProps {
    */
   locale?: string;
   fallback?: ReactNode;
+  /**
+   * ENG-2 — page-type "no-blank" backstop. A BYOT bundle that ships no
+   * template for the current route renders an empty wrapper into the mount
+   * container (its app returns a childless element) → the page is blank with
+   * no error. When the host detects that empty render AND the route supplied
+   * a `routeFallback`, it shows this instead so no route is ever blank.
+   * Passed by the cart / content-page / 404 routes; omitted on home / product
+   * / collection (which render on every theme). Distinct from `fallback`,
+   * which is the load/render ERROR UI.
+   */
+  routeFallback?: ReactNode;
 }
 
 // The two shapes a bundle's `mount` may return:
@@ -218,14 +229,23 @@ export default function ByotThemeBoundary({
   page,
   locale,
   fallback,
+  routeFallback,
 }: ByotThemeBoundaryProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<BundleHandle | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
+  // ENG-2 — set once the grace window elapses if the mounted bundle rendered
+  // no meaningful content into the container, so we can show `routeFallback`.
+  const [bundleEmpty, setBundleEmpty] = useState(false);
   // Phase 2.4 — store nav menus injected once by the layout. Stable per
   // session; read here (non-throwing) and forwarded into every mount ctx.
-  const navigation = useThemeDataOptional()?.navigation;
+  // ENG-3 R1 — the layout also threads the resolved visitor locale here; fall
+  // back to it when the page route didn't pass an explicit `locale` prop.
+  const themeData = useThemeDataOptional();
+  const navigation = themeData?.navigation;
+  const effectiveLocale = locale ?? themeData?.locale;
+  const hasRouteFallback = routeFallback != null;
 
   // ── Bundle lifecycle ──────────────────────────────────────────────────────
   //
@@ -274,7 +294,7 @@ export default function ByotThemeBoundary({
           themeSettings,
           storeData,
           page,
-          locale,
+          locale: effectiveLocale,
           demo: computeDemo(),
           navigation,
         });
@@ -307,6 +327,58 @@ export default function ByotThemeBoundary({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundleUrl, cssUrl, bundleChecksum]);
 
+  // ── ENG-2: no-blank backstop ──────────────────────────────────────────────
+  //
+  // A BYOT bundle that ships no template for the current route renders an empty
+  // wrapper into `containerRef` (its app returns a childless element), so the
+  // page is blank with no console error. In preview mode the host can't tell
+  // from `themeSettings.templates` (always {} for previews) whether the bundle
+  // covers this route — the only reliable signal is observing that the bundle
+  // produced no content. When it didn't AND the route supplied a
+  // `routeFallback`, show that (a default cart / themed 404 / page body) so the
+  // route is never blank.
+  //
+  // "Empty" is TEXT/descendant-based, NOT childElementCount: the bundle's empty
+  // wrapper makes childElementCount === 1, so test for no rendered text AND no
+  // media/interactive descendant. A real template (even "your cart is empty")
+  // has substantial text and reads as non-empty immediately.
+  useEffect(() => {
+    if (loading || error || !hasRouteFallback) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const hasContent = () =>
+      (el.textContent ?? "").trim().length > 0 ||
+      el.querySelector(
+        "img, svg, input, button, a, picture, video, iframe, canvas",
+      ) != null;
+
+    let graceOver = false;
+    // Before the grace ceiling: keep the fallback hidden (bundle may still be
+    // committing). After: reflect the live DOM — show the fallback only while
+    // the bundle is genuinely blank, and yield to it the instant real content
+    // arrives (covers late <Suspense>/lazy section chunks without flicker).
+    const sync = () => setBundleEmpty(graceOver && !hasContent());
+
+    const obs = new MutationObserver(sync);
+    obs.observe(el, { childList: true, subtree: true, characterData: true });
+
+    // createRoot().render() commits asynchronously (React 19) and themes lazy-
+    // load sections behind <Suspense>; wait before declaring the route blank.
+    const deadline = setTimeout(() => {
+      graceOver = true;
+      sync();
+    }, 1200);
+
+    return () => {
+      obs.disconnect();
+      clearTimeout(deadline);
+    };
+    // Keyed on bundle identity + mount completion only — deliberately NOT on
+    // themeSettings/page so editor live-edits don't re-trigger detection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundleUrl, cssUrl, bundleChecksum, loading, error, hasRouteFallback]);
+
   useEffect(() => {
     const handle = handleRef.current;
     if (!handle) return;
@@ -315,7 +387,7 @@ export default function ByotThemeBoundary({
         themeSettings,
         storeData,
         page,
-        locale,
+        locale: effectiveLocale,
         demo: computeDemo(),
         navigation,
       });
@@ -334,7 +406,7 @@ export default function ByotThemeBoundary({
     } catch (err) {
       console.warn("[ByotThemeBoundary] update threw:", err);
     }
-  }, [themeSettings, storeData, page, locale, navigation]);
+  }, [themeSettings, storeData, page, effectiveLocale, navigation]);
 
   // Live-preview edits (editor only). The dashboard's LivePreview posts
   // `numu:theme:update` on every change; PreviewBridge re-dispatches it as a
@@ -357,7 +429,7 @@ export default function ByotThemeBoundary({
           themeSettings: next,
           storeData,
           page,
-          locale,
+          locale: effectiveLocale,
           demo: computeDemo(),
           navigation,
         });
@@ -371,7 +443,7 @@ export default function ByotThemeBoundary({
         "numu:theme-update",
         onThemeUpdate as EventListener,
       );
-  }, [storeData, page, locale, navigation]);
+  }, [storeData, page, effectiveLocale, navigation]);
 
   const fallbackUI =
     fallback || (
@@ -393,7 +465,11 @@ export default function ByotThemeBoundary({
         </div>
       )}
       {error && fallbackUI}
-      <div ref={containerRef} />
+      {/* ENG-2 — keep the bundle container mounted always; HIDE (not unmount)
+          it when the bundle rendered blank so a late async render can still
+          reconcile underneath the fallback without forcing a remount. */}
+      <div ref={containerRef} style={bundleEmpty ? { display: "none" } : undefined} />
+      {bundleEmpty && !error && routeFallback}
     </ThemeRenderBoundary>
   );
 }

@@ -47,6 +47,36 @@ export default async function StoreNotFound() {
     !!themeSettings?.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id);
 
+  // ENG-3: bilingual 404 — this fallback shows on Arabic stores too.
+  const ar = (
+    headerList.get("x-numu-locale") || store?.default_language || "en"
+  )
+    .toLowerCase()
+    .startsWith("ar");
+  const T = (en: string, arText: string) => (ar ? arText : en);
+
+  // Static themed-neutral 404 — used both as the built-in fallback and as the
+  // ENG-2 backstop for BYOT bundles that ship no `404` template (else blank).
+  const fallback404 = (
+    <div dir={ar ? "rtl" : "ltr"} className="min-h-screen flex items-center justify-center px-4">
+      <div className="text-center max-w-md">
+        <h1 className="text-5xl font-bold text-gray-900">404</h1>
+        <p className="text-gray-600 mt-3">
+          {T(
+            "We couldn't find the page you were looking for.",
+            "مش لاقيين الصفحة اللي بتدوّر عليها.",
+          )}
+        </p>
+        <a
+          href="/"
+          className="inline-block mt-6 rounded-md bg-black px-4 py-2 text-white text-sm font-medium hover:bg-gray-800"
+        >
+          {T("Back to", "ارجع لـ")} {store?.name || T("store", "المتجر")}
+        </a>
+      </div>
+    </div>
+  );
+
   if (isByot && store) {
     return (
       <ByotThemeBoundary
@@ -55,24 +85,10 @@ export default async function StoreNotFound() {
         themeSettings={themeSettings}
         storeData={store}
         page={{ type: "404", title: "Page not found" }}
+        routeFallback={fallback404}
       />
     );
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="text-center max-w-md">
-        <h1 className="text-5xl font-bold text-gray-900">404</h1>
-        <p className="text-gray-600 mt-3">
-          We couldn't find the page you were looking for.
-        </p>
-        <a
-          href="/"
-          className="inline-block mt-6 rounded-md bg-black px-4 py-2 text-white text-sm font-medium hover:bg-gray-800"
-        >
-          Back to {store?.name || "store"}
-        </a>
-      </div>
-    </div>
-  );
+  return fallback404;
 }

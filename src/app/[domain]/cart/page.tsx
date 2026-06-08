@@ -16,6 +16,7 @@ import {
   fetchStoreByDomain,
   fetchThemeSettings,
 } from "@/lib/api-client";
+import { headers } from "next/headers";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -63,6 +64,13 @@ export default async function CartPage({ params }: PageProps) {
     themeRaw?.theme_settings || themeRaw || {},
   );
 
+  // ENG-3: visitor locale for the bilingual built-in cart fallback.
+  const hl = await headers();
+  const locale =
+    hl.get("x-numu-locale") ||
+    (store as { default_language?: string })?.default_language ||
+    "en";
+
   if (
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
@@ -74,6 +82,9 @@ export default async function CartPage({ params }: PageProps) {
         themeSettings={themeSettings}
         storeData={store}
         page={{ type: "cart", title: "Cart" }}
+        // ENG-2: themes that ship no cart template render blank — fall back to
+        // the functional built-in cart so the bag is never unreachable.
+        routeFallback={<BuiltInCart storeCurrency={store?.currency} locale={locale} />}
       />
     );
   }
@@ -89,5 +100,5 @@ export default async function CartPage({ params }: PageProps) {
     );
   }
 
-  return <BuiltInCart storeCurrency={store?.currency} />;
+  return <BuiltInCart storeCurrency={store?.currency} locale={locale} />;
 }

@@ -383,15 +383,57 @@ export async function fetchCustomerAddresses(
 function normalizeProduct(raw: Record<string, any> | null | undefined): any {
   if (!raw) return raw;
   const price = Number(raw.price ?? 0);
+  const basePrice = Number.isFinite(price) ? price : 0;
   const compareAt = raw.compare_at_price != null ? Number(raw.compare_at_price) : undefined;
+  const baseCompare =
+    compareAt !== undefined && Number.isFinite(compareAt) ? compareAt : null;
+
+  // ── ENG-1: unify the PDP price with the listing price ──────────────────
+  //
+  // The list endpoint omits variants, so listing cards render `product.price`
+  // (the base). The single-product endpoint ships `variants[]`, and the PDP
+  // (via the SDK's useVariantSelection → auto-selected default variant) renders
+  // `variant.price`. When a product has NO real option axes, that "variant" is
+  // just the implicit default unit, so its price MUST equal the base — but the
+  // backend can ship a diverged value (e.g. base 30.00 / variant 3000.00 on a
+  // single no-option product). That makes browse show 30 and detail show 3000
+  // for the same product. Reconcile here, at the one normalization boundary:
+  //
+  //   * No options  → force every variant's price/compare_at to the base, so
+  //                   the PDP's default variant == the listing price.
+  //   * Has options → leave per-variant prices (legitimate "from {min}" multi-
+  //                   variant pricing), but still COERCE string→number: themes
+  //                   gate the sale badge on `typeof compare_at_price ===
+  //                   "number"`, which a Decimal-as-string ("5000.00") fails,
+  //                   silently dropping the discount UI.
+  const hasOptions = Array.isArray(raw.options) && raw.options.length > 0;
+  const variants = Array.isArray(raw.variants)
+    ? raw.variants.map((v: Record<string, any>) => {
+        const vp = Number(v?.price);
+        const vc = v?.compare_at_price != null ? Number(v.compare_at_price) : null;
+        return {
+          ...v,
+          price: !hasOptions
+            ? basePrice
+            : Number.isFinite(vp)
+              ? vp
+              : basePrice,
+          compare_at_price: !hasOptions
+            ? baseCompare
+            : vc !== null && Number.isFinite(vc)
+              ? vc
+              : null,
+        };
+      })
+    : raw.variants;
+
   return {
     ...raw,
-    price: Number.isFinite(price) ? price : 0,
-    ...(compareAt !== undefined && Number.isFinite(compareAt)
-      ? { compare_at_price: compareAt }
-      : {}),
+    price: basePrice,
+    ...(baseCompare !== null ? { compare_at_price: baseCompare } : {}),
     currency: raw.currency ?? raw.price_currency ?? "USD",
     in_stock: raw.in_stock ?? raw.is_in_stock ?? false,
+    ...(variants !== undefined ? { variants } : {}),
   };
 }
 

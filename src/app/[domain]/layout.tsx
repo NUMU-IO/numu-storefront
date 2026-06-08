@@ -128,11 +128,21 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   // Best-effort: a failure leaves the bundle on its DEFAULT_NAV fallback.
   const navigation = await fetchStoreMenus(store.id).catch(() => ({}));
 
+  // ENG-3 R1 — the proxy resolves the visitor locale (URL prefix › ?locale ›
+  // cookie › store default) and stamps it on `x-numu-locale`. Forward it through
+  // ThemeDataProvider so ByotThemeBoundary can inject it into the bundle mount
+  // ctx; otherwise a bundle only sees the locale via the (later, client-side)
+  // numu_locale cookie and an explicit ?locale=ar override can render the wrong
+  // language while the host <html dir> already flipped.
+  const localeHeaders = await headers();
+  const visitorLocale = localeHeaders.get("x-numu-locale") || undefined;
+
   return (
     <ThemeDataProvider
       themeSettings={themeSettings}
       storeData={store}
       navigation={navigation}
+      locale={visitorLocale}
     >
       {/* Path-segment routing in dev: when the storefront is reached at
           `/<subdomain>/...` (rather than `<subdomain>.numueg.app`),
