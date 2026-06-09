@@ -158,6 +158,15 @@ export default async function CatchAllPage({ params }: PageProps) {
           // a graceful placeholder when page.data.page.body is null.
           data: { page: { handle, title: humanize(handle), body: null } },
         }}
+        // ENG-2: themes with no `page` template render these nav paths blank —
+        // show the humanized placeholder (same as the built-in branch below)
+        // so e.g. /about is never a blank screen.
+        routeFallback={
+          <div className="max-w-4xl mx-auto p-8">
+            <h1 className="text-3xl font-bold">{humanize(handle)}</h1>
+            <p className="text-gray-600 mt-4">No content yet.</p>
+          </div>
+        }
       />
     );
   }

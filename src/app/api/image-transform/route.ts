@@ -108,6 +108,52 @@ export async function GET(req: NextRequest) {
   const formatRaw = (searchParams.get("f") || "").toLowerCase();
   const format = VALID_FORMATS.has(formatRaw) ? formatRaw : null;
 
+  // Focal-point knobs (Phase 3). These let a theme request a server-side
+  // SMART CROP centered on the subject (e.g. a hero). They are honored ONLY
+  // when Cloudflare Image Resizing is enabled (NUMU_CF_IMAGE_RESIZING=1) and a
+  // target width is given; otherwise they are gracefully IGNORED and the
+  // theme's CSS object-position transform still frames the image. So enabling
+  // CF is a pure perf/bandwidth optimization, never a correctness dependency.
+  const fpx = clampFloat(searchParams.get("fp-x"), 0, 1);
+  const fpy = clampFloat(searchParams.get("fp-y"), 0, 1);
+  const arRaw = searchParams.get("ar") || "";
+  const ar = /^\d{1,3}\/\d{1,3}$/.test(arRaw) ? arRaw : null;
+  const fitRaw = (searchParams.get("fit") || "").toLowerCase();
+  const fit = fitRaw === "contain" ? "contain" : fitRaw === "cover" ? "cover" : null;
+
+  const cfEnabled = process.env.NUMU_CF_IMAGE_RESIZING === "1";
+  const hasFocalIntent =
+    fpx !== undefined || fpy !== undefined || ar !== null || fit !== null;
+
+  // Reject a source that itself embeds a CF directive — appended after our
+  // options it would nest a second, attacker-controlled transform. (The host is
+  // already allowlisted, so this is hardening, not the primary gate.) Such a
+  // source falls through to /_next/image instead.
+  const srcHasCfDirective = target.pathname.toLowerCase().includes("/cdn-cgi/");
+
+  if (cfEnabled && hasFocalIntent && w && !srcHasCfDirective) {
+    // Cloudflare Image Resizing: /cdn-cgi/image/<options>/<source-url>.
+    // gravity accepts fractional coords (0.7x0.3). height is derived from the
+    // aspect ratio so the crop box matches the storefront container.
+    const opts: string[] = [`fit=${fit ?? "cover"}`, `width=${w}`];
+    if (fpx !== undefined || fpy !== undefined) {
+      opts.push(`gravity=${fpx ?? 0.5}x${fpy ?? 0.5}`);
+    }
+    if (ar) {
+      const [num, den] = ar.split("/").map(Number);
+      if (num > 0 && den > 0) opts.push(`height=${Math.round((w * den) / num)}`);
+    }
+    if (q) opts.push(`quality=${q}`);
+    if (format) opts.push(`format=${format}`);
+    // CF's path form takes the absolute source URL appended RAW (NOT
+    // percent-encoded — encoding breaks its parser). We use target.href (the
+    // normalized, validated URL) so stray whitespace/control chars can't
+    // malform the redirect. CF options precede the source segment, so the
+    // source's own query string can never override them.
+    const cfUrl = `${req.nextUrl.origin}/cdn-cgi/image/${opts.join(",")}/${target.href}`;
+    return NextResponse.redirect(cfUrl, 302);
+  }
+
   // Build the Next.js built-in optimizer URL. `_next/image` accepts:
   //   ?url=<encoded src>&w=<width>&q=<quality>
   // It serves AVIF when the Accept header advertises it and the
@@ -139,4 +185,15 @@ function clampInt(
   if (n < min) return min;
   if (n > max) return max;
   return n;
+}
+
+function clampFloat(
+  raw: string | null,
+  min: number,
+  max: number,
+): number | undefined {
+  if (raw == null || raw === "") return undefined;
+  const n = parseFloat(raw);
+  if (Number.isNaN(n)) return undefined;
+  return Math.min(max, Math.max(min, n));
 }

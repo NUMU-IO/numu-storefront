@@ -406,6 +406,7 @@ export async function fetchCustomerAddresses(
 function normalizeProduct(raw: Record<string, any> | null | undefined): any {
   if (!raw) return raw;
   const price = Number(raw.price ?? 0);
+  const basePrice = Number.isFinite(price) ? price : 0;
   const compareAt = raw.compare_at_price != null ? Number(raw.compare_at_price) : undefined;
   // The API returns `images` as a plain string[] of URLs, but the SDK
   // contract (ProductImage[]) — and every theme — reads `images[i].url`.
@@ -416,12 +417,16 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
         typeof img === "string" ? { id: String(i), url: img } : img,
       )
     : [];
+  // ── Variant price normalization (supersedes the earlier ENG-1 fix) ──────
   // The API serializes the PRODUCT price in MAJOR units ("110.00") but
   // VARIANT prices in CENTS ("11000.00") — an inconsistency. Themes prefer
   // `variant.price ?? product.price`, so without this they render variant
-  // prices ×100. Convert variant money cents→major to match the product
-  // price (major end-to-end). NOTE: bandaid for a backend serialization bug
-  // — if the backend starts serializing variant prices as major, drop this.
+  // prices ×100. Converting variant money cents→major makes prices major
+  // end-to-end AND reconciles the no-option case (a single product's implicit
+  // variant came back as 3000.00 cents → 30.00 == base, so listing and PDP
+  // agree) — i.e. this also covers what ENG-1's reconcile-to-base did, without
+  // double-transforming. NOTE: bandaid for a backend serialization bug — if
+  // variant prices start arriving as major, drop this.
   const variants = Array.isArray(raw.variants)
     ? raw.variants.map((v: Record<string, any>) => {
         if (!v || typeof v !== "object") return v;
@@ -439,9 +444,9 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
       ? { compare_at_price: compareAt }
       : {}),
     images,
-    ...(variants !== undefined ? { variants } : {}),
     currency: raw.currency ?? raw.price_currency ?? "USD",
     in_stock: raw.in_stock ?? raw.is_in_stock ?? false,
+    ...(variants !== undefined ? { variants } : {}),
   };
 }
 
