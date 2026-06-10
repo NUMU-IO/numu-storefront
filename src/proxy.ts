@@ -268,5 +268,10 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  // NOTE: `/api` is intentionally INCLUDED so the middleware can inject a
+  // canonical `x-numu-host` for client cart/checkout calls on deep platform
+  // hosts (the `/api/` branch above returns early before any page rewrite).
+  // Excluding it leaves those calls forwarding the deep host → backend can't
+  // resolve the store → 400/404 (add-to-cart broken).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
