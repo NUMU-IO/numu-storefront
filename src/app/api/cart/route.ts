@@ -11,6 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { adaptCart } from "@/lib/adapt-cart";
 import { ensureCsrfCookie } from "@/lib/csrf";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
@@ -36,7 +37,16 @@ export async function GET(req: NextRequest) {
     headers: backendHeaders(req),
     cache: "no-store",
   });
-  const body = await res.text();
+  let body = await res.text();
+  // Adapt the backend envelope/field-names to the SDK Cart shape so the
+  // theme's useCart() reads a populated cart (only on success bodies).
+  if (res.ok) {
+    try {
+      body = JSON.stringify(adaptCart(JSON.parse(body)));
+    } catch {
+      // Non-JSON / unexpected body — pass through untouched.
+    }
+  }
 
   // First /api/cart fetch is also where we mint the CSRF cookie. The
   // SDK calls /api/cart on mount, so by the time any cart write runs
