@@ -15,6 +15,7 @@
 import { resolveByotFork } from "@/lib/byot-fork";
 import { notFound } from "next/navigation";
 import { ContactStep } from "./ContactStep";
+import { CartFunnelTracker } from "@/components/tracking/FunnelTracker";
 
 export const dynamic = "force-dynamic"; // Don't ISR the checkout
 
@@ -29,6 +30,21 @@ export default async function ContactStepPage({ params }: PageProps) {
     title: "Checkout — Contact",
   });
   if (fork.kind === "missing-store") notFound();
-  if (fork.kind === "byot") return fork.element;
-  return <ContactStep />;
+
+  // Meta InitiateCheckout — fires on checkout entry (contact step) for both
+  // BYOT + built-in. <CartFunnelTracker> enriches value/contents from /api/cart.
+  const initiateCheckout = <CartFunnelTracker step="checkout_started" />;
+  if (fork.kind === "byot")
+    return (
+      <>
+        {initiateCheckout}
+        {fork.element}
+      </>
+    );
+  return (
+    <>
+      {initiateCheckout}
+      <ContactStep />
+    </>
+  );
 }

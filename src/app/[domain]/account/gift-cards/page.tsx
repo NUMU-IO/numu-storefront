@@ -57,6 +57,9 @@ export default async function GiftCardsPage({ params }: PageProps) {
           title: "Gift cards",
           data: { customer },
         }}
+        // ENG-2: themes ship no `account_gift_cards` template — fall back to
+        // the built-in balance checker so the page is never blank.
+        routeFallback={<GiftCardCheckClient />}
       />
     );
   }

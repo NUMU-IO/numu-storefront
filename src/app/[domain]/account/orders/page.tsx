@@ -64,6 +64,9 @@ export default async function OrdersPage({ params }: PageProps) {
           title: "Orders",
           data: { customer, orders },
         }}
+        // ENG-2: themes ship no `account_orders` template — fall back to the
+        // functional built-in order history so the page is never blank.
+        routeFallback={<OrdersList customer={customer} initialOrders={orders} />}
       />
     );
   }

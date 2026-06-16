@@ -27,6 +27,11 @@ export interface CheckoutState {
   // Step 2
   selected_shipping_rate_id: string | null;
   shipping_method: string | null;
+  // Cached shipping cost (cents) of the selected rate so the order-summary
+  // panel can show the Shipping line + Total without re-fetching all rates.
+  // Pickup = 0. Re-resolved server-side on POST /checkout (this is display
+  // only — the backend recomputes to prevent amount tampering).
+  shipping_cost_cents: number | null;
   // Phase 7.2 — when set, the order is fulfilled as in-store pickup.
   // Mutually exclusive with selected_shipping_rate_id (a pickup order
   // has no shipping rate); PaymentStep clears one when the other is
@@ -60,6 +65,7 @@ export const EMPTY_CHECKOUT_STATE: CheckoutState = {
   shipping_address: {},
   selected_shipping_rate_id: null,
   shipping_method: null,
+  shipping_cost_cents: null,
   pickup_location_id: null,
   payment_method: null,
   cod_requested: false,

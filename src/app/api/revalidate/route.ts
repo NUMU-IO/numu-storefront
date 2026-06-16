@@ -87,8 +87,14 @@ export async function POST(request: NextRequest) {
 
   for (const tag of new Set(tags)) {
     try {
-      // Next 16 made `profile` required; "default" preserves prior semantics.
-      revalidateTag(tag, "default");
+      // This route is called by an EXTERNAL system (the FastAPI backend) that
+      // requires IMMEDIATE expiry. Per the Next 16 docs, the string-profile
+      // form (`revalidateTag(tag, "default")`) is stale-while-revalidate — it
+      // keeps serving the STALE entry for the profile's stale window ("default"
+      // = 5 minutes), which is exactly the 5-minute publish lag we saw. The
+      // documented pattern for "external systems that require data to expire
+      // immediately" is `{ expire: 0 }`. Matches numu-egyptian-bazaar's route.
+      revalidateTag(tag, { expire: 0 });
       revalidated.tags.push(tag);
     } catch (err) {
       console.warn(`[revalidate] Failed to revalidate tag "${tag}":`, err);

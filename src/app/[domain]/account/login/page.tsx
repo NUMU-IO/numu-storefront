@@ -44,25 +44,11 @@ export default async function LoginPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id);
 
-  // BYOT theme renders its own login UI by reading `page.type === "login"`.
-  // Themes that haven't shipped a login template fall through to their
-  // generic page template — themes should add a `login` template to the
-  // section_templates registry to render a polished form. The bundle's
-  // forms hit the same `/api/customer/login` proxy so behavior matches.
-  if (isByot) {
-    return (
-      <ByotThemeBoundary
-        bundleUrl={themeSettings.external_theme!.bundle_url!}
-        cssUrl={themeSettings.external_theme!.css_url}
-        themeSettings={themeSettings}
-        storeData={store}
-        page={{ type: "login", title: "Sign in" }}
-      />
-    );
-  }
-
-  // Built-in fallback — works on any theme even before BYOT login templates ship.
-  return (
+  // Built-in fallback — works on any theme even before BYOT login templates
+  // ship. Doubles as the ENG-2 no-blank backstop: account sub-pages redirect
+  // anonymous shoppers here, so a blank login (theme with no `login` template)
+  // would lock them out entirely.
+  const builtInLogin = (
     <main className="min-h-screen flex items-center justify-center px-4 py-12 bg-white">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
@@ -75,4 +61,23 @@ export default async function LoginPage({ params }: PageProps) {
       </div>
     </main>
   );
+
+  // BYOT theme renders its own login UI by reading `page.type === "login"`.
+  // Themes that haven't shipped a login template fall back to the built-in
+  // form. The bundle's forms hit the same `/api/customer/login` proxy so
+  // behavior matches.
+  if (isByot) {
+    return (
+      <ByotThemeBoundary
+        bundleUrl={themeSettings.external_theme!.bundle_url!}
+        cssUrl={themeSettings.external_theme!.css_url}
+        themeSettings={themeSettings}
+        storeData={store}
+        page={{ type: "login", title: "Sign in" }}
+        routeFallback={builtInLogin}
+      />
+    );
+  }
+
+  return builtInLogin;
 }

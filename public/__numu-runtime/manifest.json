@@ -1,6 +1,6 @@
 {
-  "built_at": "2026-06-08T20:33:45.922Z",
-  "sdk_version": "0.2.1",
+  "built_at": "2026-06-16T15:49:35.477Z",
+  "sdk_version": "0.2.3",
   "react_version": "19.2.5",
   "react_dom_version": "19.2.5",
   "files": {
@@ -8,10 +8,10 @@
     "react-jsx-runtime.js": "77aa48426603ce31",
     "react-jsx-dev-runtime.js": "774794cff5e79c61",
     "react-dom.js": "a27e3654a07daafa",
-    "react-dom-client.js": "1317869c3bb7803a",
+    "react-dom-client.js": "e118a42d41edb789",
     "chunk-IA5QTEFP.js": "05834c3b831da091",
     "chunk-BHNQUPPO.js": "9a3686111b5499e1",
     "chunk-EK7ODJWE.js": "06b1bf39b7cee1b3",
-    "sdk.js": "dd3de079c611cfcd"
+    "sdk.js": "61b4836b7ea7aebb"
   }
 }

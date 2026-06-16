@@ -4,6 +4,7 @@ import {
   fetchProducts,
   fetchCollections,
 } from "@/lib/api-client";
+import { storeBlocksIndexing, type StoreForSeo } from "@/lib/seo";
 
 /**
  * Per-store sitemap.
@@ -70,6 +71,10 @@ export default async function sitemap({
     return entries;
   }
   if (!store?.id) return entries;
+
+  // Indexing gate — a suspended / opted-out store gets an empty sitemap so
+  // search engines have no URLs to crawl (pairs with robots.ts Disallow: /).
+  if (storeBlocksIndexing(store as unknown as StoreForSeo)) return [];
 
   const [products, collections] = await Promise.all([
     fetchProducts(store.id, 1000).catch(() => []),

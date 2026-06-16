@@ -63,6 +63,11 @@ export default async function AddressesRoute({ params }: PageProps) {
           title: "Addresses",
           data: { customer, addresses },
         }}
+        // ENG-2: themes ship no `account_addresses` template — fall back to the
+        // functional built-in address book so the page is never blank.
+        routeFallback={
+          <AddressesPage customer={customer} initialAddresses={addresses as any} />
+        }
       />
     );
   }

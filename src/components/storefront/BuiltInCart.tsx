@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatCents } from "@/lib/money";
+import { PromoCartHints } from "@/components/promo/PromoCartHints";
 
 /**
  * Wire format the backend's `_build_cart_response` emits — see
@@ -259,6 +260,12 @@ export default function BuiltInCart({
         })}
       </ul>
 
+      <PromoCartHints
+        subtotalCents={cart.subtotal}
+        currency={currency}
+        locale={locale}
+      />
+
       <div className="mt-6 border-t border-gray-200 pt-4 space-y-2">
         <div className="flex justify-between text-sm">
           <span>{T("Subtotal", "الإجمالي الفرعي")}</span>
@@ -276,7 +283,18 @@ export default function BuiltInCart({
         )}
         <div className="flex justify-between text-base font-semibold pt-2 border-t border-gray-200">
           <span>{T("Total", "الإجمالي")}</span>
-          <span>{fmtCents(cart.subtotal, currency)}</span>
+          {/* Total must net off any applied promotion — it previously
+              mirrored the subtotal, so a discounted cart showed the
+              pre-discount amount as the Total. */}
+          <span>
+            {fmtCents(
+              Math.max(
+                0,
+                cart.subtotal - (cart.applied_promotion?.amount ?? 0),
+              ),
+              currency,
+            )}
+          </span>
         </div>
         <p className="text-xs text-gray-500 mt-2">
           {T(

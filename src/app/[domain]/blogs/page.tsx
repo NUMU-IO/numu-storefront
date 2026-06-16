@@ -58,22 +58,11 @@ export default async function BlogsIndexPage({ params }: PageProps) {
   // read page.data.blogs and render their own design; built-in
   // themes get the minimal fallback below.
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
-  if (
-    themeSettings.external_theme?.bundle_url &&
-    !isBuiltInTheme(themeSettings.theme_id)
-  ) {
-    return (
-      <ByotThemeBoundary
-        bundleUrl={themeSettings.external_theme.bundle_url}
-        cssUrl={themeSettings.external_theme.css_url}
-        themeSettings={themeSettings}
-        storeData={store}
-        page={{ type: "blogs", title: "Blog", data: { blogs } }}
-      />
-    );
-  }
 
-  return (
+  // Built-in listing + ENG-2 no-blank backstop: no theme currently ships a
+  // `blogs` template, so without this the route would render blank wherever a
+  // nav menu links to it.
+  const builtInBlogs = (
     <main className="max-w-3xl mx-auto px-4 py-12" id="main">
       <h1 className="text-3xl font-semibold mb-6">Blog</h1>
       {blogs.length === 0 ? (
@@ -97,4 +86,22 @@ export default async function BlogsIndexPage({ params }: PageProps) {
       )}
     </main>
   );
+
+  if (
+    themeSettings.external_theme?.bundle_url &&
+    !isBuiltInTheme(themeSettings.theme_id)
+  ) {
+    return (
+      <ByotThemeBoundary
+        bundleUrl={themeSettings.external_theme.bundle_url}
+        cssUrl={themeSettings.external_theme.css_url}
+        themeSettings={themeSettings}
+        storeData={store}
+        page={{ type: "blogs", title: "Blog", data: { blogs } }}
+        routeFallback={builtInBlogs}
+      />
+    );
+  }
+
+  return builtInBlogs;
 }

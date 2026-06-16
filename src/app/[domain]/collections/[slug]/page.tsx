@@ -88,6 +88,17 @@ export default async function CollectionPage({ params }: PageProps) {
     />
   ));
 
+  // Built-in collection view — the ENG-2 no-blank backstop (and the
+  // built-in-theme fallback): a theme that ships no `collection` template
+  // would otherwise render an empty page. Shows the collection heading +
+  // description so the route is never blank.
+  const builtInCollection = (
+    <div className="max-w-4xl mx-auto p-8">
+      <h1 className="text-3xl font-bold">{collection?.name || "Collection"}</h1>
+      <p className="text-gray-600 mt-4">{collection?.description || ""}</p>
+    </div>
+  );
+
   // BYOT: hand the bundle the page context so it knows to render its
   // collection template. Same fork the home route uses.
   if (
@@ -108,6 +119,7 @@ export default async function CollectionPage({ params }: PageProps) {
             handle: slug,
             data: collection ? { collection } : undefined,
           }}
+          routeFallback={builtInCollection}
         />
       </>
     );
@@ -130,10 +142,7 @@ export default async function CollectionPage({ params }: PageProps) {
   return (
     <>
       {ldScripts}
-      <div className="max-w-4xl mx-auto p-8">
-        <h1 className="text-3xl font-bold">{collection?.name || "Collection"}</h1>
-        <p className="text-gray-600 mt-4">{collection?.description || ""}</p>
-      </div>
+      {builtInCollection}
     </>
   );
 }
