@@ -133,11 +133,30 @@ export function ShippingStep() {
           }
         } else {
           const body = await ratesRes.json();
-          const list: ShippingRateOption[] =
-            (body?.data?.options ||
-              body?.data ||
-              body?.options ||
-              []) as ShippingRateOption[];
+          const raw = (body?.data?.options ||
+            body?.data ||
+            body?.options ||
+            []) as Array<Record<string, unknown>>;
+          // The backend returns options keyed `rate_id`/`label`; the UI reads
+          // `id`/`name`. Without this mapping `r.id` is undefined, so the rate
+          // radio can't be selected (Continue stays disabled) and every <li>
+          // shares an undefined key. Normalize both field shapes.
+          const list: ShippingRateOption[] = (Array.isArray(raw) ? raw : []).map(
+            (o) =>
+              ({
+                id: String(o.id ?? o.rate_id ?? ""),
+                name: String(o.name ?? o.label ?? "Shipping"),
+                amount_cents: Number(o.amount_cents ?? 0),
+                currency: String(o.currency ?? "EGP"),
+                estimated_days_min: (o.estimated_days_min ?? null) as
+                  | number
+                  | null,
+                estimated_days_max: (o.estimated_days_max ?? null) as
+                  | number
+                  | null,
+                carrier: (o.carrier ?? o.rate_type ?? null) as string | null,
+              }) as ShippingRateOption,
+          );
           setRates(list);
           if (list.length && !s.selected_shipping_rate_id) {
             const cheapest = [...list].sort(
@@ -176,6 +195,8 @@ export function ShippingStep() {
       patchCheckoutState({
         selected_shipping_rate_id: selected,
         shipping_method: rate?.name || null,
+        // Cache the cost so the order-summary Total can include shipping.
+        shipping_cost_cents: rate?.amount_cents ?? null,
         pickup_location_id: null,
       });
     } else {
@@ -188,6 +209,8 @@ export function ShippingStep() {
         pickup_location_id: pickupId,
         selected_shipping_rate_id: null,
         shipping_method: loc?.name ? `Pickup at ${loc.name}` : "Pickup",
+        // In-store pickup has no shipping charge.
+        shipping_cost_cents: 0,
       });
     }
     router.push(`/${params.domain}/checkout/payment`);

@@ -88,24 +88,10 @@ export default async function PolicyPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id);
 
-  if (isByot) {
-    return (
-      <ByotThemeBoundary
-        bundleUrl={themeSettings.external_theme!.bundle_url!}
-        cssUrl={themeSettings.external_theme!.css_url}
-        themeSettings={themeSettings}
-        storeData={store}
-        page={{
-          type: "policy",
-          title,
-          handle,
-          data: { policy: { handle, title, body } },
-        }}
-      />
-    );
-  }
-
-  return (
+  // Built-in policy view — the ENG-2 no-blank backstop (and the built-in-theme
+  // fallback): a theme that ships no `policy` template would otherwise render
+  // an empty page when footer "Privacy/Refund/Terms" links resolve here.
+  const builtInPolicy = (
     <main className="max-w-3xl mx-auto px-4 py-12">
       <h1 className="text-3xl font-bold mb-6">{title}</h1>
       {body ? (
@@ -125,4 +111,24 @@ export default async function PolicyPage({ params }: PageProps) {
       )}
     </main>
   );
+
+  if (isByot) {
+    return (
+      <ByotThemeBoundary
+        bundleUrl={themeSettings.external_theme!.bundle_url!}
+        cssUrl={themeSettings.external_theme!.css_url}
+        themeSettings={themeSettings}
+        storeData={store}
+        page={{
+          type: "policy",
+          title,
+          handle,
+          data: { policy: { handle, title, body } },
+        }}
+        routeFallback={builtInPolicy}
+      />
+    );
+  }
+
+  return builtInPolicy;
 }

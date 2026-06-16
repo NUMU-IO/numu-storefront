@@ -61,11 +61,17 @@ export default async function AccountPage({ params }: PageProps) {
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}
+        // Themes declare their account template as `profile` (lux/vionne/bazar);
+        // the route must send the matching type or the bundle finds no template
+        // and renders blank. `routeFallback` is the ENG-2 no-blank backstop:
+        // themes WITHOUT a profile section degrade to the built-in AccountHome
+        // (functional) instead of a blank page.
         page={{
-          type: "account",
+          type: "profile",
           title: "Account",
           data: { customer, recent_orders: orders },
         }}
+        routeFallback={<AccountHome customer={customer} recentOrders={orders} />}
       />
     );
   }

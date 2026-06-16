@@ -97,14 +97,17 @@ export const fetchStoreByHost = cache(async (rawHost: string) => {
     return normalizeStore(
       await apiFetch<StoreData>(
         `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
-        { tags: [`store-${subdomain}`], revalidate: 300 },
+        // Publish busts `store-{subdomain}` immediately (NUMU-api
+        // revalidate_on_customization_publish); this 60s window is only the
+        // safety-net floor for a missed bust — was 300s (a 5-min stale tail).
+        { tags: [`store-${subdomain}`], revalidate: 60 },
       ),
     );
   }
   return normalizeStore(
     await apiFetch<StoreData>(
       `/storefront/store-by-domain/${encodeURIComponent(host)}`,
-      { tags: [`store-${host}`], revalidate: 300 },
+      { tags: [`store-${host}`], revalidate: 60 },
     ),
   );
 });
@@ -122,7 +125,7 @@ export const fetchStoreByDomain = cache(async (domainOrSubdomain: string) => {
     return normalizeStore(
       await apiFetch<StoreData>(
         `/storefront/store-by-subdomain/${encodeURIComponent(domainOrSubdomain)}`,
-        { tags: [`store-${domainOrSubdomain}`], revalidate: 300 },
+        { tags: [`store-${domainOrSubdomain}`], revalidate: 60 },
       ),
     );
   }

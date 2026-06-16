@@ -23,6 +23,7 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import BuiltInCart from "@/components/storefront/BuiltInCart";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
@@ -32,9 +33,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { domain } = await params;
   try {
     const store = await fetchStoreByDomain(domain);
-    return { title: `Cart | ${store?.name || "Store"}` };
+    return { title: `Cart | ${store?.name || "Store"}`, robots: NOINDEX_ROBOTS };
   } catch {
-    return { title: "Cart" };
+    return { title: "Cart", robots: NOINDEX_ROBOTS };
   }
 }
 

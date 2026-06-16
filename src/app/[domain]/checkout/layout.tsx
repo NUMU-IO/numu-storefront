@@ -17,7 +17,12 @@ import { fetchStoreByDomain } from "@/lib/api-client";
 import { themeOwnsCheckout } from "@/lib/byot-fork";
 import { CheckoutTrustBadges } from "@/components/checkout/CheckoutTrustBadges";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 import Link from "next/link";
+import type { Metadata } from "next";
+
+// Checkout is transactional — never index any step (incl. thank-you).
+export const metadata: Metadata = { robots: NOINDEX_ROBOTS };
 
 interface LayoutProps {
   children: React.ReactNode;

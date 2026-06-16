@@ -60,6 +60,9 @@ export default async function ProfileRoute({ params }: PageProps) {
           title: "Profile",
           data: { customer },
         }}
+        // ENG-2: themes ship no `account_profile` template — fall back to the
+        // functional built-in so the page is never blank.
+        routeFallback={<ProfilePage customer={customer} />}
       />
     );
   }

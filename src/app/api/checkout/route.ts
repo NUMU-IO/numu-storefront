@@ -49,7 +49,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Store not found" }, { status: 404 });
   }
 
-  const body = await req.text();
+  // The review step posts `shipping_address.line1`/`line2`, but the backend's
+  // CheckoutRequest requires `address_line1`/`address_line2`. Rename here so the
+  // order isn't rejected with a 422 missing-field error.
+  const raw = await req.text();
+  let body = raw;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const fixAddr = (a: unknown): unknown => {
+      if (!a || typeof a !== "object") return a;
+      const addr = { ...(a as Record<string, unknown>) };
+      if (addr.address_line1 === undefined && addr.line1 !== undefined)
+        addr.address_line1 = addr.line1;
+      if (addr.address_line2 === undefined && addr.line2 !== undefined)
+        addr.address_line2 = addr.line2;
+      delete addr.line1;
+      delete addr.line2;
+      return addr;
+    };
+    if (parsed.shipping_address)
+      parsed.shipping_address = fixAddr(parsed.shipping_address);
+    if (parsed.billing_address)
+      parsed.billing_address = fixAddr(parsed.billing_address);
+    body = JSON.stringify(parsed);
+  } catch {
+    /* not JSON — forward verbatim */
+  }
   const upstream = `${API_URL}/storefront/store/${store.id}/checkout`;
   const res = await fetch(upstream, {
     method: "POST",

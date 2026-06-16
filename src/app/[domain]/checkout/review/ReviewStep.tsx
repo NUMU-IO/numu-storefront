@@ -10,7 +10,6 @@ import {
   ErrorBanner,
   Field,
   PrimaryButton,
-  TextInput,
   Textarea,
 } from "@/components/checkout/ui";
 import {
@@ -19,14 +18,17 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { useAttribution } from "@/components/layout/AttributionProvider";
+import { getSessionFingerprint } from "@/lib/meta-pixel";
 import type { CheckoutResponse } from "@/types/checkout";
 
 /**
  * Step 4 — review + place order.
  *
- * The live order summary (items + subtotal) is shown by the checkout
- * layout's sticky panel, so this step focuses on confirming the shipping
- * destination + collecting an order note / coupon, then placing the order.
+ * The live order summary (items + totals breakdown + the coupon Apply
+ * field) is shown by the checkout layout's sticky panel, so this step
+ * focuses on confirming the shipping destination + collecting an order
+ * note, then placing the order. The applied coupon is read back from
+ * checkout-state (OrderSummary writes it there) and submitted with the order.
  *
  * On submit we POST the full payload to /api/checkout. The backend creates
  * the order and returns either a payment_url (redirect to gateway) or null
@@ -50,9 +52,8 @@ interface CartLine {
 
 const T = {
   shipTo: { en: "Shipping to", ar: "التوصيل إلى" },
-  notesCoupon: { en: "Notes & coupon", ar: "ملاحظات وكوبون" },
+  notesCoupon: { en: "Order notes", ar: "ملاحظات الطلب" },
   orderNotes: { en: "Order notes (optional)", ar: "ملاحظات الطلب (اختياري)" },
-  couponCode: { en: "Coupon code", ar: "كود الخصم" },
   secure: {
     en: "Your data is fully protected and encrypted",
     ar: "بياناتك محمية ومشفّرة بالكامل",
@@ -71,7 +72,6 @@ export function ReviewStep() {
   const [cart, setCart] = useState<{ items: CartLine[] } | null>(null);
   const [locale, setLocale] = useState("en");
   const [notes, setNotes] = useState("");
-  const [coupon, setCoupon] = useState("");
   const [error, setError] = useState<string | null>(null);
   // COD-trust gate: true when the backend blocked COD for this buyer, so we
   // surface a "pay online instead" path rather than a dead-end error.
@@ -90,7 +90,6 @@ export function ReviewStep() {
       setLocale(document.documentElement.lang === "ar" ? "ar" : "en");
     }
     setNotes(state.customer_notes || "");
-    setCoupon(state.coupon_code || "");
 
     (async () => {
       try {
@@ -132,9 +131,19 @@ export function ReviewStep() {
       deposit_gateway: state.deposit_gateway,
       saved_payment_method_id: state.saved_payment_method_id,
       customer_notes: notes || null,
-      coupon_code: coupon || null,
+      // Read the coupon from the LIVE state, not the mount snapshot — the
+      // OrderSummary panel may have applied/removed one after this step
+      // mounted (it writes coupon_code into checkout-state).
+      coupon_code: readCheckoutState().coupon_code || null,
       gift_card_codes: state.gift_card_codes || [],
       ...(attribution ? { attribution } : {}),
+      // Stable per-visitor id (same value ContactStep sends to /cart/track).
+      // The backend links the order to its funnel events + abandoned-cart row
+      // by this fingerprint, and the COD-trust / network-reputation path reads
+      // it for journey context. Was previously DROPPED here — without it,
+      // attribution funnel→order linkage and abandoned→order recovery degrade
+      // to email/phone-only matching, and trust scoring loses session context.
+      session_fingerprint: getSessionFingerprint() || null,
     };
 
     try {
@@ -252,27 +261,16 @@ export function ReviewStep() {
         </CheckoutCard>
 
         <CheckoutCard title={t("notesCoupon")}>
-          <div className="space-y-4">
-            <Field label={t("orderNotes")} htmlFor="notes">
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                maxLength={1000}
-                rows={3}
-                dir="auto"
-              />
-            </Field>
-            <Field label={t("couponCode")} htmlFor="coupon">
-              <TextInput
-                id="coupon"
-                value={coupon}
-                onChange={(e) => setCoupon(e.target.value.toUpperCase())}
-                maxLength={50}
-                dir="ltr"
-              />
-            </Field>
-          </div>
+          <Field label={t("orderNotes")} htmlFor="notes">
+            <Textarea
+              id="notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              maxLength={1000}
+              rows={3}
+              dir="auto"
+            />
+          </Field>
         </CheckoutCard>
 
         {error && <ErrorBanner>{error}</ErrorBanner>}

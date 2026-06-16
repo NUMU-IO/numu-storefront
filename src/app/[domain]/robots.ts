@@ -1,4 +1,6 @@
 import type { MetadataRoute } from "next";
+import { fetchStoreByDomain } from "@/lib/api-client";
+import { storeBlocksIndexing, type StoreForSeo } from "@/lib/seo";
 
 /**
  * Per-store robots.txt.
@@ -28,6 +30,23 @@ export default async function robots({
   const sitemapUrl = isProd
     ? `https://${domain}.${platformDomain}/sitemap.xml`
     : `http://localhost:3000/${domain}/sitemap.xml`;
+
+  // Indexing gate: a suspended / inactive / pending store, or a merchant who
+  // turned indexing off, must not be crawlable. A failed lookup is treated as
+  // permissive — only block when the store resolved AND blocks indexing, so a
+  // transient API blip can't de-index a live store.
+  let store: StoreForSeo | null = null;
+  try {
+    store = (await fetchStoreByDomain(domain)) as unknown as StoreForSeo;
+  } catch {
+    store = null;
+  }
+  if (store && storeBlocksIndexing(store)) {
+    return {
+      rules: [{ userAgent: "*", disallow: "/" }],
+      host: domain,
+    };
+  }
 
   return {
     rules: [
