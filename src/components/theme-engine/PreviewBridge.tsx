@@ -33,7 +33,7 @@
  */
 
 import { useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 const ALLOWED_EDITOR_ORIGINS = [
   "https://app.numueg.app",
@@ -68,6 +68,13 @@ export function PreviewBridge() {
   const params = useSearchParams();
   const isPreview = params.get("preview") === "true";
   const editorParam = params.get("editor");
+  // Re-run the effect on client-side navigation so the bridge re-announces
+  // `numu:editor:ready` for the freshly-mounted page. The editor drives page
+  // switches via postMessage now (no iframe reload — see LivePreview), so the
+  // new route's bundle starts from the SERVER-rendered published data; the
+  // re-announced ready makes the hub re-push the live draft + locale so the
+  // new page reflects unsaved edits.
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!isPreview || editorParam !== "v3") return;
@@ -122,11 +129,17 @@ export function PreviewBridge() {
           );
           break;
         case "numu:theme:navigate": {
-          const payload = data.payload as { page?: string } | undefined;
+          const payload = data.payload as
+            | { page?: string; path?: string }
+            | undefined;
           if (payload?.page) {
+            // Forward BOTH the logical page and the precomputed storefront
+            // subpath (e.g. "products/foo", "cart", ""). PreviewNavigationBridge
+            // uses `path` to client-route without an iframe reload; legacy
+            // consumers that only read `page` keep working.
             window.dispatchEvent(
               new CustomEvent("numu:theme-navigate", {
-                detail: { page: payload.page },
+                detail: { page: payload.page, path: payload.path },
               }),
             );
           }
@@ -303,7 +316,10 @@ export function PreviewBridge() {
       selectBox.remove();
       label.remove();
     };
-  }, [isPreview, editorParam]);
+    // `pathname` is in the dep list so a client-side navigation re-runs this
+    // effect → re-announces `numu:editor:ready` for the new page (see comment
+    // on the `pathname` declaration above).
+  }, [isPreview, editorParam, pathname]);
 
   return null;
 }

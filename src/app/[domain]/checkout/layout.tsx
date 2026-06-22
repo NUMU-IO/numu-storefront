@@ -13,8 +13,11 @@
  */
 
 import { headers } from "next/headers";
-import { fetchStoreByDomain } from "@/lib/api-client";
+import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
+import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { themeOwnsCheckout } from "@/lib/byot-fork";
+import type { CSSProperties } from "react";
+import { resolveBrandTokens, brandVarsToCss } from "@/lib/brand-tokens";
 import { CheckoutTrustBadges } from "@/components/checkout/CheckoutTrustBadges";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { NOINDEX_ROBOTS } from "@/lib/seo";
@@ -50,6 +53,16 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
     );
   }
 
+  // Brand the platform checkout with the active theme's full design language
+  // (colours + radius + border weight + heading/label treatment + fonts).
+  const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
+  const brandGlobals = themeRaw
+    ? (resolveThemeSettings(
+        (themeRaw as { theme_settings?: unknown }).theme_settings || themeRaw || {},
+      ).global_settings as Record<string, unknown> | undefined)
+    : undefined;
+  const brandVars = resolveBrandTokens(brandGlobals);
+
   const hdrs = await headers();
   const locale =
     hdrs.get("x-numu-locale") ||
@@ -79,8 +92,21 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
   const showSummary = !isTerminalPage;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100/40">
-      <header className="border-b border-gray-200/70 bg-white/80 backdrop-blur">
+    <div
+      className="min-h-screen bg-[var(--ck-bg)] text-[var(--ck-fg)] [font-family:var(--ck-body-font)]"
+      style={brandVars as CSSProperties}
+      data-checkout-root
+    >
+      {/* Mirror the tokens onto :root so React portals (the map-picker dialog,
+          rendered into document.body) inherit the same brand palette. Scoped
+          to the checkout route — unmounts when the visitor leaves checkout. */}
+      <style
+        dangerouslySetInnerHTML={{ __html: brandVarsToCss(brandVars) }}
+      />
+      {/* Brand accent bar — amber for bazar, the theme primary otherwise,
+          transparent for an unbranded store (renders as before). */}
+      <div aria-hidden className="h-1 w-full bg-[var(--ck-topbar)]" />
+      <header className="border-b-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)]/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-4">
           {store?.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -90,17 +116,17 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
               className="h-8 w-auto"
             />
           ) : (
-            <span className="text-lg font-semibold tracking-tight text-gray-900">
+            <span className="text-lg text-[var(--ck-fg)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)]">
               {store?.name || "Store"}
             </span>
           )}
-          <span className="hidden text-sm text-gray-400 sm:inline">
-            {isAr ? "— إتمام الطلب" : "— Checkout"}
+          <span className="hidden text-[11px] text-[var(--ck-muted)] [font-weight:var(--ck-label-weight)] [letter-spacing:var(--ck-label-tracking)] [text-transform:var(--ck-label-transform)] sm:inline">
+            {isAr ? "إتمام الطلب" : "Checkout"}
           </span>
           <div className="ms-auto">
             <Link
               href="/cart"
-              className="text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-900 hover:underline"
+              className="text-sm font-medium text-[var(--ck-muted)] underline-offset-4 transition-colors hover:text-[var(--ck-fg)] hover:underline"
             >
               {isAr ? "العودة للسلة" : "Return to cart"}
             </Link>
@@ -129,11 +155,10 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
           <div className="mx-auto max-w-2xl">{children}</div>
         )}
 
-        {showSummary && <CheckoutTrustBadges locale={locale} />}
       </main>
 
-      <footer className="mt-12 border-t border-gray-200/70 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-6 text-xs text-gray-500">
+      <footer className="mt-12 border-t border-[var(--ck-border)] bg-[var(--ck-surface)]">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-6 text-xs text-[var(--ck-muted)]">
           <span className="inline-flex items-center gap-1.5">
             <svg
               width="13"
@@ -157,7 +182,7 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
           </span>
           <Link
             href="/policies/privacy"
-            className="underline-offset-4 hover:text-gray-900 hover:underline"
+            className="underline-offset-4 transition-colors hover:text-[var(--ck-fg)] hover:underline"
           >
             {isAr ? "الخصوصية" : "Privacy"}
           </Link>

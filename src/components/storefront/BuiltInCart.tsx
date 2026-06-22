@@ -153,25 +153,25 @@ export default function BuiltInCart({
 
   if (loading && !cart) {
     return (
-      <div dir={dir} className="max-w-4xl mx-auto p-8 text-center text-gray-500">
+      <div dir={dir} className="mx-auto max-w-4xl p-8 text-center text-[var(--numu-ink-soft)] [font-family:var(--numu-sans)]">
         {T("Loading cart…", "جاري تحميل السلة…")}
       </div>
     );
   }
   if (error) {
     return (
-      <div dir={dir} className="max-w-4xl mx-auto p-8 text-center text-red-700">
+      <div dir={dir} className="mx-auto max-w-4xl p-8 text-center text-red-700 [font-family:var(--numu-sans)]">
         {error}
       </div>
     );
   }
   if (!cart || cart.items.length === 0) {
     return (
-      <div dir={dir} className="max-w-4xl mx-auto p-8 text-center">
-        <h1 className="text-3xl font-bold mb-2">
+      <div dir={dir} className="mx-auto max-w-4xl p-8 text-center [font-family:var(--numu-sans)]">
+        <h1 className="mb-2 text-3xl font-bold text-[var(--numu-ink)] [font-family:var(--numu-display)]">
           {T("Your cart is empty", "سلتك فاضية")}
         </h1>
-        <p className="text-gray-500">
+        <p className="text-[var(--numu-ink-soft)]">
           {T("Add a product to see it here.", "ضيف منتج علشان يظهر هنا.")}
         </p>
       </div>
@@ -179,9 +179,11 @@ export default function BuiltInCart({
   }
 
   return (
-    <div dir={dir} className="max-w-4xl mx-auto p-4 md:p-8">
-      <h1 className="text-3xl font-bold mb-6">{T("Cart", "السلة")}</h1>
-      <ul className="divide-y divide-gray-200">
+    <div dir={dir} className="mx-auto max-w-4xl p-4 text-[var(--numu-ink)] [font-family:var(--numu-sans)] md:p-8">
+      <h1 className="mb-6 text-3xl font-bold text-[var(--numu-ink)] [font-family:var(--numu-display)]">
+        {T("Cart", "السلة")}
+      </h1>
+      <ul className="divide-y divide-[var(--numu-border)]">
         {cart.items.map((li) => {
           const sold = li.sold_out_now;
           const priceChanged = Boolean(li.price_changed);
@@ -194,12 +196,12 @@ export default function BuiltInCart({
                   className="w-20 h-20 object-cover rounded"
                 />
               ) : (
-                <div className="w-20 h-20 bg-gray-100 rounded" />
+                <div className="w-20 h-20 rounded bg-[var(--numu-cream)]" />
               )}
               <div className="flex-1">
                 <div className="font-medium">{li.product_name || "Item"}</div>
                 {li.variant_name && (
-                  <div className="text-sm text-gray-500 mt-0.5">
+                  <div className="text-sm text-[var(--numu-ink-soft)] mt-0.5">
                     {li.variant_name}
                   </div>
                 )}
@@ -215,10 +217,10 @@ export default function BuiltInCart({
                   </div>
                 )}
                 <div className="mt-2 flex items-center gap-3">
-                  <div className="inline-flex border border-gray-300 rounded-md overflow-hidden">
+                  <div className="inline-flex overflow-hidden rounded-full border border-[var(--numu-border)]">
                     <button
                       type="button"
-                      className="px-2 py-1 hover:bg-gray-50"
+                      className="px-2 py-1 hover:bg-[var(--numu-cream)]"
                       onClick={() =>
                         updateQty(li.id, Math.max(1, li.quantity - 1))
                       }
@@ -226,12 +228,12 @@ export default function BuiltInCart({
                     >
                       −
                     </button>
-                    <span className="px-3 py-1 min-w-[2rem] text-center">
+                    <span className="min-w-[2rem] px-3 py-1 text-center">
                       {li.quantity}
                     </span>
                     <button
                       type="button"
-                      className="px-2 py-1 hover:bg-gray-50"
+                      className="px-2 py-1 hover:bg-[var(--numu-cream)]"
                       onClick={() => updateQty(li.id, li.quantity + 1)}
                       aria-label="Increase quantity"
                     >
@@ -240,7 +242,7 @@ export default function BuiltInCart({
                   </div>
                   <button
                     type="button"
-                    className="text-sm text-gray-500 hover:text-red-700"
+                    className="text-sm text-[var(--numu-ink-soft)] hover:text-red-700"
                     onClick={() => removeItem(li.id)}
                   >
                     {T("Remove", "إزالة")}
@@ -251,7 +253,7 @@ export default function BuiltInCart({
                 <div className="font-medium">
                   {fmtCents(li.total_price, currency)}
                 </div>
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-[var(--numu-ink-soft)]">
                   {fmtCents(li.unit_price, currency)} {T("each", "للوحدة")}
                 </div>
               </div>
@@ -266,7 +268,7 @@ export default function BuiltInCart({
         locale={locale}
       />
 
-      <div className="mt-6 border-t border-gray-200 pt-4 space-y-2">
+      <div className="mt-6 border-t border-[var(--numu-border)] pt-4 space-y-2">
         <div className="flex justify-between text-sm">
           <span>{T("Subtotal", "الإجمالي الفرعي")}</span>
           <span>{fmtCents(cart.subtotal, currency)}</span>
@@ -281,7 +283,7 @@ export default function BuiltInCart({
             <span>−{fmtCents(cart.applied_promotion.amount, currency)}</span>
           </div>
         )}
-        <div className="flex justify-between text-base font-semibold pt-2 border-t border-gray-200">
+        <div className="flex justify-between text-base font-semibold pt-2 border-t border-[var(--numu-border)]">
           <span>{T("Total", "الإجمالي")}</span>
           {/* Total must net off any applied promotion — it previously
               mirrored the subtotal, so a discounted cart showed the
@@ -296,7 +298,7 @@ export default function BuiltInCart({
             )}
           </span>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
+        <p className="text-xs text-[var(--numu-ink-soft)] mt-2">
           {T(
             "Shipping, taxes, and any gift cards apply at checkout.",
             "الشحن والضرائب وكروت الهدايا بتتحسب عند الدفع.",
@@ -306,7 +308,7 @@ export default function BuiltInCart({
 
       <a
         href={checkoutUrl}
-        className="mt-6 block text-center bg-black text-white py-3 rounded-md font-medium hover:bg-gray-800"
+        className="numu-btn-navy mt-6 block rounded-full py-3 text-center font-semibold"
       >
         {T("Checkout", "إتمام الشراء")}
       </a>

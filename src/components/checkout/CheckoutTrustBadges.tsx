@@ -64,9 +64,9 @@ export function CheckoutTrustBadges({ locale = "en" }: { locale?: string }) {
       {BADGES.map((b) => (
         <li
           key={b.key}
-          className="flex items-center gap-2.5 rounded-xl border border-gray-200/80 bg-white px-3.5 py-2.5 text-xs font-medium text-gray-600 shadow-sm"
+          className="flex items-center gap-2.5 rounded-[var(--ck-radius-sm)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] px-3.5 py-2.5 text-xs font-medium text-[var(--ck-muted)] [box-shadow:var(--ck-shadow)]"
         >
-          <span className="shrink-0 text-gray-900">{b.icon}</span>
+          <span className="shrink-0 text-[var(--ck-accent)]">{b.icon}</span>
           <span>{isAr ? b.ar : b.en}</span>
         </li>
       ))}

@@ -10,9 +10,11 @@ import { AttributionProvider } from "@/components/layout/AttributionProvider";
 import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvider";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
+import { PreviewNavigationBridge } from "@/components/theme-engine/PreviewNavigationBridge";
 import { MetaPixel } from "@/components/tracking/MetaPixel";
 import { resolveMetaPixelIds } from "@/lib/meta-pixel";
 import { getActivePromotions } from "@/lib/promo-server";
+import { resolveBrandTokens } from "@/lib/brand-tokens";
 import { AnnouncementBar } from "@/components/promo/AnnouncementBar";
 import { PromoMounts } from "@/components/promo/PromoMounts";
 import {
@@ -66,15 +68,21 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
     if (fb) other["facebook-domain-verification"] = fb;
     // Theme customizer's identity.favicon_url wins; fall back to the favicon
     // set in the hub's Online Store → Preferences (`settings.favicon_url`) so
-    // a merchant who uploads it there sees it without opening the editor.
+    // a merchant who uploads it there sees it without opening the editor;
+    // finally fall back to a V3 theme's Brand → Favicon global setting
+    // (`theme_settings.global_settings.favicon`) so a BYOT theme that exposes
+    // its own favicon picker is honoured too.
+    const ts = store.theme_settings as unknown as
+      | {
+          identity?: { favicon_url?: string };
+          global_settings?: { favicon?: string };
+        }
+      | undefined;
     const favicon =
-      (
-        store.theme_settings as unknown as
-          | { identity?: { favicon_url?: string } }
-          | undefined
-      )?.identity?.favicon_url ||
+      ts?.identity?.favicon_url ||
       (store.settings as unknown as { favicon_url?: string } | undefined)
-        ?.favicon_url;
+        ?.favicon_url ||
+      ts?.global_settings?.favicon;
 
     return {
       metadataBase: new URL(base),
@@ -206,6 +214,12 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   }).catch(() => null);
   const announcementBar = promotions?.announcement_bars?.[0] ?? null;
 
+  // Brand tokens for host-rendered overlays (cookie banner) so they adopt the
+  // store's palette (bazar → cream/ink/amber) instead of a hardcoded white bar.
+  const brandVars = resolveBrandTokens(
+    themeSettings.global_settings as Record<string, unknown> | undefined,
+  );
+
   return (
     <ThemeDataProvider
       themeSettings={themeSettings}
@@ -245,6 +259,9 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
         {/* Preview bridge — only active when ?preview=true&editor=v3.
             Listens for postMessage updates from the dashboard editor. */}
         <PreviewBridge />
+        {/* Turns editor page switches into client-side route changes inside
+            the preview iframe (no full reload). Inert outside preview mode. */}
+        <PreviewNavigationBridge />
         {announcementBar && (
           <AnnouncementBar
             promotion={announcementBar}
@@ -257,6 +274,7 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             floatingWidgets={promotions.floating_widgets || []}
             cookieBanner={promotions.cookie_banner ?? null}
             locale={visitorLocale === "ar" ? "ar" : "en"}
+            brandVars={brandVars}
           />
         )}
         {!isByot && themeSettings.section_groups?.header && (
