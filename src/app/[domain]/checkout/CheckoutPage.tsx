@@ -544,7 +544,9 @@ export function CheckoutPage() {
         last_name: lastName,
         address_line1: line1,
         address_line2: line2 || null,
-        city,
+        // When the merchant disables the "area"/city field, fall back to the
+        // governorate so couriers still have a locality on the label.
+        city: city || stateGov,
         state: stateGov || null,
         postal_code: postalCode || null,
         country,
