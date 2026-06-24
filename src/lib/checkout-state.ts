@@ -119,7 +119,7 @@ export function clearCheckoutState(): void {
 export function hasContactStep(s: CheckoutState): boolean {
   return (
     Boolean(s.email) &&
-    Boolean(s.shipping_address?.line1) &&
+    Boolean(s.shipping_address?.address_line1) &&
     Boolean(s.shipping_address?.city) &&
     Boolean(s.shipping_address?.country)
   );

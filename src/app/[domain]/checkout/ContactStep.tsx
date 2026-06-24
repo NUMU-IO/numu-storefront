@@ -110,8 +110,8 @@ export function ContactStep() {
     setPhone(s.phone);
     setFirstName(s.shipping_address?.first_name || "");
     setLastName(s.shipping_address?.last_name || "");
-    setLine1(s.shipping_address?.line1 || "");
-    setLine2(s.shipping_address?.line2 || "");
+    setLine1(s.shipping_address?.address_line1 || "");
+    setLine2(s.shipping_address?.address_line2 || "");
     setCity(s.shipping_address?.city || "");
     setState(s.shipping_address?.state || "");
     setPostalCode(s.shipping_address?.postal_code || "");
@@ -201,8 +201,8 @@ export function ContactStep() {
       shipping_address: {
         first_name: firstName,
         last_name: lastName,
-        line1,
-        line2: line2 || null,
+        address_line1: line1,
+        address_line2: line2 || null,
         city,
         state: state || null,
         postal_code: postalCode || null,
