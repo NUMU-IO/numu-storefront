@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { StepIndicator } from "@/components/checkout/StepIndicator";
@@ -234,6 +234,29 @@ export function ShippingStep() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Friction cut: when there's exactly one shipping option and no pickup
+  // choice to make, skip this step entirely on FORWARD entry (the contact
+  // step links here with `?auto=1`). Back-nav from payment has no `?auto`, so
+  // the buyer can still review/change it — no redirect loop.
+  const autoAdvancedRef = useRef(false);
+  useEffect(() => {
+    if (autoAdvancedRef.current || loading) return;
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("auto") !== "1") return;
+    if (mode !== "ship") return;
+    if (!rates || rates.length !== 1) return;
+    if (pickupLocations && pickupLocations.length > 0) return;
+    autoAdvancedRef.current = true;
+    const only = rates[0];
+    patchCheckoutState({
+      selected_shipping_rate_id: only.id,
+      shipping_method: only.name,
+      shipping_cost_cents: only.amount_cents,
+      pickup_location_id: null,
+    });
+    router.replace(`/${params.domain}/checkout/payment`);
+  }, [loading, rates, pickupLocations, mode, params.domain, router]);
 
   // Keep the order summary's Shipping line + Total in sync the moment a rate
   // is chosen — auto-selected on load OR picked manually — instead of only

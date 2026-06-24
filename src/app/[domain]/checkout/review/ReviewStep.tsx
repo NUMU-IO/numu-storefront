@@ -157,7 +157,9 @@ export function ReviewStep() {
       payment_method: state.payment_method,
       selected_shipping_rate_id: state.selected_shipping_rate_id,
       shipping_method: state.shipping_method,
-      guest_email: state.email,
+      // Phone is our identity source-of-truth; email is merchant-optional, so
+      // send null (not "") when absent.
+      guest_email: state.email || null,
       cod_requested: state.cod_requested,
       deposit_gateway: state.deposit_gateway,
       saved_payment_method_id: state.saved_payment_method_id,

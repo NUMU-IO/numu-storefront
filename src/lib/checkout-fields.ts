@@ -99,35 +99,32 @@ export async function fetchCheckoutFieldsConfig(): Promise<CheckoutFieldsConfig>
 
 /**
  * Validate submitted custom-field values against the config client-side
- * (the backend re-validates). Returns a list of human error strings.
- * `values` is keyed by field id.
+ * (the backend re-validates). Returns errors keyed by field id (empty when
+ * valid). `values` is keyed by field id.
  */
 export function validateCustomFieldValues(
   fields: CustomFieldCfg[],
   values: Record<string, unknown>,
   locale: string,
-): string[] {
-  const errors: string[] = [];
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const isAr = locale === "ar";
   for (const f of fields) {
     const raw = values[f.id];
     const present = raw !== undefined && raw !== null && String(raw).trim() !== "";
-    const label = locale === "ar" && f.label_ar ? f.label_ar : f.label;
-    if (f.required && f.type !== "checkbox" && !present) {
-      errors.push(
-        locale === "ar" ? `${label} مطلوب` : `${label} is required`,
-      );
+    const label = isAr && f.label_ar ? f.label_ar : f.label;
+    if (f.required && f.type === "checkbox" && raw !== true) {
+      errors[f.id] = isAr ? `${label} مطلوب` : `${label} is required`;
       continue;
     }
-    if (f.required && f.type === "checkbox" && raw !== true) {
-      errors.push(
-        locale === "ar" ? `${label} مطلوب` : `${label} is required`,
-      );
+    if (f.required && f.type !== "checkbox" && !present) {
+      errors[f.id] = isAr ? `${label} مطلوب` : `${label} is required`;
       continue;
     }
     if (present && f.type === "number" && Number.isNaN(Number(raw))) {
-      errors.push(
-        locale === "ar" ? `${label} يجب أن يكون رقمًا` : `${label} must be a number`,
-      );
+      errors[f.id] = isAr
+        ? `${label} يجب أن يكون رقمًا`
+        : `${label} must be a number`;
     }
   }
   return errors;
