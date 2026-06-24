@@ -167,6 +167,11 @@ export function ReviewStep() {
       // mounted (it writes coupon_code into checkout-state).
       coupon_code: readCheckoutState().coupon_code || null,
       gift_card_codes: state.gift_card_codes || [],
+      // Merchant custom checkout fields collected on the contact step (keyed
+      // by field id). Backend validates against store.settings.checkout_fields.
+      ...(state.custom_fields && Object.keys(state.custom_fields).length > 0
+        ? { custom_fields: state.custom_fields }
+        : {}),
       ...(attribution ? { attribution } : {}),
       // Stable per-visitor id (same value ContactStep sends to /cart/track).
       // The backend links the order to its funnel events + abandoned-cart row

@@ -10,8 +10,16 @@ import {
   Field,
   PrimaryButton,
   Select,
+  Textarea,
   TextInput,
 } from "@/components/checkout/ui";
+import {
+  fetchCheckoutFieldsConfig,
+  stdField,
+  validateCustomFieldValues,
+  type CheckoutFieldsConfig,
+  type CustomFieldCfg,
+} from "@/lib/checkout-fields";
 import {
   LocationButton,
   LocationDialog,
@@ -92,6 +100,12 @@ export function ContactStep() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState("en");
+  // Merchant-configured checkout fields (standard enable/require toggles +
+  // custom fields). Defaults keep the form working before/if the fetch fails.
+  const [fieldsConfig, setFieldsConfig] = useState<CheckoutFieldsConfig | null>(
+    null,
+  );
+  const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
 
   // Graceful degradation: only offer the picker when a Maps key is present.
   // With no key, loadGoogleMaps() rejects — we hide the button entirely so
@@ -121,6 +135,10 @@ export function ContactStep() {
     setState(s.shipping_address?.state || "");
     setPostalCode(s.shipping_address?.postal_code || "");
     setCountry(s.shipping_address?.country || "EG");
+    setCustomValues(s.custom_fields || {});
+
+    // Merchant checkout-field config (custom fields + standard toggles).
+    void fetchCheckoutFieldsConfig().then(setFieldsConfig);
     // Rehydrate a previously-captured pin so the chip + payload survive a
     // back-nav from a later step.
     if (
@@ -187,6 +205,23 @@ export function ContactStep() {
     setError(null);
     if (!email || !line1 || !city || !country) {
       setError(t("required"));
+      return;
+    }
+    // Honor the merchant's standard-field requirements (the ones that map
+    // cleanly to this form) + custom-field validation.
+    const lastNameCfg = stdField(fieldsConfig, "last_name");
+    if (lastNameCfg.enabled && lastNameCfg.required && !lastName.trim()) {
+      setError(locale === "ar" ? "اسم العائلة مطلوب" : "Last name is required.");
+      return;
+    }
+    const customFieldDefs = fieldsConfig?.custom_fields || [];
+    const customErrors = validateCustomFieldValues(
+      customFieldDefs,
+      customValues,
+      locale,
+    );
+    if (customErrors.length) {
+      setError(customErrors[0]);
       return;
     }
     setSubmitting(true);
@@ -288,6 +323,7 @@ export function ContactStep() {
             }
           : {}),
       },
+      custom_fields: customValues,
       // Clear downstream selections that depend on the address.
       selected_shipping_rate_id: null,
       shipping_method: null,
@@ -377,14 +413,17 @@ export function ContactStep() {
                 onChange={(e) => setFirstName(e.target.value)}
               />
             </Field>
-            <Field label={t("lastName")} htmlFor="last_name">
-              <TextInput
-                id="last_name"
-                autoComplete="family-name"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-              />
-            </Field>
+            {stdField(fieldsConfig, "last_name").enabled && (
+              <Field label={t("lastName")} htmlFor="last_name">
+                <TextInput
+                  id="last_name"
+                  autoComplete="family-name"
+                  required={stdField(fieldsConfig, "last_name").required}
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                />
+              </Field>
+            )}
             <Field
               label={t("address")}
               htmlFor="line1"
@@ -474,6 +513,29 @@ export function ContactStep() {
           </div>
         </CheckoutCard>
 
+        {/* Merchant-configured custom checkout fields. */}
+        {(fieldsConfig?.custom_fields?.length ?? 0) > 0 && (
+          <CheckoutCard
+            title={locale === "ar" ? "تفاصيل إضافية" : "Additional details"}
+          >
+            <div className="grid grid-cols-1 gap-4">
+              {[...(fieldsConfig?.custom_fields ?? [])]
+                .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                .map((f) => (
+                  <CustomFieldInput
+                    key={f.id}
+                    field={f}
+                    value={customValues[f.id]}
+                    locale={locale}
+                    onChange={(v) =>
+                      setCustomValues((prev) => ({ ...prev, [f.id]: v }))
+                    }
+                  />
+                ))}
+            </div>
+          </CheckoutCard>
+        )}
+
         {error && <ErrorBanner>{error}</ErrorBanner>}
 
         <div className="flex items-center justify-between gap-3">
@@ -497,5 +559,84 @@ export function ContactStep() {
         />
       )}
     </>
+  );
+}
+
+/** Render one merchant-defined custom field by type. */
+function CustomFieldInput({
+  field,
+  value,
+  onChange,
+  locale,
+}: {
+  field: CustomFieldCfg;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  locale: string;
+}) {
+  const isAr = locale === "ar";
+  const label = isAr && field.label_ar ? field.label_ar : field.label;
+  const labelWithOpt = field.required
+    ? label
+    : `${label} (${isAr ? "اختياري" : "optional"})`;
+  const id = `cf-${field.id}`;
+
+  if (field.type === "checkbox") {
+    return (
+      <label htmlFor={id} className="flex cursor-pointer select-none items-start gap-2.5">
+        <input
+          id={id}
+          type="checkbox"
+          checked={value === true}
+          onChange={(e) => onChange(e.target.checked)}
+          className="mt-0.5 h-4 w-4 accent-gray-900"
+        />
+        <span className="text-sm text-gray-700">
+          {label}
+          {field.required ? " *" : ""}
+        </span>
+      </label>
+    );
+  }
+
+  return (
+    <Field label={labelWithOpt} htmlFor={id}>
+      {field.type === "textarea" ? (
+        <Textarea
+          id={id}
+          rows={3}
+          required={field.required}
+          value={String(value ?? "")}
+          placeholder={field.placeholder || undefined}
+          onChange={(e) => onChange(e.target.value)}
+          dir="auto"
+        />
+      ) : field.type === "select" ? (
+        <Select
+          id={id}
+          required={field.required}
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">{isAr ? "اختر" : "Select"}</option>
+          {(field.options || []).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <TextInput
+          id={id}
+          type={field.type === "number" ? "number" : "text"}
+          inputMode={field.type === "number" ? "decimal" : undefined}
+          required={field.required}
+          value={String(value ?? "")}
+          placeholder={field.placeholder || undefined}
+          onChange={(e) => onChange(e.target.value)}
+          dir="auto"
+        />
+      )}
+    </Field>
   );
 }
