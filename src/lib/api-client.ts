@@ -90,10 +90,23 @@ export const fetchStoreByHost = cache(async (rawHost: string) => {
   const platformDomain = (process.env.NUMU_PLATFORM_DOMAIN || "numueg.app")
     .toLowerCase()
     .split(":")[0];
-  const isSubdomain =
+  // A host is a subdomain store when it sits under EITHER the configured
+  // platform domain OR the canonical apex `numueg.app`. The second case is
+  // essential: the page proxy canonicalizes `x-numu-host` to the apex form
+  // `<slug>.numueg.app` for /api/* calls on deep parallel-env hosts
+  // (proxy.ts), but on v3.test NUMU_PLATFORM_DOMAIN is `v3.test.numueg.app`,
+  // so `<slug>.numueg.app` failed the platform-only endsWith check and got
+  // misrouted to the custom-domain lookup → 404 "Store not found" on every
+  // /api/* proxy (shipping, checkout, …). The store slug is always the
+  // LEFTMOST label, so take it directly — this also collapses any env infix
+  // (`<slug>.v3.test.numueg.app` → `<slug>`).
+  const CANONICAL_APEX = "numueg.app";
+  const underPlatform =
     host.endsWith(`.${platformDomain}`) && host !== platformDomain;
-  if (isSubdomain) {
-    const subdomain = host.slice(0, -(platformDomain.length + 1));
+  const underApex =
+    host.endsWith(`.${CANONICAL_APEX}`) && host !== CANONICAL_APEX;
+  if (underPlatform || underApex) {
+    const subdomain = host.split(".")[0];
     return normalizeStore(
       await apiFetch<StoreData>(
         `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,

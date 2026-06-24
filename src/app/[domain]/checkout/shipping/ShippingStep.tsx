@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { StepIndicator } from "@/components/checkout/StepIndicator";
@@ -114,11 +114,62 @@ export function ShippingStep() {
     setPickupId(s.pickup_location_id);
     setMode(s.pickup_location_id ? "pickup" : "ship");
     (async () => {
-      const ratesP = fetch("/api/shipping/options", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shipping_address: s.shipping_address }),
-      });
+      // Locale for picking the right rate label (state below is async).
+      const loc =
+        typeof document !== "undefined" &&
+        document.documentElement.lang === "ar"
+          ? "ar"
+          : "en";
+      // The backend resolves EG zones by governorate, NOT the full address.
+      // Send the governorate (state) — falling back to city, which the
+      // backend's resolve_governorate also accepts via its capital/alias map.
+      const addr = s.shipping_address || {};
+      const governorate_code = (addr.state || addr.city || "").trim();
+      const ratesP = (async () => {
+        // Value-based rate rules (free_over) need the cart subtotal in
+        // cents. The cart lives server-side (Redis); read it the same way
+        // OrderSummary does. Weight isn't tracked client-side → 0 (the
+        // backend default); flat/free rates resolve fine without it.
+        let cartSubtotalCents = 0;
+        try {
+          const cartRes = await fetch("/api/cart", { cache: "no-store" });
+          if (cartRes.ok) {
+            const cb = await cartRes.json();
+            const cart = (cb?.data || cb) as {
+              subtotal?: number;
+              items?: Array<{
+                total_price?: number;
+                subtotal?: number;
+                unit_price?: number;
+                quantity: number;
+              }>;
+            };
+            cartSubtotalCents =
+              cart?.subtotal ??
+              cart?.items?.reduce(
+                (acc, l) =>
+                  acc +
+                  (l.total_price ??
+                    l.subtotal ??
+                    (l.unit_price ?? 0) * l.quantity),
+                0,
+              ) ??
+              0;
+          }
+        } catch {
+          /* fall back to 0 — free/flat rates still resolve */
+        }
+        return fetch("/api/shipping/options", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            governorate_code,
+            cart_subtotal_cents: cartSubtotalCents,
+            cart_weight_g: 0,
+            cod_requested: Boolean(s.cod_requested),
+          }),
+        });
+      })();
       const pickupP = fetch("/api/storefront/pickup-locations", {
         cache: "no-store",
       }).catch(() => null);
@@ -134,30 +185,29 @@ export function ShippingStep() {
           }
         } else {
           const body = await ratesRes.json();
+          // Backend (ShippingOptionResponse) returns rate_id/label/label_ar;
+          // the component renders id/name. Normalize so the existing markup
+          // and the saved selected_shipping_rate_id stay correct.
           const raw = (body?.data?.options ||
-            body?.data ||
             body?.options ||
+            body?.data ||
             []) as Array<Record<string, unknown>>;
-          // The backend returns options keyed `rate_id`/`label`; the UI reads
-          // `id`/`name`. Without this mapping `r.id` is undefined, so the rate
-          // radio can't be selected (Continue stays disabled) and every <li>
-          // shares an undefined key. Normalize both field shapes.
-          const list: ShippingRateOption[] = (Array.isArray(raw) ? raw : []).map(
-            (o) =>
-              ({
-                id: String(o.id ?? o.rate_id ?? ""),
-                name: String(o.name ?? o.label ?? "Shipping"),
-                amount_cents: Number(o.amount_cents ?? 0),
-                currency: String(o.currency ?? "EGP"),
-                estimated_days_min: (o.estimated_days_min ?? null) as
-                  | number
-                  | null,
-                estimated_days_max: (o.estimated_days_max ?? null) as
-                  | number
-                  | null,
-                carrier: (o.carrier ?? o.rate_type ?? null) as string | null,
-              }) as ShippingRateOption,
-          );
+          const list: ShippingRateOption[] = (
+            Array.isArray(raw) ? raw : []
+          ).map((o) => ({
+            id: String(o.rate_id ?? o.id ?? ""),
+            name: String(
+              (loc === "ar" && o.label_ar ? o.label_ar : o.label ?? o.name) ??
+                "",
+            ),
+            amount_cents: Number(o.amount_cents ?? 0),
+            currency: String(o.currency ?? "EGP"),
+            estimated_days_min:
+              (o.estimated_days_min as number | null | undefined) ?? null,
+            estimated_days_max:
+              (o.estimated_days_max as number | null | undefined) ?? null,
+            carrier: (o.carrier as string | null | undefined) ?? null,
+          }));
           setRates(list);
           if (list.length && !s.selected_shipping_rate_id) {
             const cheapest = [...list].sort(
@@ -184,6 +234,29 @@ export function ShippingStep() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Friction cut: when there's exactly one shipping option and no pickup
+  // choice to make, skip this step entirely on FORWARD entry (the contact
+  // step links here with `?auto=1`). Back-nav from payment has no `?auto`, so
+  // the buyer can still review/change it — no redirect loop.
+  const autoAdvancedRef = useRef(false);
+  useEffect(() => {
+    if (autoAdvancedRef.current || loading) return;
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("auto") !== "1") return;
+    if (mode !== "ship") return;
+    if (!rates || rates.length !== 1) return;
+    if (pickupLocations && pickupLocations.length > 0) return;
+    autoAdvancedRef.current = true;
+    const only = rates[0];
+    patchCheckoutState({
+      selected_shipping_rate_id: only.id,
+      shipping_method: only.name,
+      shipping_cost_cents: only.amount_cents,
+      pickup_location_id: null,
+    });
+    router.replace(`/${params.domain}/checkout/payment`);
+  }, [loading, rates, pickupLocations, mode, params.domain, router]);
 
   // Keep the order summary's Shipping line + Total in sync the moment a rate
   // is chosen — auto-selected on load OR picked manually — instead of only

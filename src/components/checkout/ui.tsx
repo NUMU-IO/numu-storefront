@@ -82,12 +82,15 @@ export function Field({
   className,
   children,
   hint,
+  error,
 }: {
   label: ReactNode;
   htmlFor?: string;
   className?: string;
   children: ReactNode;
   hint?: ReactNode;
+  /** Inline validation message — shown in place of the hint when present. */
+  error?: ReactNode;
 }) {
   return (
     <label htmlFor={htmlFor} className={cn("block", className)}>
@@ -95,10 +98,20 @@ export function Field({
         {label}
       </span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-[var(--ck-muted)]">{hint}</span>}
+      {error ? (
+        <span className="mt-1 block text-xs font-medium text-red-600" role="alert">
+          {error}
+        </span>
+      ) : hint ? (
+        <span className="mt-1 block text-xs text-[var(--ck-muted)]">{hint}</span>
+      ) : null}
     </label>
   );
 }
+
+/** Red-border class for an invalid input — pass to TextInput/Select `className`. */
+export const INPUT_INVALID =
+  "border-red-400 focus:border-red-500 focus:ring-red-500/25";
 
 export function TextInput({
   className,

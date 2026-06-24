@@ -48,6 +48,10 @@ export interface CheckoutState {
   // Step 4
   customer_notes: string;
   coupon_code: string;
+  // Merchant-configured custom checkout fields, keyed by field id. Collected
+  // on the contact step and submitted as `custom_fields` in the checkout
+  // request (the backend validates them against store.settings.checkout_fields).
+  custom_fields: Record<string, unknown>;
   // Phase 8.3 — gift card tender. Up to 5 codes can be redeemed
   // against a single order; the backend FIFO-allocates the applied
   // amount up to min(sum_of_balances, total). Order's amount_due is
@@ -73,6 +77,7 @@ export const EMPTY_CHECKOUT_STATE: CheckoutState = {
   saved_payment_method_id: null,
   customer_notes: "",
   coupon_code: "",
+  custom_fields: {},
   gift_card_codes: [],
   utm_source: null,
   utm_medium: null,
@@ -134,7 +139,7 @@ export function clearCheckoutState(): void {
 export function hasContactStep(s: CheckoutState): boolean {
   return (
     Boolean(s.email) &&
-    Boolean(s.shipping_address?.line1) &&
+    Boolean(s.shipping_address?.address_line1) &&
     Boolean(s.shipping_address?.city) &&
     Boolean(s.shipping_address?.country)
   );

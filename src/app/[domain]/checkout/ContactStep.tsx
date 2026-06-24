@@ -8,10 +8,19 @@ import {
   CheckoutCard,
   ErrorBanner,
   Field,
+  INPUT_INVALID,
   PrimaryButton,
   Select,
+  Textarea,
   TextInput,
 } from "@/components/checkout/ui";
+import {
+  fetchCheckoutFieldsConfig,
+  stdField,
+  validateCustomFieldValues,
+  type CheckoutFieldsConfig,
+  type CustomFieldCfg,
+} from "@/lib/checkout-fields";
 import {
   LocationButton,
   LocationDialog,
@@ -92,6 +101,21 @@ export function ContactStep() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState("en");
+  // Merchant-configured checkout fields (standard enable/require toggles +
+  // custom fields). Defaults keep the form working before/if the fetch fails.
+  const [fieldsConfig, setFieldsConfig] = useState<CheckoutFieldsConfig | null>(
+    null,
+  );
+  const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
+  // Inline per-field validation errors (keyed by field id; custom fields use
+  // the `cf:<id>` namespace). Shown under each input; cleared on edit.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const clearErr = (key: string) =>
+    setFieldErrors((p) => {
+      if (!(key in p)) return p;
+      const { [key]: _omit, ...rest } = p;
+      return rest;
+    });
 
   // Graceful degradation: only offer the picker when a Maps key is present.
   // With no key, loadGoogleMaps() rejects — we hide the button entirely so
@@ -115,12 +139,16 @@ export function ContactStep() {
     setPhone(s.phone);
     setFirstName(s.shipping_address?.first_name || "");
     setLastName(s.shipping_address?.last_name || "");
-    setLine1(s.shipping_address?.line1 || "");
-    setLine2(s.shipping_address?.line2 || "");
+    setLine1(s.shipping_address?.address_line1 || "");
+    setLine2(s.shipping_address?.address_line2 || "");
     setCity(s.shipping_address?.city || "");
     setState(s.shipping_address?.state || "");
     setPostalCode(s.shipping_address?.postal_code || "");
     setCountry(s.shipping_address?.country || "EG");
+    setCustomValues(s.custom_fields || {});
+
+    // Merchant checkout-field config (custom fields + standard toggles).
+    void fetchCheckoutFieldsConfig().then(setFieldsConfig);
     // Rehydrate a previously-captured pin so the chip + payload survive a
     // back-nav from a later step.
     if (
@@ -185,10 +213,62 @@ export function ContactStep() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!email || !line1 || !city || !country) {
-      setError(t("required"));
+
+    // Config-driven, per-field validation. The hub's checkout-field keys map
+    // to this form as: address→line1, area→city, landmark→line2,
+    // governorate→state. Phone is our identity source-of-truth, so it's
+    // required whenever the config marks it required (default true); email is
+    // fully merchant-controlled (enabled + required).
+    const errs: Record<string, string> = {};
+    const reqMsg = locale === "ar" ? "هذا الحقل مطلوب" : "This field is required";
+    const emailCfg = stdField(fieldsConfig, "email");
+    const lastCfg = stdField(fieldsConfig, "last_name");
+    const areaCfg = stdField(fieldsConfig, "area"); // → city
+    const landmarkCfg = stdField(fieldsConfig, "landmark"); // → line2
+
+    if (emailCfg.enabled && emailCfg.required && !email.trim()) {
+      errs.email = reqMsg;
+    } else if (
+      email.trim() &&
+      !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
+    ) {
+      errs.email = locale === "ar" ? "بريد إلكتروني غير صحيح" : "Enter a valid email";
+    }
+    if (stdField(fieldsConfig, "phone").required && !phone.trim()) {
+      errs.phone = reqMsg;
+    }
+    if (stdField(fieldsConfig, "first_name").required && !firstName.trim()) {
+      errs.first_name = reqMsg;
+    }
+    if (lastCfg.enabled && lastCfg.required && !lastName.trim()) {
+      errs.last_name = reqMsg;
+    }
+    if (stdField(fieldsConfig, "address").required && !line1.trim()) {
+      errs.line1 = reqMsg;
+    }
+    if (areaCfg.enabled && areaCfg.required && !city.trim()) {
+      errs.city = reqMsg;
+    }
+    if (landmarkCfg.enabled && landmarkCfg.required && !line2.trim()) {
+      errs.line2 = reqMsg;
+    }
+    if (stdField(fieldsConfig, "governorate").required && !state.trim()) {
+      errs.state = reqMsg;
+    }
+    if (!country) errs.country = reqMsg;
+
+    const customErrors = validateCustomFieldValues(
+      fieldsConfig?.custom_fields || [],
+      customValues,
+      locale,
+    );
+    for (const [id, msg] of Object.entries(customErrors)) errs[`cf:${id}`] = msg;
+
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
       return;
     }
+    setFieldErrors({});
     setSubmitting(true);
 
     // Fire-and-forget WhatsApp opt-in (best-effort; never blocks checkout).
@@ -270,8 +350,8 @@ export function ContactStep() {
       shipping_address: {
         first_name: firstName,
         last_name: lastName,
-        line1,
-        line2: line2 || null,
+        address_line1: line1,
+        address_line2: line2 || null,
         city,
         state: state || null,
         postal_code: postalCode || null,
@@ -288,11 +368,13 @@ export function ContactStep() {
             }
           : {}),
       },
+      custom_fields: customValues,
       // Clear downstream selections that depend on the address.
       selected_shipping_rate_id: null,
       shipping_method: null,
     });
-    router.push(`/${params.domain}/checkout/shipping`);
+    // `auto=1` lets the shipping step skip itself when there's a single rate.
+    router.push(`/${params.domain}/checkout/shipping?auto=1`);
   }
 
   return (
@@ -301,24 +383,37 @@ export function ContactStep() {
       <form onSubmit={submit} className="space-y-5" noValidate>
         <CheckoutCard title={t("contact")} aria-labelledby="contact-heading">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={t("email")} htmlFor="email">
-              <TextInput
-                id="email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </Field>
-            <Field label={t("phone")} htmlFor="phone">
+            {stdField(fieldsConfig, "email").enabled && (
+              <Field label={t("email")} htmlFor="email" error={fieldErrors.email}>
+                <TextInput
+                  id="email"
+                  type="email"
+                  required={stdField(fieldsConfig, "email").required}
+                  autoComplete="email"
+                  aria-invalid={!!fieldErrors.email}
+                  className={fieldErrors.email ? INPUT_INVALID : undefined}
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    clearErr("email");
+                  }}
+                />
+              </Field>
+            )}
+            <Field label={t("phone")} htmlFor="phone" error={fieldErrors.phone}>
               <TextInput
                 id="phone"
                 type="tel"
                 inputMode="tel"
                 autoComplete="tel"
+                required={stdField(fieldsConfig, "phone").required}
+                aria-invalid={!!fieldErrors.phone}
+                className={fieldErrors.phone ? INPUT_INVALID : undefined}
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  clearErr("phone");
+                }}
                 dir="ltr"
               />
             </Field>
@@ -369,64 +464,121 @@ export function ContactStep() {
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={t("firstName")} htmlFor="first_name">
+            <Field
+              label={t("firstName")}
+              htmlFor="first_name"
+              error={fieldErrors.first_name}
+            >
               <TextInput
                 id="first_name"
                 autoComplete="given-name"
+                required={stdField(fieldsConfig, "first_name").required}
+                aria-invalid={!!fieldErrors.first_name}
+                className={fieldErrors.first_name ? INPUT_INVALID : undefined}
                 value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
+                onChange={(e) => {
+                  setFirstName(e.target.value);
+                  clearErr("first_name");
+                }}
               />
             </Field>
-            <Field label={t("lastName")} htmlFor="last_name">
-              <TextInput
-                id="last_name"
-                autoComplete="family-name"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-              />
-            </Field>
+            {stdField(fieldsConfig, "last_name").enabled && (
+              <Field
+                label={t("lastName")}
+                htmlFor="last_name"
+                error={fieldErrors.last_name}
+              >
+                <TextInput
+                  id="last_name"
+                  autoComplete="family-name"
+                  required={stdField(fieldsConfig, "last_name").required}
+                  aria-invalid={!!fieldErrors.last_name}
+                  className={fieldErrors.last_name ? INPUT_INVALID : undefined}
+                  value={lastName}
+                  onChange={(e) => {
+                    setLastName(e.target.value);
+                    clearErr("last_name");
+                  }}
+                />
+              </Field>
+            )}
             <Field
               label={t("address")}
               htmlFor="line1"
               className="sm:col-span-2"
+              error={fieldErrors.line1}
             >
               <TextInput
                 id="line1"
-                required
+                required={stdField(fieldsConfig, "address").required}
                 autoComplete="address-line1"
+                aria-invalid={!!fieldErrors.line1}
+                className={fieldErrors.line1 ? INPUT_INVALID : undefined}
                 value={line1}
-                onChange={(e) => setLine1(e.target.value)}
+                onChange={(e) => {
+                  setLine1(e.target.value);
+                  clearErr("line1");
+                }}
                 dir="auto"
               />
             </Field>
-            <Field label={t("apt")} htmlFor="line2" className="sm:col-span-2">
-              <TextInput
-                id="line2"
-                autoComplete="address-line2"
-                value={line2}
-                onChange={(e) => setLine2(e.target.value)}
-                dir="auto"
-              />
-            </Field>
-            <Field label={t("city")} htmlFor="city">
-              <TextInput
-                id="city"
-                required
-                autoComplete="address-level2"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                dir="auto"
-              />
-            </Field>
-            <Field label={t("governorate")} htmlFor="state">
+            {stdField(fieldsConfig, "landmark").enabled && (
+              <Field
+                label={t("apt")}
+                htmlFor="line2"
+                className="sm:col-span-2"
+                error={fieldErrors.line2}
+              >
+                <TextInput
+                  id="line2"
+                  autoComplete="address-line2"
+                  required={stdField(fieldsConfig, "landmark").required}
+                  aria-invalid={!!fieldErrors.line2}
+                  className={fieldErrors.line2 ? INPUT_INVALID : undefined}
+                  value={line2}
+                  onChange={(e) => {
+                    setLine2(e.target.value);
+                    clearErr("line2");
+                  }}
+                  dir="auto"
+                />
+              </Field>
+            )}
+            {stdField(fieldsConfig, "area").enabled && (
+              <Field label={t("city")} htmlFor="city" error={fieldErrors.city}>
+                <TextInput
+                  id="city"
+                  required={stdField(fieldsConfig, "area").required}
+                  autoComplete="address-level2"
+                  aria-invalid={!!fieldErrors.city}
+                  className={fieldErrors.city ? INPUT_INVALID : undefined}
+                  value={city}
+                  onChange={(e) => {
+                    setCity(e.target.value);
+                    clearErr("city");
+                  }}
+                  dir="auto"
+                />
+              </Field>
+            )}
+            <Field
+              label={t("governorate")}
+              htmlFor="state"
+              error={fieldErrors.state}
+            >
               {/* EG ships a governorate dropdown so the server-side shipping
                   resolver gets a canonical zone; other countries free-text. */}
               {country === "EG" ? (
                 <Select
                   id="state"
                   autoComplete="address-level1"
+                  aria-invalid={!!fieldErrors.state}
+                  className={fieldErrors.state ? INPUT_INVALID : undefined}
                   value={state}
-                  onChange={(e) => setState(e.target.value)}
+                  onChange={(e) => {
+                    setState(e.target.value);
+                    clearErr("state");
+                  }}
                 >
                   <option value="">{t("selectGov")}</option>
                   {EG_GOVERNORATES.map((g) => (
@@ -439,8 +591,13 @@ export function ContactStep() {
                 <TextInput
                   id="state"
                   autoComplete="address-level1"
+                  aria-invalid={!!fieldErrors.state}
+                  className={fieldErrors.state ? INPUT_INVALID : undefined}
                   value={state}
-                  onChange={(e) => setState(e.target.value)}
+                  onChange={(e) => {
+                    setState(e.target.value);
+                    clearErr("state");
+                  }}
                 />
               )}
             </Field>
@@ -474,6 +631,31 @@ export function ContactStep() {
           </div>
         </CheckoutCard>
 
+        {/* Merchant-configured custom checkout fields. */}
+        {(fieldsConfig?.custom_fields?.length ?? 0) > 0 && (
+          <CheckoutCard
+            title={locale === "ar" ? "تفاصيل إضافية" : "Additional details"}
+          >
+            <div className="grid grid-cols-1 gap-4">
+              {[...(fieldsConfig?.custom_fields ?? [])]
+                .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                .map((f) => (
+                  <CustomFieldInput
+                    key={f.id}
+                    field={f}
+                    value={customValues[f.id]}
+                    locale={locale}
+                    error={fieldErrors[`cf:${f.id}`]}
+                    onChange={(v) => {
+                      setCustomValues((prev) => ({ ...prev, [f.id]: v }));
+                      clearErr(`cf:${f.id}`);
+                    }}
+                  />
+                ))}
+            </div>
+          </CheckoutCard>
+        )}
+
         {error && <ErrorBanner>{error}</ErrorBanner>}
 
         <div className="flex items-center justify-between gap-3">
@@ -497,5 +679,100 @@ export function ContactStep() {
         />
       )}
     </>
+  );
+}
+
+/** Render one merchant-defined custom field by type. */
+function CustomFieldInput({
+  field,
+  value,
+  onChange,
+  locale,
+  error,
+}: {
+  field: CustomFieldCfg;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  locale: string;
+  error?: string;
+}) {
+  const isAr = locale === "ar";
+  const label = isAr && field.label_ar ? field.label_ar : field.label;
+  const labelWithOpt = field.required
+    ? label
+    : `${label} (${isAr ? "اختياري" : "optional"})`;
+  const id = `cf-${field.id}`;
+  const invalid = error ? INPUT_INVALID : undefined;
+
+  if (field.type === "checkbox") {
+    return (
+      <div>
+        <label htmlFor={id} className="flex cursor-pointer select-none items-start gap-2.5">
+          <input
+            id={id}
+            type="checkbox"
+            checked={value === true}
+            onChange={(e) => onChange(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-gray-900"
+          />
+          <span className="text-sm text-gray-700">
+            {label}
+            {field.required ? " *" : ""}
+          </span>
+        </label>
+        {error && (
+          <span className="mt-1 block text-xs font-medium text-red-600" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <Field label={labelWithOpt} htmlFor={id} error={error}>
+      {field.type === "textarea" ? (
+        <Textarea
+          id={id}
+          rows={3}
+          required={field.required}
+          aria-invalid={!!error}
+          className={invalid}
+          value={String(value ?? "")}
+          placeholder={field.placeholder || undefined}
+          onChange={(e) => onChange(e.target.value)}
+          dir="auto"
+        />
+      ) : field.type === "select" ? (
+        <Select
+          id={id}
+          required={field.required}
+          aria-invalid={!!error}
+          className={invalid}
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">{isAr ? "اختر" : "Select"}</option>
+          {(field.options || []).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <TextInput
+          id={id}
+          type={field.type === "number" ? "number" : "text"}
+          inputMode={field.type === "number" ? "decimal" : undefined}
+          required={field.required}
+          aria-invalid={!!error}
+          className={invalid}
+          value={String(value ?? "")}
+          placeholder={field.placeholder || undefined}
+          onChange={(e) => onChange(e.target.value)}
+          dir="auto"
+        />
+      )}
+    </Field>
   );
 }
