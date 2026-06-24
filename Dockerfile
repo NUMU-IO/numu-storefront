@@ -32,8 +32,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # anything the browser needs must be passed here via --build-arg.
 ARG NEXT_PUBLIC_NUMU_ENV=production
 ARG NEXT_PUBLIC_BYOT_BUNDLE_HOSTS
+ARG NEXT_PUBLIC_GOOGLE_MAPS_KEY
 ENV NEXT_PUBLIC_NUMU_ENV=$NEXT_PUBLIC_NUMU_ENV
 ENV NEXT_PUBLIC_BYOT_BUNDLE_HOSTS=$NEXT_PUBLIC_BYOT_BUNDLE_HOSTS
+# The CD passes --build-arg NEXT_PUBLIC_GOOGLE_MAPS_KEY; without this ARG/ENV
+# pair it never reaches `next build`, so canUseMaps() stayed false and the
+# checkout map-pin never rendered.
+ENV NEXT_PUBLIC_GOOGLE_MAPS_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_KEY
 
 # `npm run build` runs the prebuild hook (scripts/build-runtime.mjs) which
 # bundles the BYOT federation runtime into public/__numu-runtime/, then
