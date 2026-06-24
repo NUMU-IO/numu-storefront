@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 
 export interface InstaPayPayload {
   provider: "instapay";
@@ -96,6 +97,32 @@ export function InstaPayInstructions({ data, orderNumber, onContinue, locale = "
           remaining % 60,
         ).padStart(2, "0")}`;
 
+  // When the merchant hasn't uploaded a static QR image, render one from the
+  // InstaPay share link (preferred — a phone camera opens the universal link)
+  // or the raw instapay:// payload. The qrcode package draws to a data URL.
+  const qrSource = data.qr_image_url
+    ? ""
+    : data.qr_link_url || data.qr_payload || "";
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!qrSource) {
+      setQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(qrSource, { width: 240, margin: 1, errorCorrectionLevel: "M" })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [qrSource]);
+  const qrSrc = data.qr_image_url || qrDataUrl;
+
   const t = {
     title: isAr ? "أكمل الدفع عبر إنستاباي" : "Complete your InstaPay payment",
     order: isAr ? "طلب رقم" : "Order",
@@ -117,6 +144,12 @@ export function InstaPayInstructions({ data, orderNumber, onContinue, locale = "
   return (
     <div className="mx-auto max-w-lg">
       <div className="mb-4 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/instapay-logo.svg"
+          alt="InstaPay"
+          className="mx-auto mb-3 h-8 w-auto"
+        />
         <h2 className="text-lg font-bold text-gray-900">{t.title}</h2>
         <p className="mt-1 text-sm text-gray-500">
           {t.order} #{orderNumber}
@@ -161,17 +194,17 @@ export function InstaPayInstructions({ data, orderNumber, onContinue, locale = "
         </div>
 
         {/* QR */}
-        {(data.qr_image_url || data.qr_link_url) && (
+        {(qrSrc || data.qr_link_url) && (
           <div className="flex flex-col items-center gap-2 border-t border-gray-100 pt-4">
             <p className="text-xs text-gray-500">{t.scan}</p>
-            {data.qr_image_url ? (
+            {qrSrc && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={data.qr_image_url}
+                src={qrSrc}
                 alt="InstaPay QR"
-                className="h-44 w-44 rounded-lg border border-gray-200 object-contain"
+                className="h-44 w-44 rounded-lg border border-gray-200 bg-white object-contain p-1"
               />
-            ) : null}
+            )}
             {data.qr_link_url && (
               <a
                 href={data.qr_link_url}
