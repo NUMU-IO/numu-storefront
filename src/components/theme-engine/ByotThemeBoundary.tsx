@@ -322,10 +322,17 @@ export default function ByotThemeBoundary({
         }
       }
     };
-    // Mount is keyed on bundle identity only. Prop changes are forwarded
-    // by the update effect below — no remount needed for setting tweaks.
+    // Mount is keyed on bundle identity AND the page identity (type+handle).
+    // Setting tweaks still flow through the update effect (no remount), but a
+    // SAME-ROUTE navigation (e.g. /products/A → /products/B, where Next keeps
+    // this component mounted and only changes the param) must remount: the
+    // SDK `applyDraft` update path carries themeSettings only, NOT `page`, so
+    // without this the bundle's product/collection context (and its images)
+    // would freeze on the first product until a full refresh. Cross-route navs
+    // already remount via their own route segment, so this adds no extra cost
+    // there — it only catches the same-route param switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundleUrl, cssUrl, bundleChecksum]);
+  }, [bundleUrl, cssUrl, bundleChecksum, page?.type, page?.handle]);
 
   // ── ENG-2: no-blank backstop ──────────────────────────────────────────────
   //

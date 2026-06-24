@@ -115,6 +115,14 @@ interface HostRuntimeManifest {
  * clear message. Bundles with `federate: false` skip the check
  * (self-contained — they don't depend on the host runtime).
  */
+// Local-dev QA serves theme bundles from a STABLE URL (`:5173/theme.js`) whose
+// CONTENT changes on every rebuild — so `force-cache` replays a stale bundle
+// (its hashed chunks 404 → the theme's sections, incl. the header, silently
+// vanish). Fetch fresh in development; keep `force-cache` in production where
+// bundle URLs are versioned + immutable (and caching is correct + fast).
+const BUNDLE_CACHE: RequestCache =
+  process.env.NEXT_PUBLIC_NUMU_ENV === "development" ? "no-store" : "force-cache";
+
 async function loadAndVerifyImportMap(
   bundleUrl: string,
 ): Promise<{ map: BundleImportMap | null; ok: boolean; reason?: string }> {
@@ -123,7 +131,7 @@ async function loadAndVerifyImportMap(
   mapUrl.pathname = mapUrl.pathname.replace(/[^/]+$/, "import-map.json");
   let bundleMap: BundleImportMap | null;
   try {
-    const res = await fetch(mapUrl.toString(), { cache: "force-cache" });
+    const res = await fetch(mapUrl.toString(), { cache: BUNDLE_CACHE });
     if (!res.ok) {
       // Older bundles built before plugin 0.2.0 don't ship one. Treat
       // as self-contained — skip the check rather than refuse to load.
@@ -140,7 +148,7 @@ async function loadAndVerifyImportMap(
   let hostManifest: HostRuntimeManifest;
   try {
     const res = await fetch("/__numu-runtime/manifest.json", {
-      cache: "force-cache",
+      cache: BUNDLE_CACHE,
     });
     if (!res.ok) {
       return {
@@ -215,7 +223,7 @@ export async function loadExternalTheme(
   // create a blob URL we can dynamically import. This keeps untrusted JS
   // from running before verification.
   if (options.expectedChecksum) {
-    const res = await fetch(bundleUrl, { cache: "force-cache" });
+    const res = await fetch(bundleUrl, { cache: BUNDLE_CACHE });
     if (!res.ok) {
       throw new Error(
         `Bundle fetch failed: ${res.status} ${res.statusText}`,

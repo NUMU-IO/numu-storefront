@@ -16,7 +16,8 @@ import {
   LocationButton,
   LocationDialog,
   LocationPinnedChip,
-  hasGoogleMapsKey,
+  canUseMaps,
+  onMapsUnavailable,
   type CapturedLocation,
 } from "@/components/checkout/location";
 import {
@@ -103,7 +104,10 @@ export function ContactStep() {
     if (typeof document !== "undefined") {
       setLocale(document.documentElement.lang === "ar" ? "ar" : "en");
     }
-    setMapsEnabled(hasGoogleMapsKey());
+    // Offer the picker only with a key AND no prior auth failure this session;
+    // hide it live if Maps later reports an auth/referrer failure.
+    setMapsEnabled(canUseMaps());
+    const unsubMaps = onMapsUnavailable(() => setMapsEnabled(false));
 
     // Hydrate from sessionStorage so a back-nav doesn't blank the form.
     const s = readCheckoutState();
@@ -148,6 +152,8 @@ export function ContactStep() {
         /* anonymous visitor — fine */
       }
     })();
+
+    return () => unsubMaps();
   }, []);
 
   /**
@@ -479,8 +485,10 @@ export function ContactStep() {
       </form>
 
       {/* Lazily-mounted only when enabled. The dialog itself defers the
-          Google Maps script until it's open. */}
-      {mapsEnabled && (
+          Google Maps script until it's open. Kept mounted while open even if
+          Maps just became unavailable, so a mid-session auth failure shows the
+          dialog's clean manual-entry fallback rather than vanishing. */}
+      {(mapsEnabled || locationOpen) && (
         <LocationDialog
           open={locationOpen}
           onOpenChange={setLocationOpen}

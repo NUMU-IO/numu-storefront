@@ -88,20 +88,28 @@ export default function StoreError({
     <main
       role="alert"
       aria-labelledby="error-title"
-      className="min-h-screen flex items-center justify-center px-4"
+      className="flex min-h-screen items-center justify-center bg-[var(--numu-paper)] px-4 [font-family:var(--numu-sans)]"
     >
-      <div className="text-center max-w-md">
-        <h1 id="error-title" className="text-2xl font-bold text-red-700">
+      <div className="w-full max-w-md rounded-[var(--numu-radius)] border border-[var(--numu-border)] bg-[var(--numu-surface)] p-8 text-center shadow-[0_22px_50px_-24px_rgba(12,45,84,0.32)] sm:p-10">
+        <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-[#c14a1c]">
+          Error
+        </p>
+        <h1
+          id="error-title"
+          className="text-2xl font-bold text-[var(--numu-ink)] [font-family:var(--numu-display)]"
+        >
           Something went wrong
         </h1>
         {error.message && (
-          <p className="text-gray-700 mt-2">{error.message}</p>
+          <p className="mt-3 text-sm text-[var(--numu-ink-soft)]">
+            {error.message}
+          </p>
         )}
         <button
           type="button"
           onClick={reset}
           autoFocus
-          className="mt-6 inline-flex items-center justify-center rounded-md bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
+          className="numu-btn-navy mt-7 inline-flex min-h-11 items-center justify-center rounded-full px-7 py-2.5 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--numu-navy)]"
         >
           Try again
         </button>

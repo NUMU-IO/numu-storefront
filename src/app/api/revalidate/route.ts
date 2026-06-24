@@ -83,9 +83,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const started = Date.now();
+  const tagsReceived = [...new Set(tags)];
+  const pathsReceived = [...new Set(paths)];
   const revalidated = { paths: [] as string[], tags: [] as string[] };
+  const errors: { kind: "tag" | "path"; value: string; error: string }[] = [];
 
-  for (const tag of new Set(tags)) {
+  for (const tag of tagsReceived) {
     try {
       // This route is called by an EXTERNAL system (the FastAPI backend) that
       // requires IMMEDIATE expiry. Per the Next 16 docs, the string-profile
@@ -97,19 +101,38 @@ export async function POST(request: NextRequest) {
       revalidateTag(tag, { expire: 0 });
       revalidated.tags.push(tag);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push({ kind: "tag", value: tag, error: msg });
       console.warn(`[revalidate] Failed to revalidate tag "${tag}":`, err);
     }
   }
 
-  for (const path of new Set(paths)) {
+  for (const path of pathsReceived) {
     try {
       // `scope` controls layout vs page invalidation; default is "page".
       revalidatePath(path, scope === "layout" ? "layout" : "page");
       revalidated.paths.push(path);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push({ kind: "path", value: path, error: msg });
       console.warn(`[revalidate] Failed to revalidate path "${path}":`, err);
     }
   }
 
-  return NextResponse.json({ revalidated, success: true });
+  const durationMs = Date.now() - started;
+  const success = errors.length === 0;
+
+  // Structured response so the FastAPI caller can report an honest freshness
+  // state back to the merchant UI. `revalidated` is kept for backward-compat
+  // with older callers that read `revalidated.tags`.
+  return NextResponse.json({
+    success,
+    tagsReceived,
+    tagsRevalidated: revalidated.tags,
+    pathsReceived,
+    pathsRevalidated: revalidated.paths,
+    durationMs,
+    errors,
+    revalidated,
+  });
 }

@@ -43,11 +43,26 @@ interface CartLine {
   product_name?: string;
   image_url?: string | null;
   variant_name?: string | null;
+  // The /api/cart proxy may return the SDK CartItem shape instead
+  // (`name` + per-unit `price` in cents) — tolerate both so the line
+  // renders the real name + amount rather than a fallback id + 0.00.
+  name?: string;
+  price?: number;
 }
 
-/** Per-line amount in cents — prefer the backend's `total_price`. */
+/** The line's display name across both cart payload shapes. */
+function lineName(l: CartLine): string | undefined {
+  return l.product_name || l.name || undefined;
+}
+
+/** Per-line amount in cents — prefer the backend's `total_price`, then a
+ *  per-unit price (`unit_price` or the SDK shape's `price`) × quantity. */
 function lineTotal(l: CartLine): number {
-  return l.total_price ?? l.subtotal ?? (l.unit_price ?? 0) * l.quantity;
+  return (
+    l.total_price ??
+    l.subtotal ??
+    (l.unit_price ?? l.price ?? 0) * l.quantity
+  );
 }
 
 /** An automatic (non-coupon) promotion line. */
@@ -150,18 +165,18 @@ function TotalRow({
     <div
       className={
         emphasis
-          ? "flex items-center justify-between border-t border-gray-200 pt-3 text-base font-semibold text-gray-900"
+          ? "flex items-center justify-between border-t-[length:var(--ck-frame-width)] border-[var(--ck-frame)] pt-3 text-base text-[var(--ck-fg)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)]"
           : "flex items-center justify-between text-sm"
       }
     >
-      <span className={emphasis ? "" : "text-gray-500"}>{label}</span>
+      <span className={emphasis ? "" : "text-[var(--ck-muted)]"}>{label}</span>
       <span
         className={
           emphasis
             ? ""
             : positive
               ? "font-medium text-emerald-700"
-              : "font-medium text-gray-900"
+              : "font-medium text-[var(--ck-fg)]"
         }
       >
         {value}
@@ -296,10 +311,10 @@ function CouponField({
   }
 
   return (
-    <div className="mt-4 border-t border-gray-100 pt-4">
+    <div className="mt-4 border-t border-[var(--ck-border)] pt-4">
       <label
         htmlFor="order-summary-coupon"
-        className="mb-1.5 block text-sm font-medium text-gray-700"
+        className="mb-1.5 block text-xs text-[var(--ck-fg)] [font-weight:var(--ck-label-weight)] [letter-spacing:var(--ck-label-tracking)] [text-transform:var(--ck-label-transform)]"
       >
         {c("label")}
       </label>
@@ -319,13 +334,13 @@ function CouponField({
           dir="ltr"
           placeholder={isAr ? "أدخل الكود" : "Enter code"}
           disabled={busy}
-          className="block w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm uppercase text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 placeholder:normal-case focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 disabled:cursor-not-allowed disabled:bg-gray-50"
+          className="block w-full rounded-[var(--ck-radius-sm)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] px-3.5 py-2 text-sm uppercase text-[var(--ck-fg)] outline-none transition-colors placeholder:text-[var(--ck-muted)] placeholder:normal-case focus:border-[var(--ck-ring)] focus:ring-2 focus:ring-[var(--ck-ring)]/25 disabled:cursor-not-allowed disabled:opacity-60"
         />
         <button
           type="button"
           onClick={apply}
           disabled={busy || !code.trim()}
-          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-gray-900 bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex shrink-0 items-center justify-center rounded-full bg-[var(--ck-button)] px-5 py-2 text-sm font-semibold text-[var(--ck-button-text)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? c("applying") : c("apply")}
         </button>
@@ -350,7 +365,7 @@ function Lines({ cart, locale }: { cart: Cart; locale: string }) {
           key={`${l.product_id}-${l.variant_id || ""}-${i}`}
           className="flex items-start gap-3"
         >
-          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] bg-[var(--ck-surface-2)]">
             {l.image_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -359,24 +374,24 @@ function Lines({ cart, locale }: { cart: Cart; locale: string }) {
                 className="h-full w-full object-cover"
               />
             ) : (
-              <span className="flex h-full w-full items-center justify-center text-gray-300">
+              <span className="flex h-full w-full items-center justify-center text-[var(--ck-muted)]">
                 <BagIcon />
               </span>
             )}
-            <span className="absolute -end-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-gray-700 px-1 text-[10px] font-semibold text-white">
+            <span className="absolute -end-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ck-fg)] px-1 text-[10px] font-semibold text-[var(--ck-surface)]">
               {l.quantity}
             </span>
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-gray-900">
-              {l.product_name ||
+            <p className="truncate text-sm font-medium text-[var(--ck-fg)]">
+              {lineName(l) ||
                 `${isAr ? "منتج" : "Item"} ${l.product_id.slice(0, 8)}`}
             </p>
             {l.variant_name && (
-              <p className="truncate text-xs text-gray-500">{l.variant_name}</p>
+              <p className="truncate text-xs text-[var(--ck-muted)]">{l.variant_name}</p>
             )}
           </div>
-          <span className="shrink-0 text-sm font-medium text-gray-900">
+          <span className="shrink-0 text-sm font-medium text-[var(--ck-fg)]">
             {formatCents(lineTotal(l), currency)}
           </span>
         </li>
@@ -485,7 +500,7 @@ function Breakdown({
       />
 
       {shipping == null && (
-        <p className="pt-1 text-xs text-gray-400">
+        <p className="pt-1 text-xs text-[var(--ck-muted)]">
           {isAr
             ? "تُحسب الشحن والضرائب في الخطوات التالية."
             : "Shipping & taxes calculated at the next steps."}
@@ -505,13 +520,75 @@ export function OrderSummary() {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/cart", { cache: "no-store" });
-      if (res.ok) {
-        const body = await res.json();
-        setCart((body?.data || body) as Cart);
-        setFailed(false);
-      } else {
+      if (!res.ok) {
         setFailed(true);
+        return;
       }
+      const body = await res.json();
+      const c = (body?.data || body) as Cart;
+      setFailed(false);
+
+      // Preview the automatic-offer discount (BOGO / %, etc.) so the Total
+      // matches what the order will be charged — the cart response itself
+      // doesn't carry computed offers, only the per-line subtotal. We hit the
+      // same engine the order-create path runs (/api/cart/discounts →
+      // DiscountCalculator) and fold the result in as an offers line the
+      // Breakdown already knows how to render. Best-effort: any miss leaves
+      // the cart untouched (subtotal + shipping only) — never throws.
+      const items = (c.items || [])
+        .map((l) => {
+          const qty = l.quantity || 0;
+          const unit =
+            l.unit_price ??
+            l.price ??
+            (qty > 0 ? Math.round(lineTotal(l) / qty) : 0);
+          return {
+            product_id: l.product_id,
+            quantity: qty,
+            unit_price_cents: unit,
+          };
+        })
+        .filter((it) => it.product_id && it.quantity > 0);
+
+      if (items.length > 0) {
+        try {
+          const couponCode = readCheckoutState().coupon_code;
+          const dr = await fetch("/api/cart/discounts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            cache: "no-store",
+            body: JSON.stringify({
+              items,
+              applied_codes: couponCode ? [couponCode] : [],
+            }),
+          });
+          if (dr.ok) {
+            const dj = await dr.json();
+            const out = dj?.data || dj;
+            // Prefer the engine's NAMED snapshot ({id,title,title_ar?,amount})
+            // so the line reads "Welcome 10 −EGP 30" with the real promo name.
+            const named: PromotionLine[] = Array.isArray(out?.applied_promotions)
+              ? out.applied_promotions.filter(
+                  (p: PromotionLine) => p && Number(p.amount) > 0,
+                )
+              : [];
+            const auto = Number(out?.automatic_discount_cents || 0);
+            if (named.length > 0) {
+              c.applied_promotions = named;
+            } else if (auto > 0) {
+              // Fallback: a generic aggregate line if a name wasn't resolved.
+              c.applied_promotions = [
+                { id: "auto-offers", title: "Offer", title_ar: "العرض", amount: auto },
+              ];
+            }
+          }
+        } catch {
+          /* best-effort — render the cart without the offer line */
+        }
+      }
+
+      setCart(c);
     } catch {
       setFailed(true);
     }
@@ -566,7 +643,7 @@ export function OrderSummary() {
   const body = (() => {
     if (failed) {
       return (
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-[var(--ck-muted)]">
           {isAr ? "تعذّر تحميل الملخص." : "Couldn't load the summary."}
         </p>
       );
@@ -576,10 +653,10 @@ export function OrderSummary() {
         <div className="space-y-3" aria-hidden>
           {[0, 1].map((i) => (
             <div key={i} className="flex items-center gap-3">
-              <div className="h-14 w-14 shrink-0 animate-pulse rounded-lg bg-gray-100" />
+              <div className="h-14 w-14 shrink-0 animate-pulse rounded-[var(--ck-radius-sm)] bg-[var(--ck-surface-2)]" />
               <div className="flex-1 space-y-2">
-                <div className="h-3 w-3/4 animate-pulse rounded bg-gray-100" />
-                <div className="h-3 w-1/3 animate-pulse rounded bg-gray-100" />
+                <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--ck-surface-2)]" />
+                <div className="h-3 w-1/3 animate-pulse rounded bg-[var(--ck-surface-2)]" />
               </div>
             </div>
           ))}
@@ -588,7 +665,7 @@ export function OrderSummary() {
     }
     if (cart.items.length === 0) {
       return (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-[var(--ck-muted)]">
           {isAr ? "سلة التسوق فارغة." : "Your cart is empty."}
         </p>
       );
@@ -620,14 +697,14 @@ export function OrderSummary() {
     <>
       {/* Mobile: collapsible bar (above the form). */}
       <div className="lg:hidden">
-        <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-[var(--ck-radius)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] [box-shadow:var(--ck-shadow)]">
           <button
             type="button"
             onClick={() => setOpenMobile((o) => !o)}
             aria-expanded={openMobile}
             className="flex w-full items-center justify-between gap-3 px-4 py-3 text-start"
           >
-            <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <span className="flex items-center gap-2 text-sm font-medium text-[var(--ck-fg)]">
               <BagIcon />
               <span>
                 {openMobile
@@ -640,25 +717,25 @@ export function OrderSummary() {
               </span>
               <ChevronIcon open={openMobile} />
             </span>
-            <span className="text-sm font-semibold text-gray-900">
+            <span className="text-sm font-semibold text-[var(--ck-fg)]">
               {formatCents(collapsedTotal, currency)}
             </span>
           </button>
           {openMobile && (
-            <div className="border-t border-gray-100 p-4">{body}</div>
+            <div className="border-t border-[var(--ck-border)] p-4">{body}</div>
           )}
         </div>
       </div>
 
       {/* Desktop: sticky card. */}
       <aside className="hidden lg:block">
-        <div className="sticky top-8 rounded-2xl border border-gray-200/80 bg-white p-6 shadow-sm">
+        <div className="sticky top-8 rounded-[var(--ck-radius)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] p-6 [box-shadow:var(--ck-shadow)]">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-base font-semibold tracking-tight text-gray-900">
+            <h2 className="text-base text-[var(--ck-fg)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)]">
               {heading}
             </h2>
             {itemCount > 0 && (
-              <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+              <span className="rounded-full bg-[var(--ck-surface-2)] px-2.5 py-0.5 text-xs font-medium text-[var(--ck-muted)]">
                 {itemCount} {isAr ? "منتج" : itemCount === 1 ? "item" : "items"}
               </span>
             )}

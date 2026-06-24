@@ -1,4 +1,9 @@
-import { fetchStoreByDomain, fetchProductBySlug, fetchThemeSettings } from "@/lib/api-client";
+import {
+  fetchStoreByDomain,
+  fetchProductBySlug,
+  fetchThemeSettings,
+  fetchProducts,
+} from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -98,6 +103,11 @@ export default async function ProductPage({ params }: PageProps) {
   const themeRaw = await fetchThemeSettings(store.id);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
 
+  // Catalogue slice so the bundle's useProducts() has data ON the PDP — the
+  // single-product fetch above doesn't populate the catalogue, which left the
+  // theme's "you may also like" rail empty. Best-effort; PDP renders without it.
+  const catalogue = await fetchProducts(store.id, 12).catch(() => []);
+
   const isByotTheme =
     !!themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id);
@@ -172,7 +182,7 @@ export default async function ProductPage({ params }: PageProps) {
             type: "product",
             title: product?.name,
             handle: slug,
-            data: product ? { product } : undefined,
+            data: product ? { product, products: catalogue } : undefined,
           }}
           // ENG-2 defense-in-depth: every registered theme ships a `product`
           // template, but if a bundle renders blank fall back to the functional

@@ -110,17 +110,23 @@ export function PlaceSearch({ onPlacePicked, placeholder }: PlaceSearchProps) {
           by Google. Our modal sits high in the stack, so bump pac-container
           above it. Mobile-first: 44px tap targets, 15px query text. */}
       <style>{`
-        .pac-container { z-index: 10000 !important; box-shadow: 0 8px 24px rgba(0,0,0,0.18); border-radius: 8px; margin-top: 4px; border: none; }
-        .pac-item { padding: 12px 12px; font-size: 14px; line-height: 1.3; cursor: pointer; min-height: 44px; display: flex; align-items: center; border-top: 1px solid #f3f4f6; }
+        .pac-container { z-index: 10000 !important; box-shadow: 0 8px 24px rgba(0,0,0,0.18); border-radius: var(--ck-radius-sm, 8px); margin-top: 4px; border: none; }
+        .pac-item { padding: 12px 12px; font-size: 14px; line-height: 1.3; cursor: pointer; min-height: 44px; display: flex; align-items: center; border-top: 1px solid var(--ck-border, #f3f4f6); }
         .pac-item:first-child { border-top: none; }
         .pac-item-query { font-size: 15px; font-weight: 600; }
         .pac-icon { margin-top: 0; }
       `}</style>
-      <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-gray-400">
+      <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-[var(--ck-muted,#9ca3af)]">
         <SearchIcon size={16} />
       </span>
       <input
         ref={inputRef}
+        // id + name so it's a well-formed form field (silences the DevTools
+        // "form field element should have an id or name attribute" issue) and
+        // so browser/extension autofill can target it predictably.
+        id="numu-location-search"
+        name="numu-location-search"
+        aria-label={placeholder}
         type="text"
         autoComplete="off"
         inputMode="search"
@@ -129,11 +135,11 @@ export function PlaceSearch({ onPlacePicked, placeholder }: PlaceSearchProps) {
         disabled={!ready}
         // h-11 (44px) = iOS HIG min tap target. text-base on mobile avoids
         // iOS Safari's 16px input zoom-on-focus; desktop tightens to text-sm.
-        className="w-full h-11 ps-10 pe-3 text-base sm:text-sm rounded-lg border border-gray-200 bg-white shadow-md outline-none transition-colors focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 disabled:opacity-50"
+        className="w-full h-11 ps-10 pe-3 text-base sm:text-sm rounded-[var(--ck-radius-sm,0.5rem)] border-[length:var(--ck-frame-width,1px)] border-[var(--ck-frame,#e5e7eb)] bg-[var(--ck-surface,#fff)] shadow-md outline-none transition-colors focus:border-[var(--ck-ring,#111827)] focus:ring-2 focus:ring-[var(--ck-ring,#111827)]/25 disabled:opacity-50"
         dir="auto"
       />
       {!ready && (
-        <span className="absolute inset-y-0 end-3 flex items-center text-gray-400">
+        <span className="absolute inset-y-0 end-3 flex items-center text-[var(--ck-muted,#9ca3af)]">
           <SpinnerIcon size={16} className="animate-spin" />
         </span>
       )}

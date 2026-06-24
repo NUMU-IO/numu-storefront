@@ -55,9 +55,9 @@ export default function StoreLoading() {
       role="status"
       aria-live="polite"
       aria-label="Loading"
-      className="min-h-screen flex items-center justify-center px-4"
+      className="flex min-h-screen items-center justify-center bg-[var(--numu-paper)] px-4"
     >
-      <div className="flex items-center gap-3 text-gray-600 motion-safe:animate-pulse">
+      <div className="flex items-center gap-3 text-[var(--numu-navy)] motion-safe:animate-pulse [font-family:var(--numu-sans)]">
         <svg
           className="h-5 w-5"
           aria-hidden="true"

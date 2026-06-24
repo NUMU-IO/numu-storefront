@@ -88,9 +88,11 @@ export default function BuiltInSearchResults({
   return (
     <main
       dir={ar ? "rtl" : "ltr"}
-      className="max-w-6xl mx-auto px-4 py-10"
+      className="mx-auto max-w-6xl px-4 py-10 [font-family:var(--numu-sans)]"
     >
-      <h1 className="text-2xl font-bold mb-4">{t.title}</h1>
+      <h1 className="mb-4 text-2xl font-bold text-[var(--numu-ink)] [font-family:var(--numu-display)]">
+        {t.title}
+      </h1>
 
       <div className="mb-6 max-w-md">
         <input
@@ -98,15 +100,15 @@ export default function BuiltInSearchResults({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder={t.placeholder}
-          className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm outline-none focus:border-gray-900"
+          className="w-full rounded-[var(--numu-radius)] border border-[var(--numu-border)] bg-[var(--numu-surface)] px-4 py-2.5 text-sm text-[var(--numu-ink)] outline-none transition-colors focus:border-[var(--numu-navy)] focus:ring-2 focus:ring-[var(--numu-navy)]/20"
           aria-label={t.placeholder}
         />
       </div>
 
-      <p className="text-sm text-gray-500 mb-6">{t.count(results.length)}</p>
+      <p className="mb-6 text-sm text-[var(--numu-ink-soft)]">{t.count(results.length)}</p>
 
       {results.length === 0 ? (
-        <p className="text-gray-600">{t.empty}</p>
+        <p className="text-[var(--numu-ink-soft)]">{t.empty}</p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8">
           {results.map((p) => {
@@ -122,7 +124,7 @@ export default function BuiltInSearchResults({
                 href={productHref(p)}
                 className="group block"
               >
-                <div className="aspect-square w-full overflow-hidden rounded-lg bg-gray-100">
+                <div className="aspect-square w-full overflow-hidden rounded-[var(--numu-radius)] border border-[var(--numu-border)] bg-[var(--numu-cream)]">
                   {img ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -135,23 +137,23 @@ export default function BuiltInSearchResults({
                     <div className="h-full w-full" />
                   )}
                 </div>
-                <h3 className="mt-2 text-sm font-medium text-gray-900 line-clamp-2">
+                <h3 className="mt-2 line-clamp-2 text-sm font-medium text-[var(--numu-ink)]">
                   {p.name ?? p.title ?? ""}
                 </h3>
                 <div className="mt-1 flex items-center gap-2 text-sm">
                   {typeof p.price === "number" && (
-                    <span className="font-semibold">
+                    <span className="font-semibold text-[var(--numu-ink)]">
                       {formatMajor(p.price, ccy)}
                     </span>
                   )}
                   {onSale && (
-                    <span className="text-gray-400 line-through">
+                    <span className="text-[var(--numu-ink-soft)] line-through">
                       {formatMajor(p.compare_at_price as number, ccy)}
                     </span>
                   )}
                 </div>
                 {p.in_stock === false && (
-                  <span className="mt-1 inline-block text-xs text-gray-400">
+                  <span className="mt-1 inline-block text-xs text-[var(--numu-ink-soft)]">
                     {t.soldOut}
                   </span>
                 )}

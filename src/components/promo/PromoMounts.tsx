@@ -18,17 +18,26 @@ export function PromoMounts({
   floatingWidgets,
   cookieBanner,
   locale = "ar",
+  brandVars,
 }: {
   popups: ResolvedPromotion[];
   floatingWidgets: ResolvedPromotion[];
   cookieBanner: ResolvedPromotion | null;
   locale?: string;
+  /** `--ck-*` brand tokens (from the active theme) for the cookie banner. */
+  brandVars?: Record<string, string>;
 }) {
   const popup = popups?.[0] ?? null;
   const widget = floatingWidgets?.[0] ?? null;
   return (
     <>
-      {cookieBanner && <CookieBanner promotion={cookieBanner} locale={locale} />}
+      {cookieBanner && (
+        <CookieBanner
+          promotion={cookieBanner}
+          locale={locale}
+          brandVars={brandVars}
+        />
+      )}
       {widget && (
         <FloatingWidget
           promotion={widget}

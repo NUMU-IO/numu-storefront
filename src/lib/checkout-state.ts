@@ -105,6 +105,15 @@ export function writeCheckoutState(state: CheckoutState): void {
 export function patchCheckoutState(patch: Partial<CheckoutState>): CheckoutState {
   const next = { ...readCheckoutState(), ...patch };
   writeCheckoutState(next);
+  // Notify live UI that checkout state changed. The OrderSummary lives in the
+  // persistent checkout LAYOUT (mounted once on the contact step) and only
+  // re-reads on this event — without it, the Shipping line + Total never
+  // reflect the rate the ShippingStep just selected (they'd stay at the
+  // step-1 "calculated at the next steps" / subtotal-only state). Centralizing
+  // the dispatch here covers every patch site (shipping, coupon, pickup, …).
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("numu:checkout:updated"));
+  }
   return next;
 }
 

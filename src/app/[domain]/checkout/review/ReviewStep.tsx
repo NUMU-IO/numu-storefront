@@ -17,6 +17,7 @@ import {
   hasPaymentStep,
   readCheckoutState,
 } from "@/lib/checkout-state";
+import { resolveApiError } from "@/lib/api-error";
 import { useAttribution } from "@/components/layout/AttributionProvider";
 import { getSessionFingerprint } from "@/lib/meta-pixel";
 import type { CheckoutResponse } from "@/types/checkout";
@@ -155,29 +156,16 @@ export function ReviewStep() {
         },
         body: JSON.stringify(payload),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => null);
       if (!res.ok) {
-        const detail = body?.detail;
-        // COD-trust gate (403 cod_trust_blocked / 400 phone_required_for_cod):
-        // the backend returns a localized message + prepaid fallbacks. Show the
-        // friendly message and, for a hard block, surface a pay-online path —
-        // never dump the raw error object on the buyer.
-        if (detail && typeof detail === "object" && detail.code) {
-          setError(
-            (locale === "ar" ? detail.message_ar : detail.message_en) ||
-              detail.message_en ||
-              detail.message_ar ||
-              `Checkout failed (${res.status})`,
-          );
-          setCodBlocked(detail.code === "cod_trust_blocked");
-          setSubmitting(false);
-          return;
-        }
-        const fallback =
-          detail || body?.error || `Checkout failed (${res.status})`;
-        setError(
-          typeof fallback === "string" ? fallback : JSON.stringify(fallback),
-        );
+        // Resolve a clean, localized message from whatever envelope shape the
+        // backend/proxy returned ({error:{…}} | {detail:{…}} | string | …) —
+        // never dump the raw `{"code":…,"message":…}` object on the buyer. The
+        // returned `code` still lets us branch on the COD-trust hard block to
+        // offer a pay-online path.
+        const { message, code } = resolveApiError(body, res.status, locale);
+        setError(message);
+        setCodBlocked(code === "cod_trust_blocked");
         setSubmitting(false);
         return;
       }
@@ -200,7 +188,9 @@ export function ReviewStep() {
         `/${params.domain}/checkout/${data.order_id}/thank-you?n=${encodeURIComponent(data.order_number)}`,
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // Network/parse failure — resolve to a friendly localized message
+      // rather than leaking an Error string.
+      setError(resolveApiError(e, 0, locale).message);
       setSubmitting(false);
     }
   }
