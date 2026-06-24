@@ -19,7 +19,8 @@ import {
 } from "@/lib/checkout-state";
 import { resolveApiError } from "@/lib/api-error";
 import { useAttribution } from "@/components/layout/AttributionProvider";
-import { getSessionFingerprint } from "@/lib/meta-pixel";
+import { PaymobPixel } from "@/components/checkout/PaymobPixel";
+import { KashierCheckout } from "@/components/checkout/KashierCheckout";
 import type { CheckoutResponse } from "@/types/checkout";
 
 /**
@@ -79,6 +80,22 @@ export function ReviewStep() {
   const [codBlocked, setCodBlocked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [state] = useState(() => readCheckoutState());
+  // Embedded-payment overlays (parity with the bazaar): Paymob Pixel and
+  // Kashier return no payment_url — they render inline and the order is
+  // confirmed via webhook, so we poll on the processing page afterwards.
+  const [pixelData, setPixelData] = useState<{
+    clientSecret: string;
+    publicKey: string;
+    orderId: string;
+    orderNumber: string;
+  } | null>(null);
+  const [kashierData, setKashierData] = useState<{
+    sessionUrl: string;
+    amount?: string;
+    currency?: string;
+    orderId: string;
+    orderNumber: string;
+  } | null>(null);
 
   const t = (k: keyof typeof T) => (locale === "ar" ? T[k].ar : T[k].en);
 
@@ -170,7 +187,7 @@ export function ReviewStep() {
         return;
       }
       const data = (body?.data || body) as CheckoutResponse;
-      if (data.payment_url) {
+      const stashPending = () => {
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(
             "numu_checkout_pending_order",
@@ -180,9 +197,46 @@ export function ReviewStep() {
             }),
           );
         }
+      };
+
+      // Redirect-based gateways (Fawry hosted page, InstaPay link, etc.).
+      if (data.payment_url) {
+        stashPending();
         window.location.assign(data.payment_url);
         return;
       }
+
+      // Paymob Pixel — embedded card form. Render inline; the overlay's
+      // onComplete forwards to the processing poller (webhook confirms).
+      if (data.paymob_client_secret && data.paymob_public_key) {
+        stashPending();
+        setPixelData({
+          clientSecret: data.paymob_client_secret,
+          publicKey: data.paymob_public_key,
+          orderId: data.order_id,
+          orderNumber: data.order_number,
+        });
+        return;
+      }
+
+      // Kashier — embedded iframe session.
+      const pd = data.payment_data as
+        | { provider?: string; session_url?: string; amount?: string; currency?: string }
+        | null
+        | undefined;
+      if (pd && pd.provider === "kashier" && pd.session_url) {
+        stashPending();
+        setKashierData({
+          sessionUrl: pd.session_url,
+          amount: pd.amount,
+          currency: pd.currency,
+          orderId: data.order_id,
+          orderNumber: data.order_number,
+        });
+        return;
+      }
+
+      // COD / already-paid / data-only providers → straight to thank-you.
       clearCheckoutState();
       router.replace(
         `/${params.domain}/checkout/${data.order_id}/thank-you?n=${encodeURIComponent(data.order_number)}`,
@@ -197,6 +251,63 @@ export function ReviewStep() {
 
   const a = state.shipping_address;
   const cartEmpty = cart !== null && cart.items.length === 0;
+
+  // ── Embedded payment overlays (replace the form while paying) ──────
+  if (pixelData) {
+    return (
+      <div className="mx-auto max-w-lg">
+        <h2 className="mb-1 text-lg font-bold text-gray-900">
+          {locale === "ar" ? "إتمام الدفع" : "Complete payment"}
+        </h2>
+        <p className="mb-4 text-sm text-gray-500">
+          {locale === "ar" ? "طلب رقم" : "Order"} #{pixelData.orderNumber}
+        </p>
+        <PaymobPixel
+          publicKey={pixelData.publicKey}
+          clientSecret={pixelData.clientSecret}
+          locale={locale}
+          onComplete={(success) => {
+            if (success) {
+              clearCheckoutState();
+              router.replace(
+                `/${params.domain}/checkout/processing?order=${encodeURIComponent(pixelData.orderId)}`,
+              );
+            } else {
+              setError(
+                locale === "ar"
+                  ? "فشل الدفع. حاول مرة أخرى أو اختر طريقة دفع أخرى."
+                  : "Payment failed. Please try again or choose another method.",
+              );
+              setPixelData(null);
+              setSubmitting(false);
+            }
+          }}
+          onCancel={() => {
+            setError(locale === "ar" ? "تم إلغاء الدفع." : "Payment cancelled.");
+            setPixelData(null);
+            setSubmitting(false);
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (kashierData) {
+    return (
+      <KashierCheckout
+        sessionUrl={kashierData.sessionUrl}
+        amount={kashierData.amount}
+        currency={kashierData.currency}
+        orderNumber={kashierData.orderNumber}
+        locale={locale}
+        onCancel={() => {
+          setError(locale === "ar" ? "تم إلغاء الدفع." : "Payment cancelled.");
+          setKashierData(null);
+          setSubmitting(false);
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -216,8 +327,8 @@ export function ReviewStep() {
             <p className="font-medium text-gray-900">
               {a.first_name} {a.last_name}
             </p>
-            <p>{a.line1}</p>
-            {a.line2 && <p>{a.line2}</p>}
+            <p>{a.address_line1}</p>
+            {a.address_line2 && <p>{a.address_line2}</p>}
             <p>
               {a.city}
               {a.state ? `, ${a.state}` : ""}
