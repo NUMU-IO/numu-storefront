@@ -10,8 +10,11 @@
 export interface CheckoutAddress {
   first_name: string;
   last_name: string;
-  line1: string;
-  line2?: string | null;
+  // Field names match the backend's OrderAddressRequest exactly — the
+  // payload is forwarded verbatim by /api/checkout, which has no aliases
+  // (a `line1` key would be dropped and address_line1 would 422).
+  address_line1: string;
+  address_line2?: string | null;
   city: string;
   state?: string | null;
   postal_code?: string | null;
@@ -46,5 +49,10 @@ export interface CheckoutResponse {
   currency: string;
   payment_status: string;
   payment_url?: string | null;
+  // Provider-specific payload for client-side rendering, e.g. Kashier
+  // ({ provider: "kashier", session_url, amount, currency }), InstaPay, Fawry.
   payment_data?: Record<string, unknown> | null;
+  // Paymob Pixel embedded checkout credentials (card stores).
+  paymob_client_secret?: string | null;
+  paymob_public_key?: string | null;
 }
