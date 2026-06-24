@@ -22,6 +22,10 @@ import { getSessionFingerprint } from "@/lib/meta-pixel";
 import { useAttribution } from "@/components/layout/AttributionProvider";
 import { PaymobPixel } from "@/components/checkout/PaymobPixel";
 import { KashierCheckout } from "@/components/checkout/KashierCheckout";
+import {
+  InstaPayInstructions,
+  type InstaPayPayload,
+} from "@/components/checkout/InstaPayInstructions";
 import type { CheckoutResponse } from "@/types/checkout";
 
 /**
@@ -94,6 +98,14 @@ export function ReviewStep() {
     sessionUrl: string;
     amount?: string;
     currency?: string;
+    orderId: string;
+    orderNumber: string;
+  } | null>(null);
+  // InstaPay is manual-verification (no hosted page): we render the IPA +
+  // reference + QR instructions inline; the order stays PENDING until the
+  // merchant confirms the transfer.
+  const [instapayData, setInstapayData] = useState<{
+    data: InstaPayPayload;
     orderId: string;
     orderNumber: string;
   } | null>(null);
@@ -237,6 +249,17 @@ export function ReviewStep() {
         return;
       }
 
+      // InstaPay — manual bank transfer; show IPA + reference + QR inline.
+      if (pd && pd.provider === "instapay") {
+        stashPending();
+        setInstapayData({
+          data: data.payment_data as unknown as InstaPayPayload,
+          orderId: data.order_id,
+          orderNumber: data.order_number,
+        });
+        return;
+      }
+
       // COD / already-paid / data-only providers → straight to thank-you.
       clearCheckoutState();
       router.replace(
@@ -305,6 +328,22 @@ export function ReviewStep() {
           setError(locale === "ar" ? "تم إلغاء الدفع." : "Payment cancelled.");
           setKashierData(null);
           setSubmitting(false);
+        }}
+      />
+    );
+  }
+
+  if (instapayData) {
+    return (
+      <InstaPayInstructions
+        data={instapayData.data}
+        orderNumber={instapayData.orderNumber}
+        locale={locale}
+        onContinue={() => {
+          clearCheckoutState();
+          router.replace(
+            `/${params.domain}/checkout/${instapayData.orderId}/thank-you?n=${encodeURIComponent(instapayData.orderNumber)}`,
+          );
         }}
       />
     );
