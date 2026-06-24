@@ -19,7 +19,6 @@ import { themeOwnsCheckout } from "@/lib/byot-fork";
 import type { CSSProperties } from "react";
 import { resolveBrandTokens, brandVarsToCss } from "@/lib/brand-tokens";
 import { CheckoutTrustBadges } from "@/components/checkout/CheckoutTrustBadges";
-import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { NOINDEX_ROBOTS } from "@/lib/seo";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -89,7 +88,6 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
   const isTerminalPage =
     afterDomain.includes("/processing") ||
     afterDomain.includes("/thank-you");
-  const showSummary = !isTerminalPage;
 
   return (
     <div
@@ -139,22 +137,18 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
         className="mx-auto max-w-6xl px-4 py-6 sm:py-10"
         aria-label="Checkout"
       >
-        {showSummary ? (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-10">
-            {/* Left column — the active step. */}
-            <div className="order-2 lg:order-1">{children}</div>
-            {/* Right column — sticky order summary (collapsible on mobile,
-                where it renders above the form via the order utilities). */}
-            <div className="order-1 lg:order-2">
-              <OrderSummary />
-            </div>
-          </div>
-        ) : (
+        {isTerminalPage ? (
           // Terminal pages (processing / thank-you) — single centered column,
           // no order summary (cart is already cleared).
           <div className="mx-auto max-w-2xl">{children}</div>
+        ) : (
+          // The single-page checkout owns its own two-column layout (summary +
+          // delivery/payment), so render it full-width.
+          <>
+            {children}
+            <CheckoutTrustBadges locale={locale} />
+          </>
         )}
-
       </main>
 
       <footer className="mt-12 border-t border-[var(--ck-border)] bg-[var(--ck-surface)]">

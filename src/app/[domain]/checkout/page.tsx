@@ -14,7 +14,7 @@
 
 import { resolveByotFork } from "@/lib/byot-fork";
 import { notFound } from "next/navigation";
-import { ContactStep } from "./ContactStep";
+import { CheckoutPage } from "./CheckoutPage";
 import { CartFunnelTracker } from "@/components/tracking/FunnelTracker";
 
 export const dynamic = "force-dynamic"; // Don't ISR the checkout
@@ -44,7 +44,7 @@ export default async function ContactStepPage({ params }: PageProps) {
   return (
     <>
       {initiateCheckout}
-      <ContactStep />
+      <CheckoutPage />
     </>
   );
 }
