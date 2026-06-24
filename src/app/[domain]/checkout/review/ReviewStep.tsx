@@ -18,6 +18,7 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { resolveApiError } from "@/lib/api-error";
+import { getSessionFingerprint } from "@/lib/meta-pixel";
 import { useAttribution } from "@/components/layout/AttributionProvider";
 import { PaymobPixel } from "@/components/checkout/PaymobPixel";
 import { KashierCheckout } from "@/components/checkout/KashierCheckout";
