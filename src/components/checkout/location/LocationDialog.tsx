@@ -7,6 +7,7 @@ import { PlaceSearch, type PlacePickResult } from "./PlaceSearch";
 import { useGeolocation } from "./useGeolocation";
 import { useReverseGeocode } from "./useReverseGeocode";
 import { reverseGeocode } from "./geocodeService";
+import { onMapsUnavailable } from "./googleMapsLoader";
 import { locationLabels } from "./labels";
 import {
   CheckIcon,
@@ -70,6 +71,11 @@ export function LocationDialog({
 
   // Portals need the DOM; only render the portal after mount.
   useEffect(() => setMounted(true), []);
+
+  // If the Maps JS API reports an auth failure (e.g. RefererNotAllowedMapError
+  // when this host isn't in the key's allowed-referrers), swap Google's broken
+  // error tile for the clean manual-entry fallback.
+  useEffect(() => onMapsUnavailable(() => setMapError(true)), []);
 
   useEffect(() => {
     if (open) {
@@ -217,16 +223,18 @@ export function LocationDialog({
       />
 
       {/* Panel — full-bleed on mobile (100dvh shrinks for iOS chrome), a
-          centered capped card on desktop. */}
-      <div className="relative flex h-[100dvh] w-screen max-w-full flex-col overflow-hidden bg-white shadow-2xl sm:h-[min(720px,90vh)] sm:max-h-[90vh] sm:w-[min(640px,95vw)] sm:rounded-2xl">
+          centered capped card on desktop. Inherits the checkout's `--ck-*`
+          brand tokens from :root (the layout mirrors them there so this
+          portaled dialog matches the active theme — bazar's cream/ink/amber). */}
+      <div className="relative flex h-[100dvh] w-screen max-w-full flex-col overflow-hidden bg-[var(--ck-surface,#fff)] text-[var(--ck-fg,#111827)] shadow-2xl [font-family:var(--ck-body-font)] sm:h-[min(720px,90vh)] sm:max-h-[90vh] sm:w-[min(640px,95vw)] sm:rounded-[var(--ck-radius,1rem)]">
         {/* Header */}
-        <div className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 bg-white px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-3 border-b border-[var(--ck-border,rgba(0,0,0,0.12))] bg-[var(--ck-surface,#fff)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-sm font-bold text-gray-900">
+            <div className="flex items-center gap-2 text-sm text-[var(--ck-fg,#111827)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight,700)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)]">
               <MapPinIcon size={16} />
               <span className="truncate">{l.dialogTitle}</span>
             </div>
-            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-500">
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--ck-muted,#6b7280)]">
               <ShieldCheckIcon size={11} className="shrink-0" />
               <span className="truncate">{l.privacyNote}</span>
             </div>
@@ -235,7 +243,7 @@ export function LocationDialog({
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="-m-2 shrink-0 p-2 text-gray-400 transition-colors hover:text-gray-900"
+            className="-m-2 shrink-0 p-2 text-[var(--ck-muted,#9ca3af)] transition-colors hover:text-[var(--ck-fg,#111827)]"
             aria-label={l.close}
           >
             <CloseIcon size={20} />
@@ -247,14 +255,14 @@ export function LocationDialog({
         <div className="relative min-h-[280px] flex-1 sm:min-h-[420px] landscape:max-h-[60vh] landscape:min-h-[200px]">
           {mapError ? (
             // Graceful degradation — Maps failed to load (no key / blocked).
-            <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gray-50 px-6 text-center">
-              <MapPinIcon size={28} className="text-gray-300" />
-              <p className="text-sm font-medium text-gray-700">
+            <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--ck-surface-2,#f9fafb)] px-6 text-center">
+              <MapPinIcon size={28} className="text-[var(--ck-muted,#d1d5db)]" />
+              <p className="text-sm font-medium text-[var(--ck-fg,#374151)]">
                 {locale === "ar"
                   ? "تعذّر تحميل الخريطة"
                   : "Map couldn't be loaded"}
               </p>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-[var(--ck-muted,#6b7280)]">
                 {locale === "ar"
                   ? "أكمل طلبك بإدخال العنوان يدوياً."
                   : "Continue by entering your address manually."}
@@ -283,14 +291,14 @@ export function LocationDialog({
                   setUserMoved(false);
                   request();
                 }}
-                className="absolute bottom-3 end-3 z-30 inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold text-gray-900 shadow-lg ring-1 ring-black/5 transition-colors hover:bg-gray-50"
+                className="absolute bottom-3 end-3 z-30 inline-flex items-center gap-2 rounded-full bg-[var(--ck-surface,#fff)] px-3 py-2 text-xs font-semibold text-[var(--ck-fg,#111827)] shadow-lg ring-1 ring-[var(--ck-frame,rgba(0,0,0,0.08))] transition-[filter] hover:brightness-95"
               >
                 <CrosshairIcon size={15} />
                 <span>{l.useMyLocation}</span>
               </button>
               {state.status === "requesting" && (
-                <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60 backdrop-blur-sm">
-                  <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium shadow-sm">
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-[var(--ck-surface,#fff)]/60 backdrop-blur-sm">
+                  <div className="flex items-center gap-2 rounded-full border border-[var(--ck-border,rgba(0,0,0,0.12))] bg-[var(--ck-surface,#fff)] px-4 py-2 text-sm font-medium shadow-sm">
                     <SpinnerIcon size={14} className="animate-spin" />
                     <span>{l.locating}</span>
                   </div>
@@ -301,7 +309,7 @@ export function LocationDialog({
         </div>
 
         {/* Footer — mt-auto pins it to the bottom even when the map shrinks. */}
-        <div className="mt-auto shrink-0 space-y-3 border-t border-gray-100 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="mt-auto shrink-0 space-y-3 border-t border-[var(--ck-border,rgba(0,0,0,0.12))] bg-[var(--ck-surface,#fff)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {errorMessage && !mapError && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
               {errorMessage}
@@ -317,12 +325,12 @@ export function LocationDialog({
               ) : geocode.data?.formatted_address ? (
                 <>
                   <p
-                    className="text-sm font-medium leading-snug text-gray-900"
+                    className="text-sm font-medium leading-snug text-[var(--ck-fg,#111827)]"
                     dir="auto"
                   >
                     {geocode.data.formatted_address}
                   </p>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--ck-muted,#6b7280)]">
                     {geocode.data.city && (
                       <span className="inline-flex items-center gap-1">
                         <MapPinIcon size={11} />
@@ -339,7 +347,7 @@ export function LocationDialog({
                   </div>
                 </>
               ) : (
-                <p className="text-xs text-gray-500">{l.dragHint}</p>
+                <p className="text-xs text-[var(--ck-muted,#6b7280)]">{l.dragHint}</p>
               )}
             </div>
           )}
@@ -347,8 +355,9 @@ export function LocationDialog({
             type="button"
             onClick={handleConfirm}
             disabled={!center || busy || mapError}
-            // Full-width on mobile with a generous 48px+ tap target.
-            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-5 py-3 text-sm font-bold text-white transition-opacity hover:bg-gray-800 disabled:opacity-40 sm:w-auto"
+            // Full-width on mobile with a generous 48px+ tap target. Amber pill
+            // to match the checkout's primary CTA (the theme's brand button).
+            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ck-button,#111827)] px-6 py-3 text-sm font-bold uppercase tracking-wide text-[var(--ck-button-text,#fff)] transition-[filter] hover:brightness-95 disabled:opacity-40 sm:w-auto"
           >
             {busy ? (
               <>

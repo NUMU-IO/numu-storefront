@@ -41,19 +41,9 @@ export default async function RegisterPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id);
 
-  if (isByot) {
-    return (
-      <ByotThemeBoundary
-        bundleUrl={themeSettings.external_theme!.bundle_url!}
-        cssUrl={themeSettings.external_theme!.css_url}
-        themeSettings={themeSettings}
-        storeData={store}
-        page={{ type: "register", title: "Create account" }}
-      />
-    );
-  }
-
-  return (
+  // Built-in fallback + ENG-2 no-blank backstop for themes with no `register`
+  // template.
+  const builtInRegister = (
     <main className="min-h-screen flex items-center justify-center px-4 py-12 bg-white">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
@@ -67,4 +57,19 @@ export default async function RegisterPage({ params }: PageProps) {
       </div>
     </main>
   );
+
+  if (isByot) {
+    return (
+      <ByotThemeBoundary
+        bundleUrl={themeSettings.external_theme!.bundle_url!}
+        cssUrl={themeSettings.external_theme!.css_url}
+        themeSettings={themeSettings}
+        storeData={store}
+        page={{ type: "register", title: "Create account" }}
+        routeFallback={builtInRegister}
+      />
+    );
+  }
+
+  return builtInRegister;
 }

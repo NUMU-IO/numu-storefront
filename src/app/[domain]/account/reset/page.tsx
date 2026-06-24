@@ -36,42 +36,26 @@ export default async function ResetPage({ params, searchParams }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id);
 
-  if (isByot) {
-    return (
-      <ByotThemeBoundary
-        bundleUrl={themeSettings.external_theme!.bundle_url!}
-        cssUrl={themeSettings.external_theme!.css_url}
-        themeSettings={themeSettings}
-        storeData={store}
-        page={{ type: "reset", title: "Set new password", data: { token } }}
-      />
-    );
-  }
-
-  // No token in the URL → render an error explaining how the user should
-  // arrive here. Don't render the form — submitting with an empty token
-  // would just 400 on the backend.
-  if (!token) {
-    return (
-      <main className="min-h-screen flex items-center justify-center px-4 py-12 bg-white">
-        <div className="w-full max-w-md space-y-4 text-center">
-          <h1 className="text-2xl font-bold">Reset link missing</h1>
-          <p className="text-sm text-gray-600">
-            Open the password-reset email we sent and click the link inside.
-            That link contains the token needed to reset your password.
-          </p>
-          <a
-            href="/account/recover"
-            className="inline-block text-sm font-medium underline"
-          >
-            Send a new reset link
-          </a>
-        </div>
-      </main>
-    );
-  }
-
-  return (
+  // Built-in fallback + ENG-2 no-blank backstop for themes with no `reset`
+  // template. No token in the URL → render guidance instead of the form
+  // (an empty token would just 400 on the backend).
+  const builtInReset = !token ? (
+    <main className="min-h-screen flex items-center justify-center px-4 py-12 bg-white">
+      <div className="w-full max-w-md space-y-4 text-center">
+        <h1 className="text-2xl font-bold">Reset link missing</h1>
+        <p className="text-sm text-gray-600">
+          Open the password-reset email we sent and click the link inside.
+          That link contains the token needed to reset your password.
+        </p>
+        <a
+          href="/account/recover"
+          className="inline-block text-sm font-medium underline"
+        >
+          Send a new reset link
+        </a>
+      </div>
+    </main>
+  ) : (
     <main className="min-h-screen flex items-center justify-center px-4 py-12 bg-white">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
@@ -81,4 +65,19 @@ export default async function ResetPage({ params, searchParams }: PageProps) {
       </div>
     </main>
   );
+
+  if (isByot) {
+    return (
+      <ByotThemeBoundary
+        bundleUrl={themeSettings.external_theme!.bundle_url!}
+        cssUrl={themeSettings.external_theme!.css_url}
+        themeSettings={themeSettings}
+        storeData={store}
+        page={{ type: "reset", title: "Set new password", data: { token } }}
+        routeFallback={builtInReset}
+      />
+    );
+  }
+
+  return builtInReset;
 }

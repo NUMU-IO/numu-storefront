@@ -34,6 +34,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { NumuDefaultShell } from "@/components/storefront/NumuDefaultShell";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
@@ -79,6 +80,11 @@ const KNOWN_PAGE_HANDLES = new Set([
   "testimonial", "testimonials", "reviews",
   "blogs", "blog", "news", "journal",
   "pages",
+  // Account + post-purchase pages a theme templates (bazar ships profile +
+  // order-confirmation) and links to from chrome — without these they fall to
+  // notFound() and the customer/merchant sees the themed 404.
+  "profile", "account",
+  "order-confirmation", "order-confirmed", "thank-you", "thanks",
 ]);
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -117,6 +123,30 @@ export default async function CatchAllPage({ params }: PageProps) {
     notFound();
   }
 
+  // Map well-known content handles onto a theme template TYPE so a theme that
+  // ships a dedicated About / Contact template (e.g. bazar's bz-about-section /
+  // bz-contact) renders it instead of the generic `page` body. Unmapped handles
+  // stay `page`; a theme without the mapped template still degrades to the
+  // routeFallback below, so this is additive and never blanks a page.
+  const TEMPLATE_TYPE_BY_HANDLE: Record<string, string> = {
+    about: "about",
+    "about-us": "about",
+    "our-story": "about",
+    story: "about",
+    contact: "contact",
+    "contact-us": "contact",
+    // Account → the theme's `profile` template; post-purchase → its
+    // `order-confirmation` template. Themes without these still degrade to the
+    // routeFallback, so this is additive.
+    profile: "profile",
+    account: "profile",
+    "order-confirmation": "order-confirmation",
+    "order-confirmed": "order-confirmation",
+    "thank-you": "order-confirmation",
+    thanks: "order-confirmation",
+  };
+  const pageType = TEMPLATE_TYPE_BY_HANDLE[topHandle] ?? "page";
+
   let store;
   try {
     store = await fetchStoreByDomain(domain);
@@ -140,6 +170,23 @@ export default async function CatchAllPage({ params }: PageProps) {
     themeRaw?.theme_settings || themeRaw || {},
   );
 
+  const ar = ((store as { default_language?: string })?.default_language || "")
+    .toLowerCase()
+    .startsWith("ar");
+  const emptyMessage = ar
+    ? "الصفحة دي لسه مفيهاش محتوى. ارجع للرئيسية لحد ما المحتوى يتنشر."
+    : "This page doesn't have any content yet. Head back home while it's being prepared.";
+  const numuPlaceholder = (
+    <NumuDefaultShell
+      ar={ar}
+      fullScreen={false}
+      eyebrow={(store as { name?: string })?.name || "NUMU"}
+      title={humanize(handle)}
+      message={emptyMessage}
+      action={{ href: "/", label: ar ? "الرئيسية" : "Back home" }}
+    />
+  );
+
   if (
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
@@ -151,13 +198,17 @@ export default async function CatchAllPage({ params }: PageProps) {
         themeSettings={themeSettings}
         storeData={store}
         page={{
-          type: "page",
+          type: pageType,
           title: humanize(handle),
           handle,
           // body absent until the CMS-pages backend lands; themes render
           // a graceful placeholder when page.data.page.body is null.
           data: { page: { handle, title: humanize(handle), body: null } },
         }}
+        // ENG-2: themes with no `page` template render these nav paths blank —
+        // show the branded NUMU placeholder (same as the built-in branch
+        // below) so e.g. /about is never a blank screen.
+        routeFallback={numuPlaceholder}
       />
     );
   }
@@ -173,10 +224,5 @@ export default async function CatchAllPage({ params }: PageProps) {
     );
   }
 
-  return (
-    <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-3xl font-bold">{humanize(handle)}</h1>
-      <p className="text-gray-600 mt-4">No content yet.</p>
-    </div>
-  );
+  return numuPlaceholder;
 }

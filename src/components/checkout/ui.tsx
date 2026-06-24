@@ -26,7 +26,11 @@ export function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-/** A premium content card — soft border, rounded-2xl, subtle shadow. */
+/**
+ * A content card. Frame weight + corner radius + flat/shadow come from the
+ * active theme's `--ck-*` tokens, so bazar renders a flat 2px souk-print frame
+ * while a neutral store keeps the soft rounded-2xl shadowed card.
+ */
 export function CheckoutCard({
   title,
   description,
@@ -44,7 +48,7 @@ export function CheckoutCard({
     <section
       aria-labelledby={ariaLabelledBy}
       className={cn(
-        "rounded-2xl border border-gray-200/80 bg-white p-5 shadow-sm sm:p-6",
+        "rounded-[var(--ck-radius)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] p-5 [box-shadow:var(--ck-shadow)] sm:p-6",
         className,
       )}
     >
@@ -53,13 +57,13 @@ export function CheckoutCard({
           {title && (
             <h2
               id={ariaLabelledBy}
-              className="text-base font-semibold tracking-tight text-gray-900 sm:text-lg"
+              className="text-base text-[var(--ck-fg)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)] sm:text-lg"
             >
               {title}
             </h2>
           )}
           {description && (
-            <p className="mt-1 text-sm text-gray-500">{description}</p>
+            <p className="mt-1 text-sm text-[var(--ck-muted)]">{description}</p>
           )}
         </div>
       )}
@@ -69,7 +73,7 @@ export function CheckoutCard({
 }
 
 const FIELD_INPUT =
-  "block w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-60";
+  "block w-full rounded-[var(--ck-radius-sm)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] px-3.5 py-2.5 text-sm text-[var(--ck-fg)] outline-none transition-colors placeholder:text-[var(--ck-muted)] focus:border-[var(--ck-ring)] focus:ring-2 focus:ring-[var(--ck-ring)]/25 disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Labeled field wrapper. `span` className keeps label copy consistent. */
 export function Field({
@@ -87,11 +91,11 @@ export function Field({
 }) {
   return (
     <label htmlFor={htmlFor} className={cn("block", className)}>
-      <span className="mb-1.5 block text-sm font-medium text-gray-700">
+      <span className="mb-1.5 block text-xs text-[var(--ck-fg)] [font-weight:var(--ck-label-weight)] [letter-spacing:var(--ck-label-tracking)] [text-transform:var(--ck-label-transform)]">
         {label}
       </span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-gray-400">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-[var(--ck-muted)]">{hint}</span>}
     </label>
   );
 }
@@ -132,7 +136,7 @@ export function PrimaryButton({
     <button
       {...props}
       className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gray-900 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900 disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--ck-button)] px-7 py-2.5 text-sm font-bold uppercase tracking-wide text-[var(--ck-button-text)] transition-[filter,opacity] hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ck-ring)] disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
     >
@@ -152,7 +156,7 @@ export function BackLink({
   return (
     <Link
       href={href}
-      className="inline-flex items-center gap-1 text-sm font-medium text-gray-500 underline-offset-4 transition-colors hover:text-gray-900 hover:underline"
+      className="inline-flex items-center gap-1 text-sm font-medium text-[var(--ck-muted)] underline-offset-4 transition-colors hover:text-[var(--ck-fg)] hover:underline"
     >
       <span aria-hidden>‹</span>
       <span>{children}</span>
@@ -204,10 +208,10 @@ export function OptionRow({
     <label
       htmlFor={htmlFor}
       className={cn(
-        "flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 transition-colors",
+        "flex cursor-pointer items-center gap-3 rounded-[var(--ck-radius-sm)] border-[length:var(--ck-frame-width)] p-3.5 transition-colors",
         selected
-          ? "border-gray-900 bg-gray-50 ring-1 ring-gray-900"
-          : "border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+          ? "border-[var(--ck-accent)] bg-[var(--ck-accent-tint)]"
+          : "border-[var(--ck-frame)] hover:border-[var(--ck-accent)]",
         className,
       )}
     >

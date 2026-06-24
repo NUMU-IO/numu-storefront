@@ -16,7 +16,8 @@ import {
   LocationButton,
   LocationDialog,
   LocationPinnedChip,
-  hasGoogleMapsKey,
+  canUseMaps,
+  onMapsUnavailable,
   type CapturedLocation,
 } from "@/components/checkout/location";
 import {
@@ -24,6 +25,7 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { EG_GOVERNORATES, governorateLabel } from "@/lib/eg-governorates";
+import { getSessionFingerprint } from "@/lib/meta-pixel";
 
 const COUNTRIES = [
   ["EG", "Egypt", "مصر"],
@@ -102,7 +104,10 @@ export function ContactStep() {
     if (typeof document !== "undefined") {
       setLocale(document.documentElement.lang === "ar" ? "ar" : "en");
     }
-    setMapsEnabled(hasGoogleMapsKey());
+    // Offer the picker only with a key AND no prior auth failure this session;
+    // hide it live if Maps later reports an auth/referrer failure.
+    setMapsEnabled(canUseMaps());
+    const unsubMaps = onMapsUnavailable(() => setMapsEnabled(false));
 
     // Hydrate from sessionStorage so a back-nav doesn't blank the form.
     const s = readCheckoutState();
@@ -147,6 +152,8 @@ export function ContactStep() {
         /* anonymous visitor — fine */
       }
     })();
+
+    return () => unsubMaps();
   }, []);
 
   /**
@@ -194,6 +201,68 @@ export function ContactStep() {
         /* best-effort */
       });
     }
+
+    // Abandoned-checkout seed — capture contact + cart so the merchant's
+    // recovery flow (WhatsApp/email) can reach a customer who drops off after
+    // this step. Best-effort; the SPA navigation below keeps this alive.
+    void (async () => {
+      try {
+        const res = await fetch("/api/cart", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        const cart = (json?.data ?? json) as {
+          subtotal?: number;
+          currency?: string;
+          items?: Array<Record<string, unknown>>;
+        };
+        const items = Array.isArray(cart?.items) ? cart.items : [];
+        if (!items.length) return;
+        const line_items = items.map((li) => {
+          const quantity = Number(li.quantity) || 1;
+          const total_price = Number(li.total_price) || 0;
+          return {
+            product_id: li.product_id,
+            product_name: li.product_name ?? li.name,
+            variant_id: li.variant_id ?? undefined,
+            variant_name: li.variant_name ?? undefined,
+            sku: li.sku ?? undefined,
+            quantity,
+            unit_price:
+              Number(li.unit_price) || Math.round(total_price / quantity),
+            total_price,
+          };
+        });
+        await fetch("/api/storefront/cart-track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          body: JSON.stringify({
+            session_fingerprint: getSessionFingerprint(),
+            email,
+            phone: phone || undefined,
+            shipping_address: {
+              first_name: firstName,
+              last_name: lastName,
+              address_line1: line1,
+              address_line2: line2 || undefined,
+              city,
+              state: state || undefined,
+              postal_code: postalCode || undefined,
+              country,
+              phone: phone || undefined,
+            },
+            line_items,
+            subtotal: Number(cart?.subtotal) || 0,
+            currency: cart?.currency || "EGP",
+          }),
+        });
+      } catch {
+        /* best-effort — never block checkout on a tracking write */
+      }
+    })();
 
     patchCheckoutState({
       email,
@@ -416,8 +485,10 @@ export function ContactStep() {
       </form>
 
       {/* Lazily-mounted only when enabled. The dialog itself defers the
-          Google Maps script until it's open. */}
-      {mapsEnabled && (
+          Google Maps script until it's open. Kept mounted while open even if
+          Maps just became unavailable, so a mid-session auth failure shows the
+          dialog's clean manual-entry fallback rather than vanishing. */}
+      {(mapsEnabled || locationOpen) && (
         <LocationDialog
           open={locationOpen}
           onOpenChange={setLocationOpen}

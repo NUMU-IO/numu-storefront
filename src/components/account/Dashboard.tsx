@@ -18,11 +18,11 @@ import { useState } from "react";
 import ReorderButton from "@/components/account/ReorderButton";
 
 const inputCls =
-  "block w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black";
+  "block w-full rounded-[var(--numu-radius)] border border-[var(--numu-border)] bg-[var(--numu-surface)] px-3 py-2 text-[var(--numu-ink)] focus:outline-none focus:ring-2 focus:ring-[var(--numu-navy)]/30 focus:border-[var(--numu-navy)]";
 const buttonCls =
-  "rounded-md bg-black px-4 py-2 text-white text-sm font-medium disabled:opacity-50";
+  "numu-btn-navy rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-50";
 const ghostBtn =
-  "rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50";
+  "rounded-full border border-[var(--numu-border)] bg-[var(--numu-surface)] px-4 py-1.5 text-sm font-medium text-[var(--numu-ink)] hover:bg-[var(--numu-cream)] disabled:opacity-50";
 const errorCls =
   "rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-800";
 const okCls =
@@ -92,20 +92,22 @@ function AccountFrame({
   }
 
   return (
-    <main className="min-h-screen px-4 py-12 bg-white">
+    <main className="min-h-screen bg-[var(--numu-paper)] px-4 py-12 [font-family:var(--numu-sans)]">
       <div className="max-w-4xl mx-auto space-y-8">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold">{name}</h1>
+            <h1 className="text-2xl font-bold text-[var(--numu-ink)] [font-family:var(--numu-display)]">
+              {name}
+            </h1>
             {customer?.email && (
-              <p className="text-sm text-gray-600 mt-0.5">{customer.email}</p>
+              <p className="text-sm text-[var(--numu-ink-soft)] mt-0.5">{customer.email}</p>
             )}
           </div>
           <button onClick={logout} className={ghostBtn}>
             Sign out
           </button>
         </header>
-        <nav className="flex gap-1 border-b border-gray-200 -mb-px overflow-x-auto">
+        <nav className="flex gap-1 border-b border-[var(--numu-border)] -mb-px overflow-x-auto">
           {tabs.map((t) => (
             <a
               key={t.key}
@@ -113,8 +115,8 @@ function AccountFrame({
               className={
                 "px-3 py-2 text-sm font-medium border-b-2 -mb-px " +
                 (t.key === active
-                  ? "border-black text-black"
-                  : "border-transparent text-gray-500 hover:text-black")
+                  ? "border-[var(--numu-navy)] text-[var(--numu-navy)]"
+                  : "border-transparent text-[var(--numu-ink-soft)] hover:text-[var(--numu-navy)]")
               }
             >
               {t.label}
@@ -139,12 +141,12 @@ export function AccountHome({
   return (
     <AccountFrame customer={customer} active="home">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <section className="rounded-lg border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">
+        <section className="rounded-lg border border-[var(--numu-border)] p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--numu-ink-soft)] mb-3">
             Recent orders
           </h2>
           {recentOrders.length === 0 ? (
-            <p className="text-sm text-gray-600">No orders yet.</p>
+            <p className="text-sm text-[var(--numu-ink-soft)]">No orders yet.</p>
           ) : (
             <ul className="space-y-2">
               {recentOrders.slice(0, 3).map((o: any) => (
@@ -155,7 +157,7 @@ export function AccountHome({
                   >
                     <strong>#{o.order_number || o.id.slice(0, 8)}</strong>
                     {" — "}
-                    <span className="text-gray-600">
+                    <span className="text-[var(--numu-ink-soft)]">
                       {o.status} · {o.total} {o.currency}
                     </span>
                   </a>
@@ -163,7 +165,7 @@ export function AccountHome({
               ))}
               {recentOrders.length > 3 && (
                 <li className="text-sm">
-                  <a href="/account/orders" className="text-gray-600 hover:underline">
+                  <a href="/account/orders" className="text-[var(--numu-ink-soft)] hover:underline">
                     See all orders →
                   </a>
                 </li>
@@ -171,8 +173,8 @@ export function AccountHome({
             </ul>
           )}
         </section>
-        <section className="rounded-lg border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-3">
+        <section className="rounded-lg border border-[var(--numu-border)] p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--numu-ink-soft)] mb-3">
             Account
           </h2>
           <ul className="space-y-2 text-sm">
@@ -206,11 +208,11 @@ export function OrdersList({
     <AccountFrame customer={customer} active="orders">
       <h2 className="text-lg font-semibold mb-4">Order history</h2>
       {initialOrders.length === 0 ? (
-        <p className="text-sm text-gray-600">No orders yet.</p>
+        <p className="text-sm text-[var(--numu-ink-soft)]">No orders yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <div className="overflow-x-auto rounded-lg border border-[var(--numu-border)]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left">
+            <thead className="bg-[var(--numu-cream)] text-left">
               <tr>
                 <th className="px-4 py-2 font-medium">Order</th>
                 <th className="px-4 py-2 font-medium">Date</th>
@@ -229,12 +231,12 @@ export function OrdersList({
                       #{o.order_number || o.id.slice(0, 8)}
                     </a>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td className="px-4 py-3 text-[var(--numu-ink-soft)]">
                     {o.created_at
                       ? new Date(o.created_at).toLocaleDateString()
                       : "—"}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{o.status}</td>
+                  <td className="px-4 py-3 text-[var(--numu-ink-soft)]">{o.status}</td>
                   <td className="px-4 py-3">
                     {o.total} {o.currency}
                   </td>
@@ -260,7 +262,7 @@ export function OrderDetail({
   if (!order) {
     return (
       <AccountFrame customer={customer} active="orders">
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-[var(--numu-ink-soft)]">
           Order not found.{" "}
           <a href="/account/orders" className="hover:underline">
             ← Back to orders
@@ -274,7 +276,7 @@ export function OrderDetail({
     <AccountFrame customer={customer} active="orders">
       <a
         href="/account/orders"
-        className="text-sm text-gray-600 hover:underline inline-block mb-4"
+        className="text-sm text-[var(--numu-ink-soft)] hover:underline inline-block mb-4"
       >
         ← Back to orders
       </a>
@@ -283,7 +285,7 @@ export function OrderDetail({
           <h2 className="text-lg font-semibold">
             Order #{order.order_number || order.id?.slice(0, 8)}
           </h2>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-[var(--numu-ink-soft)]">
             {order.created_at
               ? new Date(order.created_at).toLocaleString()
               : ""}
@@ -291,19 +293,19 @@ export function OrderDetail({
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
           <div>
-            <div className="text-gray-500 text-xs uppercase">Status</div>
+            <div className="text-[var(--numu-ink-soft)] text-xs uppercase">Status</div>
             <div className="font-medium">{order.status}</div>
           </div>
           <div>
-            <div className="text-gray-500 text-xs uppercase">Payment</div>
+            <div className="text-[var(--numu-ink-soft)] text-xs uppercase">Payment</div>
             <div className="font-medium">{order.payment_status}</div>
           </div>
           <div>
-            <div className="text-gray-500 text-xs uppercase">Fulfillment</div>
+            <div className="text-[var(--numu-ink-soft)] text-xs uppercase">Fulfillment</div>
             <div className="font-medium">{order.fulfillment_status || "—"}</div>
           </div>
         </div>
-        <div className="rounded-lg border border-gray-200 divide-y">
+        <div className="rounded-lg border border-[var(--numu-border)] divide-y">
           {items.map((it: any, i: number) => (
             <div key={i} className="p-4 flex justify-between gap-4 text-sm">
               <div>
@@ -311,11 +313,11 @@ export function OrderDetail({
                   {it.product_name || it.name || "Item"}
                 </div>
                 {it.variant_label && (
-                  <div className="text-gray-500 text-xs mt-0.5">
+                  <div className="text-[var(--numu-ink-soft)] text-xs mt-0.5">
                     {it.variant_label}
                   </div>
                 )}
-                <div className="text-gray-500 text-xs mt-0.5">
+                <div className="text-[var(--numu-ink-soft)] text-xs mt-0.5">
                   Qty {it.quantity}
                 </div>
               </div>
@@ -325,8 +327,8 @@ export function OrderDetail({
             </div>
           ))}
         </div>
-        <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
-          <span className="text-gray-600">Total</span>
+        <div className="flex justify-between text-sm pt-2 border-t border-[var(--numu-border)]">
+          <span className="text-[var(--numu-ink-soft)]">Total</span>
           <span className="font-bold text-base">
             {order.total} {order.currency}
           </span>
@@ -417,22 +419,22 @@ export function AddressesPage({
       {!adding && !editing && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {addresses.length === 0 ? (
-            <p className="text-sm text-gray-600">No saved addresses yet.</p>
+            <p className="text-sm text-[var(--numu-ink-soft)]">No saved addresses yet.</p>
           ) : (
             addresses.map((a) => (
               <div
                 key={a.id}
-                className="rounded-lg border border-gray-200 p-4 text-sm space-y-2"
+                className="rounded-lg border border-[var(--numu-border)] p-4 text-sm space-y-2"
               >
                 <div className="font-medium">
                   {[a.first_name, a.last_name].filter(Boolean).join(" ") || "—"}
                   {a.is_default && (
-                    <span className="ml-2 text-xs rounded-full bg-black text-white px-2 py-0.5 align-middle">
+                    <span className="ml-2 text-xs rounded-full bg-[var(--numu-navy)] text-white px-2 py-0.5 align-middle">
                       Default
                     </span>
                   )}
                 </div>
-                <div className="text-gray-600">
+                <div className="text-[var(--numu-ink-soft)]">
                   {a.address_line1}
                   {a.address_line2 ? ", " + a.address_line2 : ""}
                   <br />
@@ -440,7 +442,7 @@ export function AddressesPage({
                   <br />
                   {a.country}
                 </div>
-                {a.phone && <div className="text-gray-600">{a.phone}</div>}
+                {a.phone && <div className="text-[var(--numu-ink-soft)]">{a.phone}</div>}
                 <div className="flex gap-2 pt-2 flex-wrap">
                   <button onClick={() => setEditing(a)} className={ghostBtn}>
                     Edit
@@ -493,7 +495,7 @@ function AddressForm({
   }
   return (
     <form
-      className="rounded-lg border border-gray-200 p-5 space-y-4 mb-4"
+      className="rounded-lg border border-[var(--numu-border)] p-5 space-y-4 mb-4"
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);

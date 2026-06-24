@@ -10,6 +10,24 @@ import { AttributionProvider } from "@/components/layout/AttributionProvider";
 import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvider";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
+import { PreviewNavigationBridge } from "@/components/theme-engine/PreviewNavigationBridge";
+import { MetaPixel } from "@/components/tracking/MetaPixel";
+import { resolveMetaPixelIds } from "@/lib/meta-pixel";
+import { getActivePromotions } from "@/lib/promo-server";
+import { resolveBrandTokens } from "@/lib/brand-tokens";
+import { AnnouncementBar } from "@/components/promo/AnnouncementBar";
+import { PromoMounts } from "@/components/promo/PromoMounts";
+import {
+  canonicalOriginFor,
+  storeRobots,
+  storeSeoTitle,
+  storeSeoDescription,
+  storeSocialImage,
+  buildOpenGraph,
+  buildTwitter,
+  NOINDEX_ROBOTS,
+  type StoreForSeo,
+} from "@/lib/seo";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
@@ -27,13 +45,59 @@ interface LayoutProps {
 export async function generateMetadata({ params }: { params: Promise<{ domain: string }> }): Promise<Metadata> {
   const { domain } = await params;
   try {
-    const store = await fetchStoreByDomain(domain);
+    const store = (await fetchStoreByDomain(domain)) as unknown as StoreForSeo | null;
+    if (!store) return { title: "NUMU Store", robots: NOINDEX_ROBOTS };
+
+    const origin = canonicalOriginFor(store, domain);
+    const base = origin.endsWith("/") ? origin : `${origin}/`;
+    const title = storeSeoTitle(store);
+    const description = storeSeoDescription(store);
+    const image = storeSocialImage(store);
+
+    // Site-verification + favicon — surfaced when configured.
+    const other: Record<string, string> = {};
+    const g = (store.seo?.google_site_verification ?? "").trim();
+    const b = (store.seo?.bing_site_verification ?? "").trim();
+    const fb = (
+      store.settings as unknown as
+        | { tracking?: { meta?: { domain_verification_token?: string | null } } }
+        | undefined
+    )?.tracking?.meta?.domain_verification_token?.trim();
+    if (g) other["google-site-verification"] = g;
+    if (b) other["msvalidate.01"] = b;
+    if (fb) other["facebook-domain-verification"] = fb;
+    // Theme customizer's identity.favicon_url wins; fall back to the favicon
+    // set in the hub's Online Store → Preferences (`settings.favicon_url`) so
+    // a merchant who uploads it there sees it without opening the editor;
+    // finally fall back to a V3 theme's Brand → Favicon global setting
+    // (`theme_settings.global_settings.favicon`) so a BYOT theme that exposes
+    // its own favicon picker is honoured too.
+    const ts = store.theme_settings as unknown as
+      | {
+          identity?: { favicon_url?: string };
+          global_settings?: { favicon?: string };
+        }
+      | undefined;
+    const favicon =
+      ts?.identity?.favicon_url ||
+      (store.settings as unknown as { favicon_url?: string } | undefined)
+        ?.favicon_url ||
+      ts?.global_settings?.favicon;
+
     return {
-      title: store?.name || "NUMU Store",
-      description: store?.description || "Powered by NUMU",
+      metadataBase: new URL(base),
+      title: { default: title, template: `%s · ${store.name ?? title}` },
+      description,
+      applicationName: store.name ?? undefined,
+      alternates: { canonical: base },
+      openGraph: buildOpenGraph(store, { title, description, url: base, image }),
+      twitter: buildTwitter({ title, description, image }),
+      robots: storeRobots(store),
+      ...(favicon ? { icons: { icon: favicon, shortcut: favicon } } : {}),
+      ...(Object.keys(other).length ? { other } : {}),
     };
   } catch {
-    return { title: "NUMU Store" };
+    return { title: "NUMU Store", robots: NOINDEX_ROBOTS };
   }
 }
 
@@ -128,11 +192,40 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   // Best-effort: a failure leaves the bundle on its DEFAULT_NAV fallback.
   const navigation = await fetchStoreMenus(store.id).catch(() => ({}));
 
+  // ENG-3 R1 — the proxy resolves the visitor locale (URL prefix › ?locale ›
+  // cookie › store default) and stamps it on `x-numu-locale`. Forward it through
+  // ThemeDataProvider so ByotThemeBoundary can inject it into the bundle mount
+  // ctx; otherwise a bundle only sees the locale via the (later, client-side)
+  // numu_locale cookie and an explicit ?locale=ar override can render the wrong
+  // language while the host <html dir> already flipped.
+  const localeHeaders = await headers();
+  const visitorLocale = localeHeaders.get("x-numu-locale") || undefined;
+
+  // Meta Pixel — fires for built-in AND BYOT themes since the host shell wraps
+  // every page. Only mounted when the merchant configured an enabled pixel;
+  // the browser Pixel also sets `_fbp`/`_fbc` for CAPI match quality.
+  const metaPixelIds = resolveMetaPixelIds(store);
+
+  // Promotions — server-driven announcement bar (offers-v2), rendered in the
+  // shell so it shows for built-in + BYOT alike. Best-effort: null when the
+  // `ff_storefront_promo_render` flag is off or none are active.
+  const promotions = await getActivePromotions(store.id, {
+    locale: visitorLocale === "ar" ? "ar" : "en",
+  }).catch(() => null);
+  const announcementBar = promotions?.announcement_bars?.[0] ?? null;
+
+  // Brand tokens for host-rendered overlays (cookie banner) so they adopt the
+  // store's palette (bazar → cream/ink/amber) instead of a hardcoded white bar.
+  const brandVars = resolveBrandTokens(
+    themeSettings.global_settings as Record<string, unknown> | undefined,
+  );
+
   return (
     <ThemeDataProvider
       themeSettings={themeSettings}
       storeData={store}
       navigation={navigation}
+      locale={visitorLocale}
     >
       {/* Path-segment routing in dev: when the storefront is reached at
           `/<subdomain>/...` (rather than `<subdomain>.numueg.app`),
@@ -141,6 +234,7 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
           subdomain prefix. Hoisted into <head> by Next.js automatically.
           Production (subdomain hosting) doesn't need this. */}
       <base href={`/${domain}/`} />
+      {metaPixelIds.length > 0 && <MetaPixel pixelIds={metaPixelIds} />}
       {/* Phase 5.7 WCAG-AA — skip-to-content link.
           Keyboard users tab through the header before reaching the
           page body; a skip link lets them jump straight to main
@@ -165,6 +259,24 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
         {/* Preview bridge — only active when ?preview=true&editor=v3.
             Listens for postMessage updates from the dashboard editor. */}
         <PreviewBridge />
+        {/* Turns editor page switches into client-side route changes inside
+            the preview iframe (no full reload). Inert outside preview mode. */}
+        <PreviewNavigationBridge />
+        {announcementBar && (
+          <AnnouncementBar
+            promotion={announcementBar}
+            locale={visitorLocale === "ar" ? "ar" : "en"}
+          />
+        )}
+        {promotions && (
+          <PromoMounts
+            popups={promotions.popups || []}
+            floatingWidgets={promotions.floating_widgets || []}
+            cookieBanner={promotions.cookie_banner ?? null}
+            locale={visitorLocale === "ar" ? "ar" : "en"}
+            brandVars={brandVars}
+          />
+        )}
         {!isByot && themeSettings.section_groups?.header && (
           <SectionGroupRenderer
             group={themeSettings.section_groups.header}

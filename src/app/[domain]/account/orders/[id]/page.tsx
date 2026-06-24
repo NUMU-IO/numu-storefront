@@ -58,6 +58,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
           title: `Order #${(order as any).order_number || id.slice(0, 8)}`,
           data: { customer, order },
         }}
+        // ENG-2: themes ship no `account_order` template — fall back to the
+        // functional built-in order detail so the page is never blank.
+        routeFallback={<OrderDetail customer={customer} order={order} />}
       />
     );
   }

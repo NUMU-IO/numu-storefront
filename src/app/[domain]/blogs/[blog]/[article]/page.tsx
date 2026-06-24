@@ -58,27 +58,10 @@ export default async function ArticlePage({ params }: PageProps) {
 
   const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
-  if (
-    themeSettings.external_theme?.bundle_url &&
-    !isBuiltInTheme(themeSettings.theme_id)
-  ) {
-    return (
-      <ByotThemeBoundary
-        bundleUrl={themeSettings.external_theme.bundle_url}
-        cssUrl={themeSettings.external_theme.css_url}
-        themeSettings={themeSettings}
-        storeData={store}
-        page={{
-          type: "article",
-          title: a.title,
-          handle: a.handle,
-          data: { article: a, blog_handle: blog },
-        }}
-      />
-    );
-  }
 
-  return (
+  // Built-in article + ENG-2 no-blank backstop for themes with no `article`
+  // template.
+  const builtInArticle = (
     <main className="max-w-3xl mx-auto px-4 py-12" id="main">
       <article>
         <h1 className="text-3xl font-semibold mb-2">{a.title}</h1>
@@ -98,4 +81,27 @@ export default async function ArticlePage({ params }: PageProps) {
       </article>
     </main>
   );
+
+  if (
+    themeSettings.external_theme?.bundle_url &&
+    !isBuiltInTheme(themeSettings.theme_id)
+  ) {
+    return (
+      <ByotThemeBoundary
+        bundleUrl={themeSettings.external_theme.bundle_url}
+        cssUrl={themeSettings.external_theme.css_url}
+        themeSettings={themeSettings}
+        storeData={store}
+        page={{
+          type: "article",
+          title: a.title,
+          handle: a.handle,
+          data: { article: a, blog_handle: blog },
+        }}
+        routeFallback={builtInArticle}
+      />
+    );
+  }
+
+  return builtInArticle;
 }

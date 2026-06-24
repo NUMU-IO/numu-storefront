@@ -27,6 +27,11 @@ export interface CheckoutState {
   // Step 2
   selected_shipping_rate_id: string | null;
   shipping_method: string | null;
+  // Cached shipping cost (cents) of the selected rate so the order-summary
+  // panel can show the Shipping line + Total without re-fetching all rates.
+  // Pickup = 0. Re-resolved server-side on POST /checkout (this is display
+  // only — the backend recomputes to prevent amount tampering).
+  shipping_cost_cents: number | null;
   // Phase 7.2 — when set, the order is fulfilled as in-store pickup.
   // Mutually exclusive with selected_shipping_rate_id (a pickup order
   // has no shipping rate); PaymentStep clears one when the other is
@@ -60,6 +65,7 @@ export const EMPTY_CHECKOUT_STATE: CheckoutState = {
   shipping_address: {},
   selected_shipping_rate_id: null,
   shipping_method: null,
+  shipping_cost_cents: null,
   pickup_location_id: null,
   payment_method: null,
   cod_requested: false,
@@ -99,6 +105,15 @@ export function writeCheckoutState(state: CheckoutState): void {
 export function patchCheckoutState(patch: Partial<CheckoutState>): CheckoutState {
   const next = { ...readCheckoutState(), ...patch };
   writeCheckoutState(next);
+  // Notify live UI that checkout state changed. The OrderSummary lives in the
+  // persistent checkout LAYOUT (mounted once on the contact step) and only
+  // re-reads on this event — without it, the Shipping line + Total never
+  // reflect the rate the ShippingStep just selected (they'd stay at the
+  // step-1 "calculated at the next steps" / subtotal-only state). Centralizing
+  // the dispatch here covers every patch site (shipping, coupon, pickup, …).
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("numu:checkout:updated"));
+  }
   return next;
 }
 

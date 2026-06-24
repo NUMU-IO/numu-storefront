@@ -17,6 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { adaptCart } from "@/lib/adapt-cart";
 import { verifyCsrf } from "@/lib/csrf";
 
 // Match the rest of the storefront's defaults — the API runs on 8021
@@ -60,7 +61,16 @@ export async function proxyCartMutation(
     body,
     cache: "no-store",
   });
-  const text = await res.text();
+  let text = await res.text();
+  // Adapt the backend envelope/field-names to the SDK Cart shape so the SDK's
+  // applyCart() updates the theme's cart state (only on success bodies).
+  if (res.ok) {
+    try {
+      text = JSON.stringify(adaptCart(JSON.parse(text)));
+    } catch {
+      // Non-JSON / unexpected body — pass through untouched.
+    }
+  }
 
   // Build the response. `Headers` lets us append multiple Set-Cookie
   // entries — important because the backend now emits a guest-cart
