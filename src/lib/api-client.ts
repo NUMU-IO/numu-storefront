@@ -93,7 +93,18 @@ export const fetchStoreByHost = cache(async (rawHost: string) => {
   const isSubdomain =
     host.endsWith(`.${platformDomain}`) && host !== platformDomain;
   if (isSubdomain) {
-    const subdomain = host.slice(0, -(platformDomain.length + 1));
+    // The store slug is always the LEFTMOST label. Parallel-env hosts carry
+    // an environment infix that the page proxy (proxy.ts) strips for the
+    // [domain] segment, but /api/* proxy routes read the raw host and don't:
+    //   yarab-test.v3.test.numueg.app → "yarab-test.v3.test" → slug "yarab-test"
+    //   yarab-test.test.numueg.app    → "yarab-test.test"    → slug "yarab-test"
+    //   yarab-test.staging.numueg.app → "yarab-test.staging" → slug "yarab-test"
+    //   yarab-test.numueg.app         → "yarab-test"         → slug "yarab-test"
+    // Without this, store-by-subdomain got the infixed string and 404'd, so
+    // every /api/* proxy (shipping, checkout, …) returned "Store not found".
+    const subdomain = host
+      .slice(0, -(platformDomain.length + 1))
+      .split(".")[0];
     return normalizeStore(
       await apiFetch<StoreData>(
         `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
