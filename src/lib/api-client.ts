@@ -466,14 +466,21 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
   };
 }
 
-export const fetchProducts = cache(async (storeId: string, limit = 20) => {
+export const fetchProducts = cache(async (storeId: string, limit = 20, categoryId?: string) => {
   // The backend returns the paginated wrapper `{items, total, page, ...}`.
   // Theme bundles (and the route handlers that pass this to `page.data.products`)
   // expect a plain array. Unwrap here so callers don't have to remember
   // — every consumer wants the array shape and treating the wrapper as
   // an array silently drops all products to the demo fallback.
+  //
+  // `categoryId` (optional) scopes the list to one collection — the
+  // collection route passes it so /collections/<slug> shows that
+  // category's products instead of an empty grid.
+  const categoryQs = categoryId
+    ? `&category_id=${encodeURIComponent(categoryId)}`
+    : "";
   const wrapped = await apiFetch<Record<string, any>>(
-    `/storefront/store/${storeId}/products?limit=${limit}`,
+    `/storefront/store/${storeId}/products?limit=${limit}${categoryQs}`,
     { tags: [`products:${storeId}`], revalidate: 60 },
   );
   const items: any[] = Array.isArray(wrapped)
@@ -529,10 +536,24 @@ export const fetchCollections = cache(async (storeId: string) => {
 
 export const fetchCollectionBySlug = cache(
   async (storeId: string, slug: string) => {
-    return apiFetch<Record<string, any>>(
-      `/storefront/store/${storeId}/categories?slug=${encodeURIComponent(slug)}`,
-      { tags: [`category:${storeId}:${slug}`], revalidate: 60 },
+    // NOTE: the backend `/categories` endpoint ignores `?slug=` — it always
+    // returns the full active list. So resolve the match client-side.
+    // apiFetch unwraps `data` to the array (older deployments may still send
+    // the paginated wrapper). Returns the single category object (with
+    // id/name/description/image_url) or null so the caller can fall back.
+    const wrapped = await apiFetch<Record<string, any>>(
+      `/storefront/store/${storeId}/categories`,
+      {
+        tags: [`categories:${storeId}`, `category:${storeId}:${slug}`],
+        revalidate: 60,
+      },
     );
+    const list: any[] = Array.isArray(wrapped)
+      ? wrapped
+      : wrapped && Array.isArray(wrapped.items)
+        ? wrapped.items
+        : [];
+    return list.find((c) => c?.slug === slug) ?? null;
   },
 );
 

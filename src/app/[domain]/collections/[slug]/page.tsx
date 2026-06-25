@@ -1,4 +1,4 @@
-import { fetchStoreByDomain, fetchCollectionBySlug, fetchThemeSettings } from "@/lib/api-client";
+import { fetchStoreByDomain, fetchCollectionBySlug, fetchProducts, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -61,6 +61,12 @@ export default async function CollectionPage({ params }: PageProps) {
 
   const store = await fetchStoreByDomain(domain);
   const collection = await fetchCollectionBySlug(store.id, slug);
+  // Fetch the collection's products so the bundle's grid has something to
+  // render. Without this the listing falls back to an empty catalog
+  // (useProducts() does NOT self-fetch) and shows "No results".
+  const products = collection?.id
+    ? await fetchProducts(store.id, 50, collection.id).catch(() => [])
+    : [];
   const themeRaw = await fetchThemeSettings(store.id);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
 
@@ -117,7 +123,14 @@ export default async function CollectionPage({ params }: PageProps) {
             type: "collection",
             title: collection?.name,
             handle: slug,
-            data: collection ? { collection } : undefined,
+            // `products` feeds useProducts() (what the grid actually reads
+            // today). `collection` carries name/description + its products
+            // for useCollectionOptional() once the SDK wires the singular
+            // CollectionProvider — harmless until then.
+            data: {
+              products,
+              collection: collection ? { ...collection, products } : undefined,
+            },
           }}
           routeFallback={builtInCollection}
         />
