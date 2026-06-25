@@ -491,6 +491,16 @@ export function CheckoutPage() {
     else if (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()))
       errs.email = isAr ? "بريد إلكتروني غير صحيح" : "Enter a valid email";
     if (stdField(fieldsConfig, "phone").required && !phone.trim()) errs.phone = reqMsg;
+    else if (
+      phone.trim() &&
+      // Mirror the backend rule (8–15 digits, optional leading +) so an
+      // invalid phone is caught inline instead of bouncing back as an opaque
+      // 422 "Request validation failed" from the order API.
+      !/^\+?\d{8,15}$/.test(phone.trim().replace(/[\s()-]/g, ""))
+    )
+      errs.phone = isAr
+        ? "رقم هاتف غير صحيح (٨–١٥ رقمًا)"
+        : "Enter a valid phone number (8–15 digits)";
     if (stdField(fieldsConfig, "first_name").required && !firstName.trim()) errs.first_name = reqMsg;
     if (lastCfg.enabled && lastCfg.required && !lastName.trim()) errs.last_name = reqMsg;
     if (stdField(fieldsConfig, "address").required && !line1.trim()) errs.line1 = reqMsg;
@@ -644,8 +654,26 @@ export function CheckoutPage() {
           setSubmitting(false);
           return;
         }
+        // Our API error envelope is { error: { code, message, details? } }.
+        // Never JSON.stringify it at the buyer — show the message, and for a
+        // generic VALIDATION_ERROR (field details are hidden on public
+        // endpoints) show a friendly hint instead of "Request validation
+        // failed". Client-side validation above already catches the common
+        // phone/email cases; this is the safety net for anything else.
         const fb = detail || body?.error || `Checkout failed (${res.status})`;
-        setError(typeof fb === "string" ? fb : JSON.stringify(fb));
+        let msg: string;
+        if (typeof fb === "string") {
+          msg = fb;
+        } else if (fb && typeof fb === "object" && fb.code === "VALIDATION_ERROR") {
+          msg = isAr
+            ? "تأكد من صحة البيانات المُدخلة (الهاتف، العنوان…) وحاول مرة أخرى."
+            : "Please check your details (phone, address…) and try again.";
+        } else if (fb && typeof fb === "object" && typeof fb.message === "string") {
+          msg = fb.message;
+        } else {
+          msg = `Checkout failed (${res.status})`;
+        }
+        setError(msg);
         setSubmitting(false);
         return;
       }

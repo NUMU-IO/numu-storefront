@@ -236,6 +236,17 @@ export function ContactStep() {
     }
     if (stdField(fieldsConfig, "phone").required && !phone.trim()) {
       errs.phone = reqMsg;
+    } else if (
+      phone.trim() &&
+      // Mirror the backend rule (8–15 digits, optional leading +) so an
+      // invalid phone is caught inline here instead of bouncing back as an
+      // opaque 422 "Request validation failed" from the order API.
+      !/^\+?\d{8,15}$/.test(phone.trim().replace(/[\s()-]/g, ""))
+    ) {
+      errs.phone =
+        locale === "ar"
+          ? "رقم هاتف غير صحيح (٨–١٥ رقمًا)"
+          : "Enter a valid phone number (8–15 digits)";
     }
     if (stdField(fieldsConfig, "first_name").required && !firstName.trim()) {
       errs.first_name = reqMsg;
