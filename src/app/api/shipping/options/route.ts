@@ -35,12 +35,63 @@ export async function POST(req: NextRequest) {
   const headers: HeadersInit = { "Content-Type": "application/json" };
   const cookie = req.headers.get("cookie");
   if (cookie) (headers as Record<string, string>).cookie = cookie;
-  const body = await req.text();
+
+  // The checkout's ShippingStep posts `{ shipping_address: {...} }`, but the
+  // backend's /shipping/options requires `{ governorate_code, cart_subtotal_cents }`
+  // and rejects an extra `shipping_address` (422). Bridge the two here: resolve
+  // the governorate NAME the address carries (e.g. "Cairo") to the store's ISO
+  // code (e.g. "EG-C") via /shipping/governorates, and the subtotal from the cart.
+  const incoming = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  let payload: unknown = incoming;
+  const addr = incoming?.shipping_address as Record<string, unknown> | undefined;
+  if (addr && incoming.governorate_code === undefined) {
+    const want = String(addr.state ?? addr.city ?? "").trim().toLowerCase();
+    let governorate_code = String(addr.state ?? "");
+    try {
+      const gRes = await fetch(
+        `${API_URL}/storefront/store/${store.id}/shipping/governorates`,
+        { headers, cache: "no-store" },
+      );
+      const gJson = await gRes.json().catch(() => null);
+      const govs =
+        ((gJson?.data ?? gJson ?? []) as { code?: string; name?: string }[]) || [];
+      const match = govs.find(
+        (g) =>
+          String(g.code).toLowerCase() === want ||
+          String(g.name).toLowerCase() === want,
+      );
+      if (match?.code) governorate_code = match.code;
+    } catch {
+      /* fall back to the raw state value */
+    }
+    let cart_subtotal_cents = 0;
+    try {
+      const cRes = await fetch(`${API_URL}/storefront/cart`, {
+        headers,
+        cache: "no-store",
+      });
+      const cJson = await cRes.json().catch(() => null);
+      const cart = (cJson?.data ?? cJson ?? {}) as Record<string, unknown>;
+      const items = (cart.items as { total_price?: number }[]) || [];
+      cart_subtotal_cents =
+        Number(cart.subtotal ?? cart.subtotal_cents ?? 0) ||
+        items.reduce((n, it) => n + (Number(it.total_price ?? 0) || 0), 0);
+    } catch {
+      /* leave 0 */
+    }
+    payload = {
+      governorate_code,
+      cart_subtotal_cents,
+      cod_requested: Boolean(incoming.cod_requested),
+      ...(incoming.coupon_code ? { coupon_code: incoming.coupon_code } : {}),
+    };
+  }
+
   const upstream = `${API_URL}/storefront/store/${store.id}/shipping/options`;
   const res = await fetch(upstream, {
     method: "POST",
     headers,
-    body,
+    body: JSON.stringify(payload),
     cache: "no-store",
   });
   return new NextResponse(await res.text(), {

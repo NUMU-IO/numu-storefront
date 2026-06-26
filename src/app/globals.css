@@ -16,3 +16,48 @@
   --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
     "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", "saudi_riyal";
 }
+
+/* ───────────────────────────────────────────────────────────────────────
+   NUMU house brand tokens — mirror numo-merchant-hub's identity (navy +
+   saffron + warm paper, IBM Plex Sans Arabic / Reem Kufi, 16px radius).
+   These power the host's DEFAULT / fallback pages (404, "no content yet",
+   error, loading, and the built-in search/cart/account backstops) so a page
+   the active theme doesn't template reads as a branded NUMU surface instead
+   of bare gray. A themed store never sees these — its own template wins.
+   ─────────────────────────────────────────────────────────────────────── */
+:root {
+  --numu-navy: #0c2d54;
+  --numu-navy-700: #163a64;
+  --numu-saffron: #e8a430;
+  --numu-saffron-600: #cf9026;
+  --numu-ink: #14253d;
+  --numu-ink-soft: #5b6a7e;
+  --numu-paper: #fbf6ed;
+  --numu-cream: #f5efe6;
+  --numu-surface: #ffffff;
+  --numu-border: #e7e0d4;
+  --numu-radius: 16px;
+  --numu-display: "Reem Kufi", "Tajawal", ui-sans-serif, system-ui, sans-serif;
+  --numu-sans: "IBM Plex Sans Arabic", "Cairo", ui-sans-serif, system-ui,
+    sans-serif;
+}
+
+/* NUMU tactile navy button (merchant-hub signature): 2px press depth. */
+.numu-btn-navy {
+  background-color: var(--numu-navy);
+  color: #fff;
+  box-shadow:
+    0 2px 0 var(--numu-navy-700),
+    0 6px 14px -4px rgb(12 45 84 / 0.45);
+  transition:
+    transform 0.09s ease,
+    filter 0.16s,
+    box-shadow 0.16s;
+}
+.numu-btn-navy:hover {
+  filter: brightness(1.06);
+}
+.numu-btn-navy:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--numu-navy-700);
+}

@@ -105,7 +105,7 @@ export function LocationMap({
   }, [initialCoords?.lat, initialCoords?.lng]);
 
   return (
-    <div className="relative h-full w-full bg-gray-100">
+    <div className="relative h-full w-full bg-[var(--ck-surface-2,#f3f4f6)]">
       <style>{`
         .numu-pin-loader {
           width: 36px;
@@ -120,7 +120,7 @@ export function LocationMap({
           inset: 0;
           border-radius: 50% 50% 0 50%;
           background: #0000;
-          background-image: radial-gradient(circle 9px at 50% 50%, #0000 94%, #ef4444);
+          background-image: radial-gradient(circle 9px at 50% 50%, #0000 94%, var(--ck-accent, #ef4444));
         }
         .numu-pin-loader::after {
           animation: numu-pin-pulse 1s infinite;

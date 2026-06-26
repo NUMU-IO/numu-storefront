@@ -125,6 +125,22 @@ export default async function CmsPage({ params }: PageProps) {
             },
           },
         }}
+        // ENG-2: themes that ship no `page` template render blank — render the
+        // real CMS title+body (same markup as the built-in branch below) so a
+        // published content page is never a blank white screen.
+        routeFallback={
+          <div className="max-w-4xl mx-auto p-8">
+            <h1 className="text-3xl font-bold">{resolvedTitle}</h1>
+            {resolvedBody ? (
+              <div
+                className="prose mt-4 max-w-none"
+                dangerouslySetInnerHTML={{ __html: resolvedBody }}
+              />
+            ) : (
+              <p className="text-gray-600 mt-4">No content yet.</p>
+            )}
+          </div>
+        }
       />
     );
   }

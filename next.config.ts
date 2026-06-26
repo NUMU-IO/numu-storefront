@@ -81,6 +81,22 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // BYOT federation runtime (react/react-dom/sdk/chunks, ~300KB).
+        // Next serves public/ with `max-age=0`, so every navigation (themes
+        // do full-page <a> loads) re-fetched/re-validated the whole runtime —
+        // the dominant nav latency (SSR itself is ~150ms). These files are
+        // compatible within an SDK major, so cache them a few minutes +
+        // revalidate in the background; a deploy still propagates within
+        // minutes. theme.js (R2) is already cached the same way.
+        source: "/__numu-runtime/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=300, stale-while-revalidate=86400",
+          },
+        ],
+      },
     ];
   },
 };

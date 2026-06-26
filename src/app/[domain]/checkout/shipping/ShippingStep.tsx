@@ -17,6 +17,7 @@ import {
   patchCheckoutState,
   readCheckoutState,
 } from "@/lib/checkout-state";
+import { resolveApiError } from "@/lib/api-error";
 import type { ShippingRateOption } from "@/types/checkout";
 
 interface PickupLocation {
@@ -224,7 +225,7 @@ export function ShippingStep() {
           setPickupLocations([]);
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(resolveApiError(e, 0, locale).message);
         setRates([]);
         setPickupLocations([]);
       } finally {
@@ -233,6 +234,21 @@ export function ShippingStep() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the order summary's Shipping line + Total in sync the moment a rate
+  // is chosen — auto-selected on load OR picked manually — instead of only
+  // after "Continue". `patchCheckoutState` fires `numu:checkout:updated`, which
+  // the (persistent, layout-level) OrderSummary listens for and re-reads.
+  useEffect(() => {
+    if (mode !== "ship" || !selected) return;
+    const rate = rates?.find((r) => r.id === selected);
+    if (rate) {
+      patchCheckoutState({
+        shipping_cost_cents: rate.amount_cents,
+        shipping_method: rate.name,
+      });
+    }
+  }, [selected, rates, mode]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -245,6 +261,8 @@ export function ShippingStep() {
       patchCheckoutState({
         selected_shipping_rate_id: selected,
         shipping_method: rate?.name || null,
+        // Cache the cost so the order-summary Total can include shipping.
+        shipping_cost_cents: rate?.amount_cents ?? null,
         pickup_location_id: null,
       });
     } else {
@@ -257,6 +275,8 @@ export function ShippingStep() {
         pickup_location_id: pickupId,
         selected_shipping_rate_id: null,
         shipping_method: loc?.name ? `Pickup at ${loc.name}` : "Pickup",
+        // In-store pickup has no shipping charge.
+        shipping_cost_cents: 0,
       });
     }
     router.push(`/${params.domain}/checkout/payment`);

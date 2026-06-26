@@ -1,4 +1,9 @@
-import { fetchStoreByDomain, fetchProductBySlug, fetchThemeSettings } from "@/lib/api-client";
+import {
+  fetchStoreByDomain,
+  fetchProductBySlug,
+  fetchThemeSettings,
+  fetchProducts,
+} from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -9,6 +14,8 @@ import {
   buildProductLd,
   serializeLd,
 } from "@/lib/json-ld";
+import { FunnelTracker } from "@/components/tracking/FunnelTracker";
+import { storeRobots, NOINDEX_ROBOTS, type StoreForSeo } from "@/lib/seo";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
@@ -42,22 +49,37 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   try {
     const store = await fetchStoreByDomain(domain);
     const product = await fetchProductBySlug(store.id, slug);
+    const canonical = `${storeBaseUrl(domain)}/products/${slug}`;
+    const ptitle = `${product?.seo_title || product?.name || "Product"} | ${store?.name || "Store"}`;
+    const pdesc = product?.seo_description || product?.description || "";
+    const pimg = product?.images?.[0]?.url || undefined;
+    const productActive =
+      String(product?.status ?? "active").toLowerCase() === "active";
     return {
-      title: `${product?.seo_title || product?.name || "Product"} | ${store?.name || "Store"}`,
-      description:
-        product?.seo_description || product?.description || "",
-      alternates: {
-        canonical: `${storeBaseUrl(domain)}/products/${slug}`,
-      },
+      title: ptitle,
+      description: pdesc,
+      alternates: { canonical },
       openGraph: {
         title: product?.name,
         description: product?.description,
         type: "website",
-        images: product?.images?.[0]?.url ? [product.images[0].url] : undefined,
+        url: canonical,
+        siteName: store?.name,
+        images: pimg ? [pimg] : undefined,
       },
+      twitter: {
+        card: pimg ? "summary_large_image" : "summary",
+        title: product?.name,
+        description: product?.description,
+        ...(pimg ? { images: [pimg] } : {}),
+      },
+      // noindex a draft/archived product or a non-indexable store.
+      robots: storeRobots(store as unknown as StoreForSeo, {
+        forceNoindex: !productActive,
+      }),
     };
   } catch {
-    return { title: "Product" };
+    return { title: "Product", robots: NOINDEX_ROBOTS };
   }
 }
 
@@ -80,6 +102,11 @@ export default async function ProductPage({ params }: PageProps) {
   }
   const themeRaw = await fetchThemeSettings(store.id);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
+
+  // Catalogue slice so the bundle's useProducts() has data ON the PDP — the
+  // single-product fetch above doesn't populate the catalogue, which left the
+  // theme's "you may also like" rail empty. Best-effort; PDP renders without it.
+  const catalogue = await fetchProducts(store.id, 12).catch(() => []);
 
   const isByotTheme =
     !!themeSettings.external_theme?.bundle_url &&
@@ -120,6 +147,23 @@ export default async function ProductPage({ params }: PageProps) {
     />
   ));
 
+  // Meta ViewContent — rides along with the LD scripts so it fires in every
+  // render branch (BYOT / template / built-in). Value in MAJOR units.
+  const viewContent = product ? (
+    <FunnelTracker
+      key="vc"
+      step="product_view"
+      data={{
+        content_ids: [product.meta_catalog_id || product.id],
+        content_name: product.name,
+        content_type: "product",
+        value: product.price,
+        currency: product.currency || store?.currency || "EGP",
+      }}
+    />
+  ) : null;
+  const headExtras = viewContent ? [...ldScripts, viewContent] : ldScripts;
+
   // BYOT: hand the bundle the page context so it knows to render its
   // product template. Same fork the home route uses.
   if (
@@ -128,7 +172,7 @@ export default async function ProductPage({ params }: PageProps) {
   ) {
     return (
       <>
-        {ldScripts}
+        {headExtras}
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
           cssUrl={themeSettings.external_theme.css_url}
@@ -138,8 +182,19 @@ export default async function ProductPage({ params }: PageProps) {
             type: "product",
             title: product?.name,
             handle: slug,
-            data: product ? { product } : undefined,
+            data: product ? { product, products: catalogue } : undefined,
           }}
+          // ENG-2 defense-in-depth: every registered theme ships a `product`
+          // template, but if a bundle renders blank fall back to the functional
+          // built-in PDP (product is non-null here — the !product BYOT case
+          // notFound()s above). Add-to-cart stays reachable.
+          routeFallback={
+            product ? (
+              <BuiltInProductDetail
+                product={{ ...product, currency: product.currency || store?.currency }}
+              />
+            ) : undefined
+          }
         />
       </>
     );
@@ -149,7 +204,7 @@ export default async function ProductPage({ params }: PageProps) {
   if (productTemplate) {
     return (
       <>
-        {ldScripts}
+        {headExtras}
         <PageTemplateRenderer
           template={productTemplate}
           themeId={themeSettings.theme_id}
@@ -165,7 +220,7 @@ export default async function ProductPage({ params }: PageProps) {
   if (!product) {
     return (
       <>
-        {ldScripts}
+        {headExtras}
         <div className="max-w-4xl mx-auto p-8 text-center text-gray-500">
           This product is no longer available.
         </div>
@@ -174,7 +229,7 @@ export default async function ProductPage({ params }: PageProps) {
   }
   return (
     <>
-      {ldScripts}
+      {headExtras}
       <BuiltInProductDetail
         product={{
           ...product,

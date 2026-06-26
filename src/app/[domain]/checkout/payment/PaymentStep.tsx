@@ -17,6 +17,7 @@ import {
   patchCheckoutState,
   readCheckoutState,
 } from "@/lib/checkout-state";
+import { trackFunnel } from "@/lib/meta-pixel";
 
 /**
  * Step 3 — payment method picker.
@@ -25,11 +26,41 @@ import {
  * /api/storefront/checkout-config). COD picks an extra "deposit gateway"
  * sub-form when the store's deposit policy is active. Picking the method
  * here doesn't commit anything — only the review step posts /api/checkout.
+ *
+ * The backend config payload shape is settling (Phase 2). We tolerate BOTH:
+ *   - legacy: { enabled_payment_methods: string[], cod_deposit_policy }
+ *   - new:    { payment_methods:[{code,label,label_ar,requires_deposit}],
+ *               cod:{enabled,deposit_required,deposit_gateways[]},
+ *               saved_cards_enabled, currency }
+ * `normalizeConfig` collapses either into one internal shape, preferring the
+ * merchant's own method labels when supplied.
  */
 
+interface MethodOption {
+  code: string;
+  label?: string;
+  label_ar?: string;
+  requires_deposit?: boolean;
+}
+
+/** Internal, normalized config the component renders from. */
 interface CheckoutConfig {
-  enabled_payment_methods: string[];
+  methods: MethodOption[];
+  cod: { enabled: boolean; deposit_gateways: string[] };
+  saved_cards_enabled: boolean;
+}
+
+/** Raw payload either backend shape can produce. */
+interface RawCheckoutConfig {
+  enabled_payment_methods?: string[];
+  payment_methods?: MethodOption[];
   cod_deposit_policy?: { enabled?: boolean; allowed_gateways?: string[] };
+  cod?: {
+    enabled?: boolean;
+    deposit_required?: boolean;
+    deposit_gateways?: string[];
+  };
+  saved_cards_enabled?: boolean;
 }
 
 interface SavedCard {
@@ -42,7 +73,51 @@ interface SavedCard {
 
 const SAVED_CARD_GATEWAYS = new Set(["paymob", "paymob_card", "kashier"]);
 
-function methodLabel(m: string, isAr: boolean): string {
+const FALLBACK_CONFIG: CheckoutConfig = {
+  methods: [{ code: "paymob" }, { code: "cod" }],
+  cod: { enabled: false, deposit_gateways: [] },
+  saved_cards_enabled: true,
+};
+
+/** Collapse either backend payload shape into the internal CheckoutConfig. */
+function normalizeConfig(raw: RawCheckoutConfig | null | undefined): CheckoutConfig {
+  if (!raw) return FALLBACK_CONFIG;
+
+  // Methods: prefer the rich `payment_methods[{code,label,…}]`; otherwise
+  // map the legacy `enabled_payment_methods: string[]`.
+  let methods: MethodOption[] = [];
+  if (Array.isArray(raw.payment_methods) && raw.payment_methods.length > 0) {
+    methods = raw.payment_methods.filter((m) => m && m.code);
+  } else if (Array.isArray(raw.enabled_payment_methods)) {
+    methods = raw.enabled_payment_methods.map((code) => ({ code }));
+  }
+
+  // COD deposit: new `cod:{…}` wins; else fold the legacy
+  // `cod_deposit_policy:{enabled,allowed_gateways}`.
+  const codEnabled = Boolean(
+    raw.cod?.deposit_required ??
+      raw.cod?.enabled ??
+      raw.cod_deposit_policy?.enabled,
+  );
+  const depositGateways =
+    raw.cod?.deposit_gateways ?? raw.cod_deposit_policy?.allowed_gateways ?? [];
+
+  return {
+    methods,
+    cod: { enabled: codEnabled, deposit_gateways: depositGateways },
+    // Default true so a backend that doesn't yet emit the flag still shows
+    // saved cards when the customer has any on file.
+    saved_cards_enabled: raw.saved_cards_enabled ?? true,
+  };
+}
+
+function methodLabel(opt: MethodOption | string, isAr: boolean): string {
+  const code = typeof opt === "string" ? opt : opt.code;
+  // Merchant-supplied labels take precedence over our built-in map.
+  if (typeof opt === "object") {
+    const merchant = isAr ? opt.label_ar : opt.label;
+    if (merchant) return merchant;
+  }
   const labels: Record<string, [string, string]> = {
     paymob: ["Credit / debit card (Paymob)", "بطاقة ائتمان / خصم (Paymob)"],
     paymob_card: ["Credit / debit card (Paymob)", "بطاقة ائتمان / خصم (Paymob)"],
@@ -53,8 +128,8 @@ function methodLabel(m: string, isAr: boolean): string {
     instapay: ["InstaPay", "إنستاباي"],
     cod: ["Cash on Delivery", "الدفع عند الاستلام"],
   };
-  const entry = labels[m];
-  if (!entry) return m;
+  const entry = labels[code];
+  if (!entry) return code;
   return isAr ? entry[1] : entry[0];
 }
 
@@ -118,20 +193,35 @@ export function PaymentStep() {
     );
 
     (async () => {
+      let savedCardsEnabled = true;
       try {
         const res = await fetch("/api/storefront/checkout-config", {
           cache: "no-store",
         });
         if (res.ok) {
           const body = await res.json();
-          setConfig((body?.data || body) as CheckoutConfig);
+          const normalized = normalizeConfig(
+            (body?.data || body) as RawCheckoutConfig,
+          );
+          // If the backend returned no methods at all, keep the
+          // last-resort fallback so the buyer is never stranded.
+          setConfig(
+            normalized.methods.length > 0 ? normalized : FALLBACK_CONFIG,
+          );
+          savedCardsEnabled = normalized.saved_cards_enabled;
         } else {
-          setConfig({ enabled_payment_methods: ["paymob", "cod"] });
+          setConfig(FALLBACK_CONFIG);
         }
       } catch {
-        setConfig({ enabled_payment_methods: ["paymob", "cod"] });
+        setConfig(FALLBACK_CONFIG);
       } finally {
         setLoading(false);
+      }
+
+      // Saved cards are only fetched when the store enables them.
+      if (!savedCardsEnabled) {
+        setSavedCards([]);
+        return;
       }
 
       try {
@@ -168,8 +258,7 @@ export function PaymentStep() {
       return;
     }
     const codSelected = method === "cod";
-    const depositRequired =
-      codSelected && Boolean(config?.cod_deposit_policy?.enabled);
+    const depositRequired = codSelected && Boolean(config?.cod.enabled);
     if (depositRequired && !depositGateway) {
       setError(t("pickDeposit"));
       return;
@@ -180,6 +269,8 @@ export function PaymentStep() {
         (c.gateway === method ||
           (c.gateway === "paymob" && method === "paymob_card")),
     );
+    // Meta AddPaymentInfo — fired when the buyer confirms a payment method.
+    trackFunnel("add_payment_info", { payment_method: method });
     patchCheckoutState({
       payment_method: method,
       cod_requested: codSelected,
@@ -191,9 +282,8 @@ export function PaymentStep() {
     router.push(`/${params.domain}/checkout/review`);
   }
 
-  const methods = config?.enabled_payment_methods || [];
-  const showDepositPicker =
-    method === "cod" && Boolean(config?.cod_deposit_policy?.enabled);
+  const methods = config?.methods || [];
+  const showDepositPicker = method === "cod" && Boolean(config?.cod.enabled);
   const savedCardsForMethod = (savedCards || []).filter(
     (c) =>
       method &&
@@ -214,14 +304,17 @@ export function PaymentStep() {
           {!loading && methods.length > 0 && (
             <ul className="space-y-2.5">
               {methods.map((m) => (
-                <li key={m}>
-                  <OptionRow htmlFor={`m-${m}`} selected={method === m}>
+                <li key={m.code}>
+                  <OptionRow
+                    htmlFor={`m-${m.code}`}
+                    selected={method === m.code}
+                  >
                     <input
-                      id={`m-${m}`}
+                      id={`m-${m.code}`}
                       type="radio"
                       name="payment"
-                      checked={method === m}
-                      onChange={() => setMethod(m)}
+                      checked={method === m.code}
+                      onChange={() => setMethod(m.code)}
                       className="h-4 w-4 accent-gray-900"
                     />
                     <span className="font-medium text-gray-900">
@@ -279,7 +372,7 @@ export function PaymentStep() {
               className="max-w-xs"
             >
               <option value="">{t("pickGateway")}</option>
-              {(config?.cod_deposit_policy?.allowed_gateways || []).map((g) => (
+              {(config?.cod.deposit_gateways || []).map((g) => (
                 <option key={g} value={g}>
                   {methodLabel(g, isAr)}
                 </option>

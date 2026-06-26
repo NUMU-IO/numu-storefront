@@ -42,9 +42,39 @@ function normalizeRaw(raw: Record<string, any>): ThemeSettingsV3 {
   // nested V3 payload when present.
   if (raw?.customization_v3?.schema_version === 3) {
     const v3 = raw.customization_v3 as ThemeSettingsV3;
-    // The nested V3 customization doesn't carry external_theme metadata;
-    // pull it from the outer envelope so sanitization has access to
-    // section_schemas + presets.
+
+    // The ACTIVE theme_version is authoritative for which bundle to load.
+    // The outer envelope's bundle_url/css_url/settings_schema/section_schemas
+    // come from that version (set by activate_theme), whereas the nested
+    // customization_v3.external_theme is the merchant's captured customization
+    // — which activate_theme PRESERVES verbatim on a same-theme update (the
+    // theme-update channel), leaving its bundle_url pointing at the OLD
+    // version. Since the storefront loads external_theme.bundle_url, an adopted
+    // update would otherwise never reach the rendered store. Prefer the outer
+    // envelope so the activated version always wins. (The synthesised preview
+    // payload has no outer bundle_url and routes through the schema_version===3
+    // branch above, so this never disturbs ?preview_theme_slug.)
+    if (raw?.bundle_url) {
+      const prev = v3.external_theme ?? null;
+      return {
+        ...v3,
+        external_theme: {
+          bundle_url: String(raw.bundle_url),
+          css_url: raw.css_url ?? prev?.css_url ?? null,
+          mode: prev?.mode ?? "production",
+          settings_schema: raw.settings_schema ?? prev?.settings_schema ?? null,
+          section_schemas: raw.section_schemas ?? prev?.section_schemas ?? null,
+          presets: prev?.presets ?? null,
+          theme_id:
+            (typeof raw.theme_id === "string" ? raw.theme_id : null) ??
+            prev?.theme_id ??
+            null,
+        },
+      };
+    }
+
+    // No outer bundle_url — lift external_theme off the envelope when the
+    // nested block lacks it (preserves the prior fallback behaviour).
     if (!v3.external_theme && raw?.external_theme?.bundle_url) {
       return {
         ...v3,

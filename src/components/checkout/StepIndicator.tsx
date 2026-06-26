@@ -67,9 +67,12 @@ export function StepIndicator({
               <div className="flex items-center gap-2">
                 <span
                   className={cn(
-                    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors",
-                    (done || active) && "bg-gray-900 text-white",
-                    !done && !active && "bg-gray-200 text-gray-500",
+                    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors",
+                    (done || active) &&
+                      "bg-[var(--ck-button)] text-[var(--ck-button-text)]",
+                    !done &&
+                      !active &&
+                      "border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] text-[var(--ck-muted)]",
                   )}
                   aria-current={active ? "step" : undefined}
                 >
@@ -77,10 +80,14 @@ export function StepIndicator({
                 </span>
                 <span
                   className={cn(
-                    "whitespace-nowrap text-xs sm:text-sm",
+                    "whitespace-nowrap text-[11px] [letter-spacing:var(--ck-label-tracking)] [text-transform:var(--ck-label-transform)] sm:text-xs",
+                    // On narrow phones only the ACTIVE step keeps its label, so
+                    // the 4-step row never overflows (uppercase labels + circles
+                    // + connectors don't fit at 360px). From `sm` up, all show.
+                    active ? "inline" : "hidden sm:inline",
                     (active || done)
-                      ? "font-semibold text-gray-900"
-                      : "text-gray-400",
+                      ? "text-[var(--ck-fg)] [font-weight:var(--ck-label-weight)]"
+                      : "text-[var(--ck-muted)]",
                   )}
                 >
                   {isAr ? s.ar : s.en}
@@ -91,7 +98,7 @@ export function StepIndicator({
                   aria-hidden
                   className={cn(
                     "mx-2 h-px flex-1 sm:mx-3",
-                    done ? "bg-gray-900" : "bg-gray-200",
+                    done ? "bg-[var(--ck-button)]" : "bg-[var(--ck-border)]",
                   )}
                 />
               )}
