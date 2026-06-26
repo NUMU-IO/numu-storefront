@@ -146,8 +146,8 @@ export function ThankYou({
           if (!initialOrder) {
             setError(
               T(
-                "We've emailed your order confirmation. To see full order details — items, delivery, and tracking — sign in with the email you used at checkout, or open the link in that email.",
-                "بعتنالك تأكيد الطلب على الإيميل. لرؤية تفاصيل طلبك كاملة — المنتجات والتوصيل والتتبّع — سجّل الدخول بنفس الإيميل اللي طلبت بيه، أو افتح اللينك في الإيميل.",
+                "We've sent your order confirmation to your email and WhatsApp — with your items, delivery details, and tracking. Keep your order number handy to follow up.",
+                "بعتنالك تأكيد الطلب على الإيميل وواتساب — وفيه تفاصيل المنتجات والتوصيل والتتبّع. احتفظ برقم الطلب لأي استفسار.",
               ),
             );
           }
@@ -375,10 +375,24 @@ export function ThankYou({
       {error && (
         <div
           role="status"
-          className="flex items-start gap-2.5 rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] bg-[var(--ck-accent-tint)] p-4 text-sm leading-relaxed text-[var(--ck-fg)]"
+          className="rounded-[var(--ck-radius)] border border-[var(--ck-border)] bg-[var(--ck-surface)] p-5 shadow-[var(--ck-shadow)]"
         >
-          <span aria-hidden className="mt-0.5 shrink-0 text-base">📧</span>
-          <p>{error}</p>
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--ck-accent-tint)] text-[var(--ck-accent)]">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-[var(--ck-fg)]">
+                {T("Confirmation sent", "تم إرسال التأكيد")}
+              </h3>
+              <p className="mt-1 text-sm leading-relaxed text-[var(--ck-muted)]">
+                {error}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
