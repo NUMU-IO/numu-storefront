@@ -66,12 +66,13 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
     if (g) other["google-site-verification"] = g;
     if (b) other["msvalidate.01"] = b;
     if (fb) other["facebook-domain-verification"] = fb;
-    // Theme customizer's identity.favicon_url wins; fall back to the favicon
-    // set in the hub's Online Store → Preferences (`settings.favicon_url`) so
-    // a merchant who uploads it there sees it without opening the editor;
-    // finally fall back to a V3 theme's Brand → Favicon global setting
-    // (`theme_settings.global_settings.favicon`) so a BYOT theme that exposes
-    // its own favicon picker is honoured too.
+    // Favicon resolution. The merchant's explicit upload from the hub's Store
+    // Settings / Online Store → Preferences (`settings.favicon_url`) wins, then
+    // a V3 theme's Brand → Favicon global setting
+    // (`theme_settings.global_settings.favicon`), and finally the legacy theme
+    // customizer's `identity.favicon_url`. The legacy identity field is LAST on
+    // purpose: it lingers from the old editor and used to shadow newer uploads,
+    // so an explicit settings/global favicon must out-rank it.
     const ts = store.theme_settings as unknown as
       | {
           identity?: { favicon_url?: string };
@@ -79,10 +80,10 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
         }
       | undefined;
     const favicon =
-      ts?.identity?.favicon_url ||
       (store.settings as unknown as { favicon_url?: string } | undefined)
         ?.favicon_url ||
-      ts?.global_settings?.favicon;
+      ts?.global_settings?.favicon ||
+      ts?.identity?.favicon_url;
 
     return {
       metadataBase: new URL(base),
