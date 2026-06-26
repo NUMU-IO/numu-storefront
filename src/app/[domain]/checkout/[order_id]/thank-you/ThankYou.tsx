@@ -184,33 +184,44 @@ export function ThankYou({
       {/* Success hero */}
       <section className="overflow-hidden rounded-[var(--ck-radius)] border border-[var(--ck-border)] bg-[var(--ck-surface)] text-center shadow-[var(--ck-shadow)]">
         <div className="px-6 pb-9 pt-11">
-          <span className="mx-auto mb-5 flex h-[72px] w-[72px] items-center justify-center rounded-full bg-[var(--ck-accent-tint)]">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--ck-accent)"
-              strokeWidth={2.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-              className="h-9 w-9"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          </span>
+          <img
+            src="/success.svg"
+            alt=""
+            aria-hidden
+            width={88}
+            height={88}
+            className="mx-auto mb-5 h-[88px] w-[88px]"
+          />
           <h1 className="text-[26px] text-[var(--ck-fg)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)]">
             {T("Thank you for your order!", "شكراً لطلبك!")}
           </h1>
           <p className="mt-2 text-[15px] text-[var(--ck-muted)]">
             {T(
-              "A confirmation is on its way to your inbox.",
-              "هنبعتلك تأكيد على إيميلك حالاً.",
+              "We've sent your order confirmation to your email and WhatsApp.",
+              "بعتنالك تأكيد طلبك على الإيميل وعلى واتساب.",
             )}
           </p>
           <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-[var(--ck-border)] bg-[var(--ck-bg)] px-4 py-2 text-sm">
             <span className="text-[var(--ck-muted)]">{T("Order", "الطلب")}</span>
             <span className="font-mono font-semibold text-[var(--ck-fg)]" dir="ltr">
               {displayNumber}
+            </span>
+          </div>
+
+          {/* Notification channels */}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--ck-border)] px-3 py-1.5 text-xs text-[var(--ck-muted)]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="m22 7-10 5L2 7" />
+              </svg>
+              {T("Emailed", "تم الإرسال بالإيميل")}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#25D366]/40 bg-[#25D366]/10 px-3 py-1.5 text-xs font-medium text-[#128C4B]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 0 0 1.51 5.26l-.999 3.648 3.978-1.04zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.017-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.71.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
+              </svg>
+              {T("WhatsApp sent", "تم الإرسال على واتساب")}
             </span>
           </div>
         </div>
@@ -354,21 +365,95 @@ export function ThankYou({
         </div>
       )}
 
-      <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:justify-center">
+      {/* Order tracking */}
+      <section className="rounded-[var(--ck-radius)] border border-[var(--ck-border)] bg-[var(--ck-surface)] p-6 shadow-[var(--ck-shadow)]">
+        <h2 className="mb-5 text-lg font-semibold tracking-tight text-[var(--ck-fg)]">
+          {T("Order tracking", "تتبّع الطلب")}
+        </h2>
+        <Tracker order={order} T={T} />
+        <Link
+          href={`/${params.domain}/account/orders/${orderId}`}
+          className="mt-5 inline-flex w-full items-center justify-center rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] px-6 py-3 text-sm font-semibold text-[var(--ck-fg)] transition-colors hover:bg-[var(--ck-bg)] sm:w-auto"
+        >
+          {T("Track your order", "تتبّع طلبك")}
+        </Link>
+      </section>
+
+      <div className="pt-1">
         <Link
           href={`/${params.domain}`}
-          className="inline-flex items-center justify-center rounded-[var(--ck-radius-sm)] bg-[var(--ck-button)] px-6 py-3 text-sm font-semibold text-[var(--ck-button-text)] shadow-[var(--ck-shadow)] transition-transform hover:-translate-y-0.5"
+          className="inline-flex w-full items-center justify-center rounded-[var(--ck-radius-sm)] bg-[var(--ck-button)] px-6 py-3.5 text-sm font-semibold text-[var(--ck-button-text)] shadow-[var(--ck-shadow)] transition-transform hover:-translate-y-0.5"
         >
           {T("Continue shopping", "متابعة التسوق")}
         </Link>
-        <Link
-          href={`/${params.domain}/account/orders`}
-          className="inline-flex items-center justify-center rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] px-6 py-3 text-sm font-semibold text-[var(--ck-fg)] transition-colors hover:bg-[var(--ck-bg)]"
-        >
-          {T("View your orders", "عرض طلباتك")}
-        </Link>
       </div>
     </div>
+  );
+}
+
+/** Horizontal status stepper. Marks progress from the order status; defaults to
+ *  "placed" (step 0 done) for a freshly-placed order / guest fallback. */
+function Tracker({
+  order,
+  T,
+}: {
+  order: Order | null;
+  T: (en: string, ar: string) => string;
+}) {
+  const steps = [
+    { key: "placed", en: "Placed", ar: "تم الطلب" },
+    { key: "confirmed", en: "Confirmed", ar: "تم التأكيد" },
+    { key: "shipped", en: "Shipped", ar: "تم الشحن" },
+    { key: "delivered", en: "Delivered", ar: "تم التوصيل" },
+  ];
+  const order_idx: Record<string, number> = {
+    pending: 0,
+    placed: 0,
+    paid: 1,
+    confirmed: 1,
+    processing: 1,
+    shipped: 2,
+    out_for_delivery: 2,
+    delivered: 3,
+    completed: 3,
+  };
+  const current = order_idx[(order?.status || "").toLowerCase()] ?? 0;
+
+  return (
+    <ol className="flex items-start">
+      {steps.map((s, i) => {
+        const done = i <= current;
+        return (
+          <li key={s.key} className="relative flex flex-1 flex-col items-center">
+            {i < steps.length - 1 && (
+              <span
+                aria-hidden
+                className="absolute top-3 h-0.5 w-full ltr:left-1/2 rtl:right-1/2"
+                style={{
+                  background: i < current ? "var(--ck-accent)" : "var(--ck-border)",
+                }}
+              />
+            )}
+            <span
+              className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 text-[10px]"
+              style={{
+                borderColor: done ? "var(--ck-accent)" : "var(--ck-border)",
+                background: done ? "var(--ck-accent)" : "var(--ck-surface)",
+                color: done ? "var(--ck-accent-text)" : "var(--ck-muted)",
+              }}
+            >
+              {done ? "✓" : i + 1}
+            </span>
+            <span
+              className="mt-2 text-center text-[11px]"
+              style={{ color: done ? "var(--ck-fg)" : "var(--ck-muted)" }}
+            >
+              {T(s.en, s.ar)}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
