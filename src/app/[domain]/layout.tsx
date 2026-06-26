@@ -113,7 +113,13 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
       openGraph: buildOpenGraph(store, { title, description, url: base, image }),
       twitter: buildTwitter({ title, description, image }),
       robots: storeRobots(store),
-      ...(favicon ? { icons: { icon: favicon, shortcut: favicon } } : {}),
+      // A custom store favicon must out-rank the platform default
+      // (app/favicon.ico — the NUMU brand mark shown when a store sets none).
+      // Declaring it sizes:"any" marks it scalable so browsers prefer it over
+      // the fixed-size .ico.
+      ...(favicon
+        ? { icons: { icon: [{ url: favicon, sizes: "any" }], shortcut: favicon } }
+        : {}),
       ...(Object.keys(other).length ? { other } : {}),
     };
   } catch {
