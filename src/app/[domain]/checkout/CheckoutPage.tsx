@@ -655,15 +655,40 @@ export function CheckoutPage() {
           return;
         }
         // Our API error envelope is { error: { code, message, details? } }.
-        // Never JSON.stringify it at the buyer — show the message, and for a
-        // generic VALIDATION_ERROR (field details are hidden on public
-        // endpoints) show a friendly hint instead of "Request validation
-        // failed". Client-side validation above already catches the common
-        // phone/email cases; this is the safety net for anything else.
+        // Never JSON.stringify it at the buyer. The checkout endpoint now
+        // returns a sanitized `details: [{field, message, type}]` list, so
+        // when present we highlight the offending field inline and show its
+        // specific message; otherwise fall back to a friendly hint. Client-
+        // side validation above already catches the common phone/email cases.
         const fb = detail || body?.error || `Checkout failed (${res.status})`;
         let msg: string;
         if (typeof fb === "string") {
           msg = fb;
+        } else if (fb && typeof fb === "object" && Array.isArray(fb.details) && fb.details.length) {
+          // Map backend field paths (e.g. "body.shipping_address.phone") to
+          // the form's inline-error keys by their last segment.
+          const FIELD_MAP: Record<string, string> = {
+            phone: "phone",
+            email: "email",
+            first_name: "first_name",
+            last_name: "last_name",
+            city: "city",
+            state: "state",
+            governorate: "state",
+            line1: "line1",
+            line2: "line2",
+            country: "country",
+          };
+          const fe: Record<string, string> = {};
+          for (const d of fb.details as Array<{ field?: string; message?: string }>) {
+            const seg = String(d.field || "").split(".").pop() || "";
+            const key = FIELD_MAP[seg];
+            if (key && d.message) fe[key] = d.message;
+          }
+          if (Object.keys(fe).length) setFieldErrors((prev) => ({ ...prev, ...fe }));
+          msg =
+            (fb.details[0] as { message?: string })?.message ||
+            (isAr ? "تأكد من صحة البيانات المُدخلة." : "Please check your details.");
         } else if (fb && typeof fb === "object" && fb.code === "VALIDATION_ERROR") {
           msg = isAr
             ? "تأكد من صحة البيانات المُدخلة (الهاتف، العنوان…) وحاول مرة أخرى."
