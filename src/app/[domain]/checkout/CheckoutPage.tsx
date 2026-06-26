@@ -69,6 +69,35 @@ const COUNTRIES = [
   ["LB", "Lebanon", "لبنان"],
 ] as const;
 
+// International dial codes for the phone-prefix dropdown (keyed by the
+// COUNTRIES code above). Default EG (+20).
+const DIAL: Record<string, string> = {
+  EG: "+20",
+  AE: "+971",
+  SA: "+966",
+  KW: "+965",
+  QA: "+974",
+  BH: "+973",
+  OM: "+968",
+  JO: "+962",
+  LB: "+961",
+};
+
+/**
+ * Combine the selected dial code with the typed local number into an E.164-ish
+ * string for submission. Numbers the buyer already wrote in international form
+ * (leading "+") are left untouched; otherwise the local trunk "0" is stripped
+ * and the dial code prepended (e.g. EG + "01001234567" → "+201001234567").
+ */
+function composePhone(cc: string, local: string): string {
+  const trimmed = local.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("+")) return trimmed.replace(/[\s()-]/g, "");
+  const dial = DIAL[cc] || "";
+  const national = trimmed.replace(/[\s()-]/g, "").replace(/^0+/, "");
+  return dial ? `${dial}${national}` : national;
+}
+
 // ── Payment config (same normalizer the old PaymentStep used) ──────
 interface MethodOption {
   code: string;
@@ -187,6 +216,13 @@ const T = {
   pinDesc: { en: "So we reach you fast and accurately", ar: "علشان نوصلك بسرعة وبدقة" },
   pinCta: { en: "Pin", ar: "تحديد" },
   reqField: { en: "This field is required", ar: "هذا الحقل مطلوب" },
+  phoneReq: { en: "Phone number is required", ar: "رقم الهاتف مطلوب" },
+  nameShort: { en: "Too short", ar: "قصير جداً" },
+  addrShort: {
+    en: "Address must be at least 10 characters",
+    ar: "العنوان يجب ألا يقل عن ١٠ أحرف",
+  },
+  govReq: { en: "Governorate is required", ar: "المحافظة مطلوبة" },
   pickMethod: { en: "Pick a payment method.", ar: "اختر طريقة دفع." },
   pickGatewayErr: { en: "Pick a gateway for the COD deposit.", ar: "اختر بوابة دفع للعربون." },
   noShip: { en: "No shipping available for this address.", ar: "لا يوجد شحن متاح لهذا العنوان." },
@@ -195,6 +231,33 @@ const T = {
     ar: "ابعتلي تحديثات واتساب (عروض ووصول منتجات). ابعت STOP في أي وقت.",
   },
 } as const;
+
+// ── Inline icons (numu-storefront ships no icon library) ───────────
+function PayIcon({ code }: { code: string }) {
+  // Cash banknote for COD; a generic card for every online method.
+  if (code === "cod" || code === "fawry") {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-[var(--ck-fg)]">
+        <rect x="2" y="6" width="20" height="12" rx="2" />
+        <circle cx="12" cy="12" r="2.5" />
+        <path d="M6 12h.01M18 12h.01" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-[var(--ck-fg)]">
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <path d="M2 10h20" />
+    </svg>
+  );
+}
+function CheckIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-[var(--ck-accent)]">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
 
 export function CheckoutPage() {
   const router = useRouter();
@@ -207,6 +270,7 @@ export function CheckoutPage() {
   // Contact + address
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [phoneCc, setPhoneCc] = useState("EG");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [line1, setLine1] = useState("");
@@ -490,7 +554,7 @@ export function CheckoutPage() {
     if (emailCfg.enabled && emailCfg.required && !email.trim()) errs.email = reqMsg;
     else if (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()))
       errs.email = isAr ? "بريد إلكتروني غير صحيح" : "Enter a valid email";
-    if (stdField(fieldsConfig, "phone").required && !phone.trim()) errs.phone = reqMsg;
+    if (stdField(fieldsConfig, "phone").required && !phone.trim()) errs.phone = t("phoneReq");
     else if (
       phone.trim() &&
       // Mirror the backend rule (8–15 digits, optional leading +) so an
@@ -501,12 +565,16 @@ export function CheckoutPage() {
       errs.phone = isAr
         ? "رقم هاتف غير صحيح (٨–١٥ رقمًا)"
         : "Enter a valid phone number (8–15 digits)";
-    if (stdField(fieldsConfig, "first_name").required && !firstName.trim()) errs.first_name = reqMsg;
+    // Name: a required first name must be a real name, not a single letter.
+    if (stdField(fieldsConfig, "first_name").required && firstName.trim().length < 2)
+      errs.first_name = t("nameShort");
     if (lastCfg.enabled && lastCfg.required && !lastName.trim()) errs.last_name = reqMsg;
-    if (stdField(fieldsConfig, "address").required && !line1.trim()) errs.line1 = reqMsg;
+    // Address: a required detailed address needs enough to route a courier.
+    if (stdField(fieldsConfig, "address").required && line1.trim().length < 10)
+      errs.line1 = t("addrShort");
     if (areaCfg.enabled && areaCfg.required && !city.trim()) errs.city = reqMsg;
     if (landmarkCfg.enabled && landmarkCfg.required && !line2.trim()) errs.line2 = reqMsg;
-    if (stdField(fieldsConfig, "governorate").required && !stateGov.trim()) errs.state = reqMsg;
+    if (stdField(fieldsConfig, "governorate").required && !stateGov.trim()) errs.state = t("govReq");
     if (!country) errs.country = reqMsg;
     const customErrors = validateCustomFieldValues(
       fieldsConfig?.custom_fields || [],
@@ -519,6 +587,11 @@ export function CheckoutPage() {
       return;
     }
     setFieldErrors({});
+
+    // Phone for submission: prepend the selected dial code (the backend
+    // canonicalises to E.164, but sending it pre-composed keeps non-EG numbers
+    // correct and matches the prefix the buyer picked).
+    const submitPhone = composePhone(phoneCc, phone);
 
     // Shipping must resolve to a rate.
     if (!selectedRate) {
@@ -548,7 +621,7 @@ export function CheckoutPage() {
     // Persist a snapshot so a refresh / processing-poll can recover.
     patchCheckoutState({
       email,
-      phone,
+      phone: submitPhone,
       shipping_address: {
         first_name: firstName,
         last_name: lastName,
@@ -560,7 +633,7 @@ export function CheckoutPage() {
         state: stateGov || null,
         postal_code: postalCode || null,
         country,
-        phone: phone || null,
+        phone: submitPhone || null,
         ...(captured
           ? {
               latitude: captured.lat,
@@ -578,11 +651,11 @@ export function CheckoutPage() {
       deposit_gateway: depositRequired ? depositGateway : null,
     });
 
-    if (whatsappConsent && phone) {
+    if (whatsappConsent && submitPhone) {
       void fetch("/api/whatsapp/opt-in", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone: submitPhone }),
       }).catch(() => {});
     }
     trackFunnel("add_payment_info", { payment_method: method });
@@ -616,7 +689,7 @@ export function CheckoutPage() {
           state: stateGov || null,
           postal_code: postalCode || null,
           country,
-          phone: phone || null,
+          phone: submitPhone || null,
           ...(captured
             ? {
                 latitude: captured.lat,
@@ -921,24 +994,44 @@ export function CheckoutPage() {
                   />
                 </Field>
               )}
-              <Field label={t("phone")} htmlFor="phone" error={fieldErrors.phone}>
-                <TextInput
-                  id="phone"
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  required={stdField(fieldsConfig, "phone").required}
-                  aria-invalid={!!fieldErrors.phone}
-                  className={fieldErrors.phone ? INPUT_INVALID : undefined}
-                  value={phone}
-                  onChange={(e) => {
-                    setPhone(e.target.value);
-                    clearErr("phone");
-                  }}
-                  dir="ltr"
-                />
+              <Field
+                label={t("phone")}
+                htmlFor="phone"
+                error={fieldErrors.phone}
+                required={stdField(fieldsConfig, "phone").required}
+              >
+                <div className="flex gap-2" dir="ltr">
+                  <Select
+                    aria-label="Country code"
+                    value={phoneCc}
+                    onChange={(e) => setPhoneCc(e.target.value)}
+                    className="w-24 shrink-0 text-center"
+                  >
+                    {COUNTRIES.map(([code]) => (
+                      <option key={code} value={code}>
+                        {code} {DIAL[code]}
+                      </option>
+                    ))}
+                  </Select>
+                  <TextInput
+                    id="phone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    placeholder="100 123 4567"
+                    required={stdField(fieldsConfig, "phone").required}
+                    aria-invalid={!!fieldErrors.phone}
+                    className={`flex-1 ${fieldErrors.phone ? INPUT_INVALID : ""}`}
+                    value={phone}
+                    onChange={(e) => {
+                      setPhone(e.target.value);
+                      clearErr("phone");
+                    }}
+                    dir="ltr"
+                  />
+                </div>
               </Field>
-              <Field label={t("firstName")} htmlFor="first_name" error={fieldErrors.first_name}>
+              <Field label={t("firstName")} htmlFor="first_name" error={fieldErrors.first_name} required={stdField(fieldsConfig, "first_name").required}>
                 <TextInput
                   id="first_name"
                   autoComplete="given-name"
@@ -968,7 +1061,7 @@ export function CheckoutPage() {
                   />
                 </Field>
               )}
-              <Field label={t("address")} htmlFor="line1" className="sm:col-span-2" error={fieldErrors.line1}>
+              <Field label={t("address")} htmlFor="line1" className="sm:col-span-2" error={fieldErrors.line1} required={stdField(fieldsConfig, "address").required}>
                 <TextInput
                   id="line1"
                   autoComplete="address-line1"
@@ -1000,7 +1093,7 @@ export function CheckoutPage() {
                   />
                 </Field>
               )}
-              <Field label={t("governorate")} htmlFor="state" error={fieldErrors.state}>
+              <Field label={t("governorate")} htmlFor="state" error={fieldErrors.state} required={stdField(fieldsConfig, "governorate").required}>
                 {country === "EG" ? (
                   <Select
                     id="state"
@@ -1169,8 +1262,9 @@ export function CheckoutPage() {
                         name="payment"
                         checked={method === m.code}
                         onChange={() => setMethod(m.code)}
-                        className="h-4 w-4 accent-gray-900"
+                        className="sr-only"
                       />
+                      <PayIcon code={m.code} />
                       <span className="flex-1">
                         <span className="block font-medium text-gray-900">
                           {methodLabel(m, isAr)}
@@ -1181,6 +1275,7 @@ export function CheckoutPage() {
                           </span>
                         )}
                       </span>
+                      {method === m.code && <CheckIcon />}
                     </OptionRow>
                   </li>
                 ))}
