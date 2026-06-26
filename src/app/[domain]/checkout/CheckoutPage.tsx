@@ -927,7 +927,7 @@ export function CheckoutPage() {
 
   return (
     <>
-      <h1 className="mb-6 text-xl text-[var(--ck-fg)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)]">
+      <h1 className="mb-6 text-xl text-[var(--ck-fg)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)]">
         {t("checkout")}
       </h1>
 
