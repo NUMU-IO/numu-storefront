@@ -187,10 +187,10 @@ const T = {
   payment: { en: "Payment method", ar: "طريقة الدفع" },
   shipping: { en: "Shipping method", ar: "طريقة الشحن" },
   email: { en: "Email", ar: "البريد الإلكتروني" },
-  phone: { en: "Phone number", ar: "رقم الهاتف" },
-  firstName: { en: "First name", ar: "الاسم الأول" },
-  lastName: { en: "Last name", ar: "اسم العائلة" },
-  address: { en: "Detailed address", ar: "العنوان بالتفصيل" },
+  phone: { en: "Phone Number", ar: "رقم الهاتف" },
+  firstName: { en: "First Name", ar: "الاسم الأول" },
+  lastName: { en: "Last Name", ar: "اسم العائلة" },
+  address: { en: "Detailed Address", ar: "العنوان بالتفصيل" },
   apt: { en: "Apartment, suite, etc. (optional)", ar: "شقة، مبنى، إلخ (اختياري)" },
   city: { en: "City", ar: "المدينة" },
   governorate: { en: "Governorate", ar: "المحافظة" },
@@ -210,7 +210,7 @@ const T = {
   newCard: { en: "Enter a new card", ar: "إدخال بطاقة جديدة" },
   codDeposit: { en: "COD deposit gateway", ar: "بوابة عربون الدفع عند الاستلام" },
   pickGateway: { en: "— pick gateway —", ar: "— اختر بوابة —" },
-  confirm: { en: "Confirm order", ar: "تأكيد الطلب" },
+  confirm: { en: "Confirm Order", ar: "تأكيد الطلب" },
   placing: { en: "Placing order…", ar: "جارٍ تأكيد الطلب…" },
   pinTitle: { en: "Pin your location on the map", ar: "حدد موقعك على الخريطة" },
   pinDesc: { en: "So we reach you fast and accurately", ar: "علشان نوصلك بسرعة وبدقة" },
@@ -943,6 +943,22 @@ export function CheckoutPage() {
               className="mt-4 w-full"
             >
               {submitting ? t("placing") : t("confirm")}
+              {!submitting && (
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              )}
             </PrimaryButton>
             {codBlocked && (
               <p className="mt-2 text-center text-xs text-gray-500">
@@ -1035,6 +1051,7 @@ export function CheckoutPage() {
                 <TextInput
                   id="first_name"
                   autoComplete="given-name"
+                  placeholder="John"
                   required={stdField(fieldsConfig, "first_name").required}
                   aria-invalid={!!fieldErrors.first_name}
                   className={fieldErrors.first_name ? INPUT_INVALID : undefined}
@@ -1065,6 +1082,7 @@ export function CheckoutPage() {
                 <TextInput
                   id="line1"
                   autoComplete="address-line1"
+                  placeholder="Street / Building / Apt"
                   required={stdField(fieldsConfig, "address").required}
                   aria-invalid={!!fieldErrors.line1}
                   className={fieldErrors.line1 ? INPUT_INVALID : undefined}
