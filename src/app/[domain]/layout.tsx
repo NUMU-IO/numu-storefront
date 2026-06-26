@@ -66,13 +66,31 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
     if (g) other["google-site-verification"] = g;
     if (b) other["msvalidate.01"] = b;
     if (fb) other["facebook-domain-verification"] = fb;
-    // Favicon resolution. The merchant's explicit upload from the hub's Store
-    // Settings / Online Store → Preferences (`settings.favicon_url`) wins, then
-    // a V3 theme's Brand → Favicon global setting
-    // (`theme_settings.global_settings.favicon`), and finally the legacy theme
-    // customizer's `identity.favicon_url`. The legacy identity field is LAST on
-    // purpose: it lingers from the old editor and used to shadow newer uploads,
-    // so an explicit settings/global favicon must out-rank it.
+    // Favicon resolution, in priority order:
+    //   1. settings.favicon_url   — explicit upload from the hub's Store
+    //      Settings / Online Store → Preferences.
+    //   2. global_settings.favicon — the V3 theme-editor favicon. This lives in
+    //      the theme customization (/storefront/theme/{id}), a DIFFERENT source
+    //      than store.theme_settings, so we must fetch + resolve it explicitly;
+    //      otherwise a favicon set in the V3 editor never reaches the tab.
+    //   3. legacy theme customizer's identity.favicon_url — LAST so a stale
+    //      value from the old editor can't shadow a newer upload.
+    let v3Favicon: string | undefined;
+    try {
+      const themeRaw = await fetchThemeSettings(
+        (store as unknown as { id: string }).id,
+      );
+      const resolved = resolveThemeSettings(
+        (themeRaw as { theme_settings?: Record<string, unknown> })
+          ?.theme_settings ||
+          (themeRaw as Record<string, unknown>) ||
+          {},
+      );
+      v3Favicon = (resolved.global_settings as { favicon?: string } | undefined)
+        ?.favicon;
+    } catch {
+      // No theme installed / fetch failed — fall through to other sources.
+    }
     const ts = store.theme_settings as unknown as
       | {
           identity?: { favicon_url?: string };
@@ -82,6 +100,7 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
     const favicon =
       (store.settings as unknown as { favicon_url?: string } | undefined)
         ?.favicon_url ||
+      v3Favicon ||
       ts?.global_settings?.favicon ||
       ts?.identity?.favicon_url;
 
