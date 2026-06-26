@@ -1017,18 +1017,18 @@ export function CheckoutPage() {
                 required={stdField(fieldsConfig, "phone").required}
               >
                 <div className="flex gap-2" dir="ltr">
-                  <Select
+                  <select
                     aria-label="Country code"
                     value={phoneCc}
                     onChange={(e) => setPhoneCc(e.target.value)}
-                    className="w-24 shrink-0 text-center"
+                    className="w-[5.5rem] shrink-0 rounded-[var(--ck-radius-sm)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-white px-2.5 py-2.5 text-sm text-[var(--ck-fg)] outline-none transition-colors focus:border-[var(--ck-ring)] focus:ring-2 focus:ring-[var(--ck-ring)]/25"
                   >
                     {COUNTRIES.map(([code]) => (
                       <option key={code} value={code}>
                         {code} {DIAL[code]}
                       </option>
                     ))}
-                  </Select>
+                  </select>
                   <TextInput
                     id="phone"
                     type="tel"
@@ -1037,7 +1037,7 @@ export function CheckoutPage() {
                     placeholder="100 123 4567"
                     required={stdField(fieldsConfig, "phone").required}
                     aria-invalid={!!fieldErrors.phone}
-                    className={`flex-1 ${fieldErrors.phone ? INPUT_INVALID : ""}`}
+                    className={`min-w-0 flex-1 ${fieldErrors.phone ? INPUT_INVALID : ""}`}
                     value={phone}
                     onChange={(e) => {
                       setPhone(e.target.value);
