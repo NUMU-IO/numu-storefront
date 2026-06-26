@@ -101,10 +101,6 @@ export function ThankYou({
   const [order, setOrder] = useState<Order | null>(initialOrder);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState("en");
-  // True only once the customer-scoped order fetch succeeds — i.e. the visitor
-  // is signed in. Guests stay false so we don't link them to /account/orders
-  // (which redirects to /account/login).
-  const [authed, setAuthed] = useState(false);
 
   const isAr = locale === "ar";
   const T = (en: string, ar: string) => (isAr ? ar : en);
@@ -155,7 +151,6 @@ export function ThankYou({
         }
         const body = await res.json();
         setOrder((body?.data || body) as Order);
-        setAuthed(true);
       } catch {
         if (!initialOrder) {
           setError(
@@ -407,25 +402,13 @@ export function ThankYou({
           </span>
         </div>
         <Tracker order={order} T={T} />
-        {authed ? (
-          <Link
-            href={`/${params.domain}/account/orders/${orderId}`}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] px-6 py-3 text-sm font-semibold text-[var(--ck-fg)] transition-colors hover:bg-[var(--ck-bg)] sm:w-auto"
-          >
-            {T("Track your order", "تتبّع طلبك")}
-            <span aria-hidden className="rtl:rotate-180">→</span>
-          </Link>
-        ) : (
-          <p className="mt-6 flex items-center justify-center gap-2 text-sm text-[var(--ck-muted)] sm:justify-start">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" />
-            </svg>
-            {T(
-              "We'll send tracking updates to your email and WhatsApp.",
-              "هنبعتلك تحديثات التتبّع على الإيميل وواتساب.",
-            )}
-          </p>
-        )}
+        <Link
+          href={`/${params.domain}/track/${orderId}`}
+          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] px-6 py-3 text-sm font-semibold text-[var(--ck-fg)] transition-colors hover:bg-[var(--ck-bg)] sm:w-auto"
+        >
+          {T("Track your order", "تتبّع طلبك")}
+          <span aria-hidden className="rtl:rotate-180">→</span>
+        </Link>
       </section>
 
       <div className="pt-1">
