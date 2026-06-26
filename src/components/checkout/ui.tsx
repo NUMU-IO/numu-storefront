@@ -83,6 +83,7 @@ export function Field({
   children,
   hint,
   error,
+  required,
 }: {
   label: ReactNode;
   htmlFor?: string;
@@ -91,10 +92,13 @@ export function Field({
   hint?: ReactNode;
   /** Inline validation message — shown in place of the hint when present. */
   error?: ReactNode;
+  /** Show a required-field asterisk before the label. */
+  required?: boolean;
 }) {
   return (
     <label htmlFor={htmlFor} className={cn("block", className)}>
       <span className="mb-1.5 block text-xs text-[var(--ck-fg)] [font-weight:var(--ck-label-weight)] [letter-spacing:var(--ck-label-tracking)] [text-transform:var(--ck-label-transform)]">
+        {required ? <span className="text-red-500" aria-hidden>* </span> : null}
         {label}
       </span>
       {children}
