@@ -101,6 +101,10 @@ export function ThankYou({
   const [order, setOrder] = useState<Order | null>(initialOrder);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState("en");
+  // True only once the customer-scoped order fetch succeeds — i.e. the visitor
+  // is signed in. Guests stay false so we don't link them to /account/orders
+  // (which redirects to /account/login).
+  const [authed, setAuthed] = useState(false);
 
   const isAr = locale === "ar";
   const T = (en: string, ar: string) => (isAr ? ar : en);
@@ -151,6 +155,7 @@ export function ThankYou({
         }
         const body = await res.json();
         setOrder((body?.data || body) as Order);
+        setAuthed(true);
       } catch {
         if (!initialOrder) {
           setError(
@@ -178,6 +183,18 @@ export function ThankYou({
 
   const displayNumber =
     order?.order_number || orderNumberFromUrl || `…${orderId.slice(-8)}`;
+
+  const STATUS_IDX: Record<string, number> = {
+    pending: 0, placed: 0, paid: 1, confirmed: 1, processing: 1,
+    shipped: 2, out_for_delivery: 2, delivered: 3, completed: 3,
+  };
+  const statusIdx = STATUS_IDX[(order?.status || "").toLowerCase()] ?? 0;
+  const statusLabel = [
+    T("Placed", "تم الطلب"),
+    T("Confirmed", "تم التأكيد"),
+    T("Shipped", "تم الشحن"),
+    T("Delivered", "تم التوصيل"),
+  ][statusIdx];
 
   return (
     <div className="mx-auto max-w-2xl space-y-5" dir={isAr ? "rtl" : "ltr"}>
@@ -367,16 +384,34 @@ export function ThankYou({
 
       {/* Order tracking */}
       <section className="rounded-[var(--ck-radius)] border border-[var(--ck-border)] bg-[var(--ck-surface)] p-6 shadow-[var(--ck-shadow)]">
-        <h2 className="mb-5 text-lg font-semibold tracking-tight text-[var(--ck-fg)]">
-          {T("Order tracking", "تتبّع الطلب")}
-        </h2>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold tracking-tight text-[var(--ck-fg)]">
+            {T("Order tracking", "تتبّع الطلب")}
+          </h2>
+          <span className="rounded-full bg-[var(--ck-accent-tint)] px-3 py-1 text-xs font-medium text-[var(--ck-accent)]">
+            {statusLabel}
+          </span>
+        </div>
         <Tracker order={order} T={T} />
-        <Link
-          href={`/${params.domain}/account/orders/${orderId}`}
-          className="mt-5 inline-flex w-full items-center justify-center rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] px-6 py-3 text-sm font-semibold text-[var(--ck-fg)] transition-colors hover:bg-[var(--ck-bg)] sm:w-auto"
-        >
-          {T("Track your order", "تتبّع طلبك")}
-        </Link>
+        {authed ? (
+          <Link
+            href={`/${params.domain}/account/orders/${orderId}`}
+            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] px-6 py-3 text-sm font-semibold text-[var(--ck-fg)] transition-colors hover:bg-[var(--ck-bg)] sm:w-auto"
+          >
+            {T("Track your order", "تتبّع طلبك")}
+            <span aria-hidden className="rtl:rotate-180">→</span>
+          </Link>
+        ) : (
+          <p className="mt-6 flex items-center justify-center gap-2 text-sm text-[var(--ck-muted)] sm:justify-start">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" />
+            </svg>
+            {T(
+              "We'll send tracking updates to your email and WhatsApp.",
+              "هنبعتلك تحديثات التتبّع على الإيميل وواتساب.",
+            )}
+          </p>
+        )}
       </section>
 
       <div className="pt-1">
@@ -423,29 +458,37 @@ function Tracker({
     <ol className="flex items-start">
       {steps.map((s, i) => {
         const done = i <= current;
+        const isCurrent = i === current;
         return (
           <li key={s.key} className="relative flex flex-1 flex-col items-center">
             {i < steps.length - 1 && (
               <span
                 aria-hidden
-                className="absolute top-3 h-0.5 w-full ltr:left-1/2 rtl:right-1/2"
+                className="absolute top-[15px] h-[3px] w-full rounded-full ltr:left-1/2 rtl:right-1/2"
                 style={{
                   background: i < current ? "var(--ck-accent)" : "var(--ck-border)",
                 }}
               />
             )}
             <span
-              className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 text-[10px]"
+              className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-shadow"
               style={{
-                borderColor: done ? "var(--ck-accent)" : "var(--ck-border)",
                 background: done ? "var(--ck-accent)" : "var(--ck-surface)",
                 color: done ? "var(--ck-accent-text)" : "var(--ck-muted)",
+                border: `2px solid ${done ? "var(--ck-accent)" : "var(--ck-border)"}`,
+                boxShadow: isCurrent ? "0 0 0 5px var(--ck-accent-tint)" : undefined,
               }}
             >
-              {done ? "✓" : i + 1}
+              {done ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              ) : (
+                i + 1
+              )}
             </span>
             <span
-              className="mt-2 text-center text-[11px]"
+              className="mt-3 text-center text-[11px] font-medium"
               style={{ color: done ? "var(--ck-fg)" : "var(--ck-muted)" }}
             >
               {T(s.en, s.ar)}
