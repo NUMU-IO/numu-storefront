@@ -176,37 +176,49 @@ export function ThankYou({
     addr?.full_name ||
     [addr?.first_name, addr?.last_name].filter(Boolean).join(" ");
 
+  const displayNumber =
+    order?.order_number || orderNumberFromUrl || `…${orderId.slice(-8)}`;
+
   return (
-    <div className="space-y-6" dir={isAr ? "rtl" : "ltr"}>
-      <section className="rounded-2xl border border-gray-200/80 bg-white p-6 text-center shadow-sm">
-        <img
-          src="/success.svg"
-          alt=""
-          aria-hidden
-          width={96}
-          height={96}
-          className="mx-auto mb-2 h-24 w-24"
-        />
-        <h1 className="mb-1 text-2xl font-semibold tracking-tight">
-          {T("Thank you!", "شكراً لك!")}
-        </h1>
-        <p className="text-gray-700">
-          {T("Order", "الطلب")}{" "}
-          <span className="font-mono">
-            {order?.order_number ||
-              orderNumberFromUrl ||
-              `…${orderId.slice(-8)}`}
-          </span>{" "}
-          {T(
-            "received. We'll email a confirmation shortly.",
-            "تم استلامه. هنبعتلك تأكيد على الإيميل قريب.",
-          )}
-        </p>
+    <div className="mx-auto max-w-2xl space-y-5" dir={isAr ? "rtl" : "ltr"}>
+      {/* Success hero */}
+      <section className="overflow-hidden rounded-[var(--ck-radius)] border border-[var(--ck-border)] bg-[var(--ck-surface)] text-center shadow-[var(--ck-shadow)]">
+        <div className="px-6 pb-9 pt-11">
+          <span className="mx-auto mb-5 flex h-[72px] w-[72px] items-center justify-center rounded-full bg-[var(--ck-accent-tint)]">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--ck-accent)"
+              strokeWidth={2.4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+              className="h-9 w-9"
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </span>
+          <h1 className="text-[26px] text-[var(--ck-fg)] [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight)] [letter-spacing:var(--ck-heading-tracking)] [text-transform:var(--ck-heading-transform)]">
+            {T("Thank you for your order!", "شكراً لطلبك!")}
+          </h1>
+          <p className="mt-2 text-[15px] text-[var(--ck-muted)]">
+            {T(
+              "A confirmation is on its way to your inbox.",
+              "هنبعتلك تأكيد على إيميلك حالاً.",
+            )}
+          </p>
+          <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-[var(--ck-border)] bg-[var(--ck-bg)] px-4 py-2 text-sm">
+            <span className="text-[var(--ck-muted)]">{T("Order", "الطلب")}</span>
+            <span className="font-mono font-semibold text-[var(--ck-fg)]" dir="ltr">
+              {displayNumber}
+            </span>
+          </div>
+        </div>
       </section>
 
       {order && lines.length > 0 && (
-        <section className="rounded-2xl border border-gray-200/80 bg-white p-6 shadow-sm">
-          <h2 className="mb-3 text-lg font-semibold tracking-tight">
+        <section className="rounded-[var(--ck-radius)] border border-[var(--ck-border)] bg-[var(--ck-surface)] p-6 shadow-[var(--ck-shadow)]">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight text-[var(--ck-fg)]">
             {T("Items", "المنتجات")}
           </h2>
           <ul className="divide-y divide-gray-100">
@@ -295,8 +307,8 @@ export function ThankYou({
       )}
 
       {order && (addr || order.payment_method || order.shipping_method) && (
-        <section className="rounded-2xl border border-gray-200/80 bg-white p-6 shadow-sm">
-          <h2 className="mb-3 text-lg font-semibold tracking-tight">
+        <section className="rounded-[var(--ck-radius)] border border-[var(--ck-border)] bg-[var(--ck-surface)] p-6 shadow-[var(--ck-shadow)]">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight text-[var(--ck-fg)]">
             {T("Delivery", "التوصيل")}
           </h2>
           {addr && (
@@ -335,25 +347,25 @@ export function ThankYou({
       {error && (
         <div
           role="status"
-          className="flex items-start gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm leading-relaxed text-gray-700"
+          className="flex items-start gap-2.5 rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] bg-[var(--ck-accent-tint)] p-4 text-sm leading-relaxed text-[var(--ck-fg)]"
         >
           <span aria-hidden className="mt-0.5 shrink-0 text-base">📧</span>
           <p>{error}</p>
         </div>
       )}
 
-      <div className="flex justify-center gap-4 text-sm">
-        <Link
-          href={`/${params.domain}/account/orders`}
-          className="text-blue-700 underline"
-        >
-          {T("View your orders", "عرض طلباتك")}
-        </Link>
+      <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:justify-center">
         <Link
           href={`/${params.domain}`}
-          className="text-blue-700 underline"
+          className="inline-flex items-center justify-center rounded-[var(--ck-radius-sm)] bg-[var(--ck-button)] px-6 py-3 text-sm font-semibold text-[var(--ck-button-text)] shadow-[var(--ck-shadow)] transition-transform hover:-translate-y-0.5"
         >
           {T("Continue shopping", "متابعة التسوق")}
+        </Link>
+        <Link
+          href={`/${params.domain}/account/orders`}
+          className="inline-flex items-center justify-center rounded-[var(--ck-radius-sm)] border border-[var(--ck-border)] px-6 py-3 text-sm font-semibold text-[var(--ck-fg)] transition-colors hover:bg-[var(--ck-bg)]"
+        >
+          {T("View your orders", "عرض طلباتك")}
         </Link>
       </div>
     </div>
@@ -375,18 +387,18 @@ function Row({
     <div
       className={
         emphasis
-          ? "flex items-center justify-between border-t border-gray-100 pt-3 text-base font-semibold text-gray-900"
+          ? "flex items-center justify-between border-t border-[var(--ck-border)] pt-3 text-base font-semibold text-[var(--ck-fg)]"
           : "flex items-center justify-between text-sm"
       }
     >
-      <span className={emphasis ? "" : "text-gray-500"}>{label}</span>
+      <span className={emphasis ? "" : "text-[var(--ck-muted)]"}>{label}</span>
       <span
         className={
           emphasis
             ? ""
             : positive
               ? "font-medium text-emerald-700"
-              : "font-medium text-gray-900"
+              : "font-medium text-[var(--ck-fg)]"
         }
       >
         {value}
