@@ -53,6 +53,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     const ptitle = `${product?.seo_title || product?.name || "Product"} | ${store?.name || "Store"}`;
     const pdesc = product?.seo_description || product?.description || "";
     const pimg = product?.images?.[0]?.url || undefined;
+    // OG/Twitter cards must mirror the merchant's SEO edits
+    // (seo_title/seo_description), not just name/description — these tags are
+    // what social platforms and link-preview tools actually render.
+    const ogTitle = product?.seo_title || product?.name || "Product";
     const productActive =
       String(product?.status ?? "active").toLowerCase() === "active";
     return {
@@ -60,8 +64,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       description: pdesc,
       alternates: { canonical },
       openGraph: {
-        title: product?.name,
-        description: product?.description,
+        title: ogTitle,
+        description: pdesc,
         type: "website",
         url: canonical,
         siteName: store?.name,
@@ -69,8 +73,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       },
       twitter: {
         card: pimg ? "summary_large_image" : "summary",
-        title: product?.name,
-        description: product?.description,
+        title: ogTitle,
+        description: pdesc,
         ...(pimg ? { images: [pimg] } : {}),
       },
       // noindex a draft/archived product or a non-indexable store.
