@@ -519,7 +519,20 @@ export function OrderSummary() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/cart", { cache: "no-store" });
+      // `credentials: "include"` mirrors the SDK's own cart fetch — without it
+      // the guest `numu_cart_session` cookie can be dropped in embedded
+      // (iframe/customizer) contexts, 400-ing store/cart resolution. Retry
+      // once so a single transient miss doesn't dead-end the whole checkout.
+      let res = await fetch("/api/cart", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        res = await fetch("/api/cart", {
+          cache: "no-store",
+          credentials: "include",
+        });
+      }
       if (!res.ok) {
         setFailed(true);
         return;
