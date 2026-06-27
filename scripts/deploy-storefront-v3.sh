@@ -66,6 +66,18 @@ log "Image=${NUMU_STOREFRONT_V3_IMAGE}"
 log "Pulling image..."
 docker pull "${NUMU_STOREFRONT_V3_IMAGE}"
 
+# Idempotent recreate. The compose service pins an explicit `container_name`,
+# so a `--force-recreate` that was interrupted on a prior run (e.g. the health
+# gate below failed and the script exited) can leave a hash-prefixed orphan
+# like `<hash>_${CONTAINER}`. That orphan holds compose's temp rename target
+# and blocks the NEXT deploy with "container name ... is already in use".
+# Remove the named container AND any such orphan first so the recreate can
+# never collide. The substring name filter matches both the canonical name and
+# the hash-prefixed leftover; `xargs -r` no-ops when there's nothing to remove.
+# A brief blip while the new container starts is acceptable on dev (see header).
+log "Clearing any stale/orphaned ${CONTAINER} container(s)..."
+docker ps -aq --filter "name=${CONTAINER}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+
 log "Recreating ${SERVICE}..."
 compose up -d --force-recreate "${SERVICE}"
 
