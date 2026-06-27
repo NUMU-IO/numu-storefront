@@ -102,7 +102,8 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
         ?.favicon_url ||
       v3Favicon ||
       ts?.global_settings?.favicon ||
-      ts?.identity?.favicon_url;
+      ts?.identity?.favicon_url ||
+      "/favicon.ico"; // platform NUMU default, served from public/
 
     return {
       metadataBase: new URL(base),
@@ -113,13 +114,12 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
       openGraph: buildOpenGraph(store, { title, description, url: base, image }),
       twitter: buildTwitter({ title, description, image }),
       robots: storeRobots(store),
-      // A custom store favicon must out-rank the platform default
-      // (app/favicon.ico — the NUMU brand mark shown when a store sets none).
-      // Declaring it sizes:"any" marks it scalable so browsers prefer it over
-      // the fixed-size .ico.
-      ...(favicon
-        ? { icons: { icon: [{ url: favicon, sizes: "any" }], shortcut: favicon } }
-        : {}),
+      // Emit exactly ONE icon link to avoid browser-selection ambiguity: the
+      // merchant's favicon when set, else the platform NUMU mark at
+      // /favicon.ico (served from public/). Multiple competing <link rel=icon>
+      // tags (a sized .ico plus the store png) made some browsers fall back to
+      // a generic globe; a single authoritative link removes that.
+      icons: { icon: favicon },
       ...(Object.keys(other).length ? { other } : {}),
     };
   } catch {
