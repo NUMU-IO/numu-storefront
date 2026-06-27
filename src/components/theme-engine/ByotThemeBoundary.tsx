@@ -1,9 +1,20 @@
 "use client";
 
-import { Component, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Component,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
 import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
-import type { ThemeSettingsV3, StoreData } from "@/types";
+import {
+  resolveThemeSettingsDynamicSources,
+  type DynamicResolveContext,
+} from "@/lib/resolve-dynamic-sources";
+import type { ThemeSettingsV3, StoreData, Product, Collection } from "@/types";
 
 interface PageContextData {
   /** "home" | "product" | "collection" | "cart" | "page" | "404" | … */
@@ -247,6 +258,26 @@ export default function ByotThemeBoundary({
   const effectiveLocale = locale ?? themeData?.locale;
   const hasRouteFallback = routeFallback != null;
 
+  // Dynamic-source resolution (host→bundle seam). Bind context from the store
+  // (always present) plus the current product/collection the route supplied via
+  // `page.data`. We resolve `themeSettings` HERE so a setting bound to a dynamic
+  // source — `{ __numu_source: "store.name" }` — never reaches a theme bundle as
+  // a raw object (which the bundle would render as a React child and crash:
+  // "Section failed to render"). Memoized so a store with no bindings gets back
+  // the identical object (no-op); see resolve-dynamic-sources.ts.
+  const resolveCtx = useMemo<DynamicResolveContext>(
+    () => ({
+      store: storeData,
+      product: (page?.data?.product as Product | undefined) ?? null,
+      collection: (page?.data?.collection as Collection | undefined) ?? null,
+    }),
+    [storeData, page],
+  );
+  const resolvedThemeSettings = useMemo(
+    () => resolveThemeSettingsDynamicSources(themeSettings, resolveCtx),
+    [themeSettings, resolveCtx],
+  );
+
   // ── Bundle lifecycle ──────────────────────────────────────────────────────
   //
   // Two effects, on purpose:
@@ -291,7 +322,7 @@ export default function ByotThemeBoundary({
         // captured values here because they'd be stale on the second
         // mount cycle if a settings change interleaves the import.
         handleRef.current = mod.mount(el, {
-          themeSettings,
+          themeSettings: resolvedThemeSettings,
           storeData,
           page,
           locale: effectiveLocale,
@@ -391,7 +422,7 @@ export default function ByotThemeBoundary({
     if (!handle) return;
     try {
       const ok = tryUpdate(handle, {
-        themeSettings,
+        themeSettings: resolvedThemeSettings,
         storeData,
         page,
         locale: effectiveLocale,
@@ -413,7 +444,7 @@ export default function ByotThemeBoundary({
     } catch (err) {
       console.warn("[ByotThemeBoundary] update threw:", err);
     }
-  }, [themeSettings, storeData, page, effectiveLocale, navigation]);
+  }, [resolvedThemeSettings, storeData, page, effectiveLocale, navigation]);
 
   // Live-preview edits (editor only). The dashboard's LivePreview posts
   // `numu:theme:update` on every change; PreviewBridge re-dispatches it as a
@@ -432,8 +463,12 @@ export default function ByotThemeBoundary({
       const next = (e as CustomEvent).detail as ThemeSettingsV3 | undefined;
       if (!next) return;
       try {
+        // Resolve dynamic-source refs in the live draft too — the editor posts
+        // the RAW draft (it keeps the `{ __numu_source }` ref so its inputs can
+        // show "bound to store.name"); without this, binding a field would
+        // crash the preview the instant the merchant picks a source.
         tryUpdate(handleRef.current, {
-          themeSettings: next,
+          themeSettings: resolveThemeSettingsDynamicSources(next, resolveCtx),
           storeData,
           page,
           locale: effectiveLocale,
@@ -450,7 +485,7 @@ export default function ByotThemeBoundary({
         "numu:theme-update",
         onThemeUpdate as EventListener,
       );
-  }, [storeData, page, effectiveLocale, navigation]);
+  }, [storeData, page, effectiveLocale, navigation, resolveCtx]);
 
   const fallbackUI =
     fallback || (
