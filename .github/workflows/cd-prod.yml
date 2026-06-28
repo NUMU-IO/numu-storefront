@@ -1,0 +1,125 @@
+name: CD Prod (EC2)
+
+# Build the V3 BYOT storefront and deploy it to the DEDICATED prod EC2
+# (subdomain.numueg.app) on push to `prod`. numu-storefront is now the ONLY
+# prod storefront (replaced numu-egyptian-bazaar).
+#
+# Model: build in Actions (GHCR via GITHUB_TOKEN — works in-CI even though the
+# old droplet stored cred is dead) → SSH the EC2 → docker login ghcr.io with the
+# run's token → pull + recreate via scripts/deploy-storefront-ec2.sh. The box
+# never builds, so the 2 GiB t3.small can't OOM on `next build`.
+#
+# Required repo secrets:
+#   PROD_EC2_HOST            54.155.67.253 (or an Elastic IP / DNS)
+#   PROD_EC2_USER            ec2-user
+#   PROD_EC2_SSH_KEY         private key for the numu-store key pair
+#   NEXT_PUBLIC_GOOGLE_MAPS_KEY   maps key (build-time, same as dev CD)
+#
+# The box's deploy/.env.prod (server-side runtime env) is managed ON THE BOX,
+# not shipped by CI.
+
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: numu-io/numu-storefront
+  REMOTE_DIR: /opt/numu-storefront
+
+jobs:
+  # ===========================================================================
+  # Build + push the prod image to GHCR (tagged prod + commit SHA).
+  # ===========================================================================
+  build-and-push:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_ref: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=prod
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # NEXT_PUBLIC_* are inlined into the client bundle at build time.
+          build-args: |
+            NEXT_PUBLIC_NUMU_ENV=production
+            NEXT_PUBLIC_BYOT_BUNDLE_HOSTS=https://*.numueg.app,https://numueg.app
+            NEXT_PUBLIC_GOOGLE_MAPS_KEY=${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================================================================
+  # Deploy to the dedicated prod EC2.
+  # ===========================================================================
+  deploy-prod:
+    name: Deploy storefront to prod EC2
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/prod'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+
+      # Keep the box's copy of the compose file, nginx conf, and deploy script
+      # in sync with the repo so the deploy is reproducible from source. The
+      # .env.prod (secrets) is NOT shipped — it lives on the box.
+      - name: Sync deploy assets to EC2
+        run: |
+          U="${{ secrets.PROD_EC2_USER }}"; H="${{ secrets.PROD_EC2_HOST }}"
+          ssh -i ~/.ssh/deploy_key "$U@$H" "mkdir -p ${REMOTE_DIR}/deploy/nginx ${REMOTE_DIR}/scripts"
+          scp -i ~/.ssh/deploy_key deploy/docker-compose.storefront.ec2.yml "$U@$H:${REMOTE_DIR}/deploy/"
+          scp -i ~/.ssh/deploy_key deploy/nginx/ec2-prod.conf               "$U@$H:${REMOTE_DIR}/deploy/nginx/"
+          scp -i ~/.ssh/deploy_key scripts/deploy-storefront-ec2.sh         "$U@$H:${REMOTE_DIR}/scripts/"
+
+      - name: Deploy
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:prod
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.PROD_EC2_USER }}@${{ secrets.PROD_EC2_HOST }} << DEPLOY
+            set -e
+            cd ${REMOTE_DIR}
+            echo "==> docker login ghcr.io"
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+            chmod +x scripts/deploy-storefront-ec2.sh
+            export NUMU_STOREFRONT_IMAGE="${IMAGE_REF}"
+            ./scripts/deploy-storefront-ec2.sh
+            docker logout ghcr.io || true
+          DEPLOY

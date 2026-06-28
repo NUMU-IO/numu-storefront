@@ -1,0 +1,69 @@
+# =============================================================================
+# NUMU V3 BYOT storefront — dedicated EC2 (prod)  ·  subdomain.numueg.app
+# =============================================================================
+# Self-contained, single-box deploy: the standalone Next.js storefront PLUS its
+# own nginx on :80. This box owns its edge (unlike the droplet's shared
+# numu-nginx-staging model).
+#
+# The image is BUILT IN GITHUB ACTIONS and pushed to GHCR (Actions GITHUB_TOKEN
+# works fine for GHCR — only the droplet's *stored* cred was dead). The box
+# PULLS it; it never builds (so the 2 GiB box can't OOM on `next build`). The
+# NEXT_PUBLIC_* values are inlined at BUILD time in CI, so they are NOT in this
+# file — only server-side runtime env lives in ./.env.prod.
+#
+# TLS: Cloudflare (Flexible) terminates TLS and forwards HTTP to :80 here, so
+# the box needs no cert for *.numueg.app.
+#
+# Deploy:  NUMU_STOREFRONT_IMAGE=ghcr.io/numu-io/numu-storefront:prod \
+#            scripts/deploy-storefront-ec2.sh
+# =============================================================================
+
+name: numu-storefront-prod
+
+services:
+  storefront:
+    image: ${NUMU_STOREFRONT_IMAGE:?NUMU_STOREFRONT_IMAGE must be set (e.g. ghcr.io/numu-io/numu-storefront:prod)}
+    container_name: numu-storefront-prod
+    restart: unless-stopped
+    # Server-side runtime env ONLY. NUMU_API_URL MUST include /api/v1 (used
+    # as-is — the app does not append the prefix).
+    env_file:
+      - ./.env.prod
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    expose:
+      - "3000"
+    networks:
+      - edge
+    healthcheck:
+      # `/` 404s (all routes live under /[domain]); probe the always-present
+      # BYOT runtime manifest. 127.0.0.1 (not localhost) — busybox wget tries
+      # IPv6 first while the server binds IPv4.
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/__numu-runtime/manifest.json"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+
+  nginx:
+    image: nginx:alpine
+    container_name: numu-storefront-nginx
+    restart: unless-stopped
+    depends_on:
+      - storefront
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/ec2-prod.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - edge
+
+networks:
+  edge:
+    driver: bridge
