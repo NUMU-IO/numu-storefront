@@ -92,6 +92,9 @@ interface Cart {
   // Coupon code the backend has pinned to the cart, if any.
   discount_code?: string | null;
   coupon_code?: string | null;
+  // A free-shipping coupon/offer zeroes the shipping line (folded from the
+  // discount engine's `free_shipping` flag).
+  free_shipping?: boolean;
 }
 
 function readCsrf(): string {
@@ -431,9 +434,12 @@ function Breakdown({
     : [];
   const offersTotal = offers.reduce((s, p) => s + (p.amount || 0), 0);
 
-  // Shipping: cart's own value wins (it's authoritative if the backend
-  // ever surfaces it); else the cached selected-rate amount.
-  const shipping = cart.shipping_cost ?? shippingCents;
+  // Shipping: a free-shipping coupon/offer zeroes it; else the cart's own
+  // value wins (authoritative if the backend surfaces it), else the cached
+  // selected-rate amount.
+  const shipping = cart.free_shipping
+    ? 0
+    : (cart.shipping_cost ?? shippingCents);
   const tax = cart.tax_amount ?? 0;
 
   const total = Math.max(
@@ -606,6 +612,13 @@ export function OrderSummary() {
               c.discount_amount = codeDiscount;
               if (couponCode) c.coupon_code = couponCode;
             }
+            // A free-shipping coupon/offer carries a 0 monetary discount but
+            // must zero the shipping line — fold the engine's flag through so
+            // the Breakdown + collapsed total reflect it.
+            if (out?.free_shipping) {
+              c.free_shipping = true;
+              if (couponCode) c.coupon_code = couponCode;
+            }
           }
         } catch {
           /* best-effort — render the cart without the offer line */
@@ -657,7 +670,9 @@ export function OrderSummary() {
       (Array.isArray(cart.applied_promotions)
         ? cart.applied_promotions.reduce((s, p) => s + (p.amount || 0), 0)
         : 0);
-    const shipping = cart.shipping_cost ?? shippingCents ?? 0;
+    const shipping = cart.free_shipping
+      ? 0
+      : (cart.shipping_cost ?? shippingCents ?? 0);
     const tax = cart.tax_amount ?? 0;
     return Math.max(0, subtotal - discount + shipping + tax);
   })();
