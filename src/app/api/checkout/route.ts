@@ -71,6 +71,14 @@ export async function POST(req: NextRequest) {
       parsed.shipping_address = fixAddr(parsed.shipping_address);
     if (parsed.billing_address)
       parsed.billing_address = fixAddr(parsed.billing_address);
+    // Tell the backend which storefront the shopper checked out from, so
+    // post-payment gateways (Moyasar) redirect them back to THIS host. This
+    // route is server-side, so the API never sees the browser's Origin —
+    // pass it explicitly (prefer the real Origin header, else this host).
+    if (parsed.storefront_origin === undefined) {
+      parsed.storefront_origin =
+        req.headers.get("origin") || `https://${host}`;
+    }
     body = JSON.stringify(parsed);
   } catch {
     /* not JSON — forward verbatim */
