@@ -595,6 +595,17 @@ export function OrderSummary() {
                 { id: "auto-offers", title: "Offer", title_ar: "العرض", amount: auto },
               ];
             }
+            // Coupon CODE discount is a separate field on the engine response
+            // (`code_discount_cents`) — NOT part of `applied_promotions` /
+            // `automatic_discount_cents`. Fold it into the cart's
+            // `discount_amount` so the Breakdown renders the "Discount −EGP X"
+            // line and the Total drops the moment a code is applied. Without
+            // this the UI silently ignored every coupon.
+            const codeDiscount = Number(out?.code_discount_cents || 0);
+            if (codeDiscount > 0) {
+              c.discount_amount = codeDiscount;
+              if (couponCode) c.coupon_code = couponCode;
+            }
           }
         } catch {
           /* best-effort — render the cart without the offer line */
