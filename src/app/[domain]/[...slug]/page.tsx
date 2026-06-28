@@ -45,6 +45,7 @@ export const revalidate = 300;
 
 interface PageProps {
   params: Promise<{ domain: string; slug: string[] }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 function humanize(handle: string): string {
@@ -104,9 +105,15 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 }
 
-export default async function CatchAllPage({ params }: PageProps) {
+export default async function CatchAllPage({ params, searchParams }: PageProps) {
   const { domain, slug } = await params;
   const handle = (slug ?? []).join("/");
+
+  // The order-confirmation / track templates need the order id from the query
+  // (?order_id=…, set by the payment redirect). Without it the theme's
+  // useOrder() falls back to the page handle and shows "order not found".
+  const sp = (await searchParams) ?? {};
+  const orderId = typeof sp.order_id === "string" ? sp.order_id : undefined;
 
   // Bound crafted/garbage inputs: very deep or very long paths aren't real
   // content pages → themed 404 rather than an unbounded cached render.
@@ -203,7 +210,11 @@ export default async function CatchAllPage({ params }: PageProps) {
           handle,
           // body absent until the CMS-pages backend lands; themes render
           // a graceful placeholder when page.data.page.body is null.
-          data: { page: { handle, title: humanize(handle), body: null } },
+          data: {
+            page: { handle, title: humanize(handle), body: null },
+            // Surfaced for the order-confirmation/track templates' useOrder().
+            ...(orderId ? { order_id: orderId } : {}),
+          },
         }}
         // ENG-2: themes with no `page` template render these nav paths blank —
         // show the branded NUMU placeholder (same as the built-in branch
