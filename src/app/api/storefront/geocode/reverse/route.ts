@@ -17,38 +17,37 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { fetchStoreByHost } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
-async function resolveStoreId(req: NextRequest): Promise<string | null> {
-  const host = (req.headers.get("x-numu-host") || "")
-    .split(":")[0]
-    .toLowerCase();
-  if (!host) return null;
-
-  let subdomain: string | null = null;
-  if (host.endsWith(".numueg.app")) {
-    subdomain = host.slice(0, -".numueg.app".length);
-  } else if (host.endsWith(".localhost")) {
-    subdomain = host.slice(0, -".localhost".length);
-  }
-  if (!subdomain) return null;
-
-  try {
-    const res = await fetch(
-      `${API_URL}/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
-      { cache: "no-store" },
-    );
-    if (!res.ok) return null;
-    const body = await res.json();
-    return body?.data?.id ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest) {
-  const storeId = await resolveStoreId(req);
+  // Resolve the store the same way every other `/api/storefront/*` proxy does
+  // — via the shared `fetchStoreByHost`, which understands subdomain stores,
+  // the canonical apex, parallel-env infixes (`<slug>.v3.test.numueg.app`) AND
+  // custom BYOT domains. The previous bespoke resolver only handled plain
+  // `*.numueg.app` / `*.localhost`, so on a custom domain or a v3.test host it
+  // returned 400 and the checkout map silently stopped autofilling the address.
+  const host =
+    req.headers.get("x-numu-host") ||
+    (req.headers.get("host") || "").split(":")[0];
+  if (!host) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: { code: "store_unknown", message: "Host header missing." },
+      },
+      { status: 400 },
+    );
+  }
+
+  let storeId: string | undefined;
+  try {
+    const store = await fetchStoreByHost(host);
+    storeId = store?.id;
+  } catch {
+    storeId = undefined;
+  }
   if (!storeId) {
     return NextResponse.json(
       {
@@ -79,8 +78,7 @@ export async function GET(req: NextRequest) {
   const headers: Record<string, string> = {};
   const cookie = req.headers.get("cookie");
   if (cookie) headers.cookie = cookie;
-  const host = req.headers.get("x-numu-host");
-  if (host) headers["x-numu-host"] = host;
+  headers["x-numu-host"] = host;
 
   try {
     const res = await fetch(upstream, { headers, cache: "no-store" });
