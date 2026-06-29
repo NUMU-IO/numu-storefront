@@ -433,23 +433,18 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
         typeof img === "string" ? { id: String(i), url: img } : img,
       )
     : [];
-  // ── Variant price normalization (supersedes the earlier ENG-1 fix) ──────
-  // The API serializes the PRODUCT price in MAJOR units ("110.00") but
-  // VARIANT prices in CENTS ("11000.00") — an inconsistency. Themes prefer
-  // `variant.price ?? product.price`, so without this they render variant
-  // prices ×100. Converting variant money cents→major makes prices major
-  // end-to-end AND reconciles the no-option case (a single product's implicit
-  // variant came back as 3000.00 cents → 30.00 == base, so listing and PDP
-  // agree) — i.e. this also covers what ENG-1's reconcile-to-base did, without
-  // double-transforming. NOTE: bandaid for a backend serialization bug — if
-  // variant prices start arriving as major, drop this.
+  // Variant prices now arrive in MAJOR units, same as the product price
+  // (backend variant_repository was aligned to the cents convention, so the
+  // API serializes `variant.price.amount` in major units). Coerce string→number
+  // to match product price handling; NO ÷100 (the old bandaid for the backend
+  // serving variant prices as cents has been removed at the source).
   const variants = Array.isArray(raw.variants)
     ? raw.variants.map((v: Record<string, any>) => {
         if (!v || typeof v !== "object") return v;
         const out: Record<string, any> = { ...v };
-        if (v.price != null) out.price = Number(v.price) / 100;
+        if (v.price != null) out.price = Number(v.price);
         if (v.compare_at_price != null)
-          out.compare_at_price = Number(v.compare_at_price) / 100;
+          out.compare_at_price = Number(v.compare_at_price);
         return out;
       })
     : raw.variants;
