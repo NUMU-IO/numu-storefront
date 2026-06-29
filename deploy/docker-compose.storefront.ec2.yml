@@ -59,11 +59,50 @@ services:
       - storefront
     ports:
       - "80:80"
+      # :443 exists only for n8n.numueg.app — CF routes that hostname to origin
+      # :443 (a droplet-era "Full" SSL setting). Stores still use CF Flexible →
+      # :80. The origin cert is a long-lived self-signed *.numueg.app (CF
+      # terminates the real edge cert to the client; this just satisfies CF).
+      - "443:443"
     volumes:
       - ./nginx/ec2-prod.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
     networks:
       - edge
+
+  # n8n — workflow automation (migrated off the droplet 2026-06-30). nginx
+  # routes n8n.numueg.app → here. Secrets (N8N_ENCRYPTION_KEY + basic auth)
+  # live in ./.env.n8n on the box, NOT in this file — the encryption key MUST
+  # match the one the droplet's credentials were encrypted with or they won't
+  # decrypt. Data (workflows + creds) is in the n8n_data volume, restored from
+  # the droplet's docker_n8n_data.
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: numu-n8n
+    restart: unless-stopped
+    env_file:
+      - ./.env.n8n
+    environment:
+      - N8N_HOST=n8n.numueg.app
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://n8n.numueg.app/
+      - N8N_PORT=5678
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_PROXY_HOPS=1
+    volumes:
+      - n8n_data:/home/node/.n8n
+    expose:
+      - "5678"
+    networks:
+      - edge
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
 networks:
   edge:
     driver: bridge
+
+volumes:
+  n8n_data:
