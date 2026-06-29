@@ -59,14 +59,8 @@ services:
       - storefront
     ports:
       - "80:80"
-      # :443 exists only for n8n.numueg.app — CF routes that hostname to origin
-      # :443 (a droplet-era "Full" SSL setting). Stores still use CF Flexible →
-      # :80. The origin cert is a long-lived self-signed *.numueg.app (CF
-      # terminates the real edge cert to the client; this just satisfies CF).
-      - "443:443"
     volumes:
       - ./nginx/ec2-prod.conf:/etc/nginx/nginx.conf:ro
-      - ./certs:/etc/nginx/certs:ro
     networks:
       - edge
 
