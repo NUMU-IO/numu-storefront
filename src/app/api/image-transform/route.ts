@@ -36,6 +36,7 @@ const DEFAULT_HOSTS = [
   "r2.cloudflarestorage.com",
   "imagedelivery.net", // Cloudflare Images
   "cdn.numueg.app",
+  "r2.dev", // public R2 dev/canary buckets (pub-*.r2.dev) — dev/test image host
 ];
 
 const VALID_FORMATS = new Set(["webp", "avif", "jpeg", "jpg", "png"]);
