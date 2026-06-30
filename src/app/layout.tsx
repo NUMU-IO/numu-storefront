@@ -79,19 +79,32 @@ async function resolveLocale(): Promise<{ lang: string; dir: "ltr" | "rtl" }> {
  * has thrown — we can't rely on a React provider being mounted. A
  * vanilla `document.documentElement.dataset.*` read always works.
  */
-async function resolveThemeStaticTemplates(): Promise<{
+type ThemeStaticTemplates = {
   errorUrl: string | null;
   loadingUrl: string | null;
-}> {
+  /** BYOT bundle entry — modulepreloaded so it downloads during HTML parse. */
+  bundleUrl: string | null;
+  /** BYOT stylesheet — preloaded alongside the bundle. */
+  cssUrl: string | null;
+};
+
+const NO_TEMPLATES: ThemeStaticTemplates = {
+  errorUrl: null,
+  loadingUrl: null,
+  bundleUrl: null,
+  cssUrl: null,
+};
+
+async function resolveThemeStaticTemplates(): Promise<ThemeStaticTemplates> {
   try {
     const h = await headers();
     const path = h.get("x-numu-pathname") || h.get("x-invoke-path") || "";
     const seg = path.split("/").filter(Boolean)[0];
-    if (!seg) return { errorUrl: null, loadingUrl: null };
+    if (!seg) return NO_TEMPLATES;
     const store = await fetchStoreByDomain(seg).catch(() => null);
-    if (!store) return { errorUrl: null, loadingUrl: null };
+    if (!store) return NO_TEMPLATES;
     const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
-    if (!themeRaw) return { errorUrl: null, loadingUrl: null };
+    if (!themeRaw) return NO_TEMPLATES;
     const themeSettings = resolveThemeSettings(
       themeRaw?.theme_settings || themeRaw || {},
     );
@@ -99,18 +112,32 @@ async function resolveThemeStaticTemplates(): Promise<{
       !themeSettings.external_theme?.bundle_url ||
       isBuiltInTheme(themeSettings.theme_id)
     ) {
-      return { errorUrl: null, loadingUrl: null };
+      return NO_TEMPLATES;
     }
     const ext = themeSettings.external_theme as unknown as {
       error_template_url?: string;
       loading_template_url?: string;
+      bundle_url?: string;
+      css_url?: string;
     };
     return {
       errorUrl: typeof ext.error_template_url === "string" ? ext.error_template_url : null,
       loadingUrl: typeof ext.loading_template_url === "string" ? ext.loading_template_url : null,
+      bundleUrl: typeof ext.bundle_url === "string" ? ext.bundle_url : null,
+      cssUrl: typeof ext.css_url === "string" ? ext.css_url : null,
     };
   } catch {
-    return { errorUrl: null, loadingUrl: null };
+    return NO_TEMPLATES;
+  }
+}
+
+/** Origin of a CDN url, for a <link rel="preconnect">. Null if unparseable. */
+function originOf(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
   }
 }
 
@@ -120,7 +147,9 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const { lang, dir } = await resolveLocale();
-  const { errorUrl, loadingUrl } = await resolveThemeStaticTemplates();
+  const { errorUrl, loadingUrl, bundleUrl, cssUrl } =
+    await resolveThemeStaticTemplates();
+  const cdnOrigin = originOf(bundleUrl);
   return (
     <html
       lang={lang}
@@ -129,6 +158,20 @@ export default async function RootLayout({
       data-numu-loading-template-url={loadingUrl || undefined}
     >
       <head>
+        {/*
+          Preload the BYOT theme bundle + CSS so the browser fetches them
+          DURING HTML parse (in parallel with hydration) instead of waiting
+          for the ByotThemeBoundary effect to fire post-hydration. This is the
+          single biggest cut to the "blank for a second" gap on every page —
+          modulepreload cascades to the bundle's static chunk imports too.
+        */}
+        {cdnOrigin && (
+          <link rel="preconnect" href={cdnOrigin} crossOrigin="anonymous" />
+        )}
+        {bundleUrl && (
+          <link rel="modulepreload" href={bundleUrl} crossOrigin="anonymous" />
+        )}
+        {cssUrl && <link rel="preload" as="style" href={cssUrl} />}
         {/*
           BYOT runtime import map. Federated theme bundles import
           `react`, `react/jsx-runtime`, `react-dom/client`, and
