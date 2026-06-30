@@ -104,7 +104,12 @@ export default async function ProductPage({ params }: PageProps) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("API error: 404")) throw err;
   }
-  const themeRaw = await fetchThemeSettings(store.id);
+  // Don't let a theme-settings hiccup crash the whole PDP (it did: an error
+  // here surfaced as the error boundary's "Something went wrong" on product
+  // pages, while the home / content routes — which `.catch` this — degraded
+  // fine). On failure we fall through with empty settings: no `bundle_url` →
+  // the built-in PDP fallback below renders the product, add-to-cart intact.
+  const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
 
   // Catalogue slice so the bundle's useProducts() has data ON the PDP — the
