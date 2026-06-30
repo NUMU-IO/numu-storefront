@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
+import StorefrontSkeleton from "@/components/theme-engine/StorefrontSkeleton";
 import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
 import {
   resolveThemeSettingsDynamicSources,
@@ -501,12 +502,13 @@ export default function ByotThemeBoundary({
 
   return (
     <ThemeRenderBoundary onError={postBundleError} fallback={fallbackUI}>
-      {/* No visible "Loading theme..." flash during the brief client-side
-          bundle mount — SSR is covered by the host's static loading template
-          (layout.tsx data-numu-loading-template-url), and the container below
-          fills in as soon as the bundle mounts. Render a reserved-height blank
-          frame to avoid layout shift, without dev-y placeholder text. */}
-      {loading && !error && <div className="min-h-screen" aria-busy="true" />}
+      {/* The page is prerendered, but a BYOT theme paints only after its
+          bundle downloads + mounts on the client. This loading branch is part
+          of the SSR HTML (loading starts true), so a skeleton — not a blank
+          frame — is what ships in the prerender and shows instantly, then the
+          container below swaps in the real theme as soon as it mounts. Keeps
+          the layout's shape (no CLS) and kills the empty flash on every page. */}
+      {loading && !error && <StorefrontSkeleton />}
       {error && fallbackUI}
       {/* ENG-2 — keep the bundle container mounted always; HIDE (not unmount)
           it when the bundle rendered blank so a late async render can still
