@@ -99,7 +99,16 @@ export default async function HomePage({ params }: PageProps) {
   const { domain } = await params;
 
   const store = await fetchStoreByDomain(domain);
-  const themeRaw = await fetchThemeSettings(store.id);
+  // theme + a starter set of products/collections all key off store.id and are
+  // independent — fetch them in ONE parallel wave after the store resolves
+  // (was: theme serially, THEN products/collections). products/collections feed
+  // the BYOT home grids; on the rare built-in path they go unused (cheap,
+  // best-effort — never blocks the render).
+  const [themeRaw, products, collections] = await Promise.all([
+    fetchThemeSettings(store.id),
+    fetchProducts(store.id, 20).catch(() => []),
+    fetchCollections(store.id).catch(() => []),
+  ]);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
 
   // Phase 4.6 — Organization + WebSite JSON-LD on the home page.
@@ -157,10 +166,6 @@ export default async function HomePage({ params }: PageProps) {
   // links against. Failures are non-fatal — the bundle's own sections
   // gracefully empty out.
   if (themeSettings.external_theme?.bundle_url && !isBuiltInTheme(themeSettings.theme_id)) {
-    const [products, collections] = await Promise.all([
-      fetchProducts(store.id, 20).catch(() => []),
-      fetchCollections(store.id).catch(() => []),
-    ]);
     return (
       <>
         {ldScripts}
