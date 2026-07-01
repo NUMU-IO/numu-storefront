@@ -28,6 +28,8 @@ const HERO_IMAGE_KEYS = [
   "background_image",
   "image_url",
   "image",
+  "slide_1_image", // vionne-style slideshow hero (first slide is the LCP)
+  "image_1", // empire-style slideshow hero
 ] as const;
 // MUST equal HeroMedia's HERO_WIDTHS (+ sizes="100vw") so the preload is
 // CREDITED at every viewport: a narrower subset lets the browser pick a
