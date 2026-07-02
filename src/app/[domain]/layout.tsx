@@ -13,6 +13,8 @@ import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
 import { PreviewNavigationBridge } from "@/components/theme-engine/PreviewNavigationBridge";
 import { MetaPixel } from "@/components/tracking/MetaPixel";
 import { resolveMetaPixelIds } from "@/lib/meta-pixel";
+import { TikTokPixel } from "@/components/tracking/TikTokPixel";
+import { resolveTikTokPixelIds } from "@/lib/tiktok-pixel";
 import { getActivePromotions } from "@/lib/promo-server";
 import { resolveBrandTokens } from "@/lib/brand-tokens";
 import { AnnouncementBar } from "@/components/promo/AnnouncementBar";
@@ -232,6 +234,10 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   // the browser Pixel also sets `_fbp`/`_fbc` for CAPI match quality.
   const metaPixelIds = resolveMetaPixelIds(store);
 
+  // TikTok Pixel — same host-shell coverage as Meta. Only mounted when the
+  // merchant configured an enabled pixel; also captures `ttclid` + sets `_ttp`.
+  const tiktokPixelIds = resolveTikTokPixelIds(store);
+
   // Promotions — server-driven announcement bar (offers-v2), rendered in the
   // shell so it shows for built-in + BYOT alike. Best-effort: null when the
   // `ff_storefront_promo_render` flag is off or none are active.
@@ -261,6 +267,7 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
           Production (subdomain hosting) doesn't need this. */}
       <base href={`/${domain}/`} />
       {metaPixelIds.length > 0 && <MetaPixel pixelIds={metaPixelIds} />}
+      {tiktokPixelIds.length > 0 && <TikTokPixel pixelIds={tiktokPixelIds} />}
       {/* Phase 5.7 WCAG-AA — skip-to-content link.
           Keyboard users tab through the header before reaching the
           page body; a skip link lets them jump straight to main
