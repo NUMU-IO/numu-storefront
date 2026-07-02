@@ -97,25 +97,35 @@ export default async function ProductPage({ params }: PageProps) {
   // product). fetchProductBySlug throws "API error: <status> …" for every
   // non-OK response — only treat a genuine 404 as "no such product"; rethrow
   // anything else so the error boundary shows a retryable error instead.
+  // product, theme and catalogue all key off `store.id` and are independent —
+  // fetch them in PARALLEL so SSR is bounded by the slowest call, not the sum
+  // of three serial round-trips. The product error is captured (not thrown into
+  // Promise.all) so we keep the contract: a genuine 404 → notFound below, a
+  // transient 5xx/network blip → rethrow → retryable error boundary (NOT a
+  // wrong 404+noindex). theme + catalogue are best-effort:
+  //   - theme: a hiccup must NOT crash the PDP (it surfaced as "Something went
+  //     wrong"); empty settings → no bundle_url → built-in PDP fallback renders
+  //     the product, add-to-cart intact.
+  //   - catalogue: only feeds the bundle's "you may also like" rail.
+  const [productResult, themeRaw, catalogue] = await Promise.all([
+    fetchProductBySlug(store.id, slug).then(
+      (p) => ({ ok: true as const, product: p }),
+      (err: unknown) => ({ ok: false as const, error: err }),
+    ),
+    fetchThemeSettings(store.id).catch(() => null),
+    fetchProducts(store.id, 12).catch(() => []),
+  ]);
   let product = null;
-  try {
-    product = await fetchProductBySlug(store.id, slug);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes("API error: 404")) throw err;
+  if (productResult.ok) {
+    product = productResult.product;
+  } else {
+    const msg =
+      productResult.error instanceof Error
+        ? productResult.error.message
+        : String(productResult.error);
+    if (!msg.includes("API error: 404")) throw productResult.error;
   }
-  // Don't let a theme-settings hiccup crash the whole PDP (it did: an error
-  // here surfaced as the error boundary's "Something went wrong" on product
-  // pages, while the home / content routes — which `.catch` this — degraded
-  // fine). On failure we fall through with empty settings: no `bundle_url` →
-  // the built-in PDP fallback below renders the product, add-to-cart intact.
-  const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
-
-  // Catalogue slice so the bundle's useProducts() has data ON the PDP — the
-  // single-product fetch above doesn't populate the catalogue, which left the
-  // theme's "you may also like" rail empty. Best-effort; PDP renders without it.
-  const catalogue = await fetchProducts(store.id, 12).catch(() => []);
 
   const isByotTheme =
     !!themeSettings.external_theme?.bundle_url &&
@@ -171,7 +181,25 @@ export default async function ProductPage({ params }: PageProps) {
       }}
     />
   ) : null;
-  const headExtras = viewContent ? [...ldScripts, viewContent] : ldScripts;
+  // Preload the LCP image (the product's first image) so it downloads during
+  // HTML parse — in parallel with the theme bundle. A BYOT PDP paints client-
+  // side, so without this the main image only starts loading AFTER the bundle
+  // mounts and renders the <img>. Next hoists `rel="preload"` to <head>.
+  const lcpImageUrl = product?.images?.[0]?.url;
+  const imagePreload = lcpImageUrl ? (
+    <link
+      key="lcp-img"
+      rel="preload"
+      as="image"
+      href={lcpImageUrl}
+      fetchPriority="high"
+    />
+  ) : null;
+  const headExtras = [
+    ...(imagePreload ? [imagePreload] : []),
+    ...ldScripts,
+    ...(viewContent ? [viewContent] : []),
+  ];
 
   // BYOT: hand the bundle the page context so it knows to render its
   // product template. Same fork the home route uses.

@@ -202,7 +202,34 @@ async function loadAndVerifyImportMap(
  * Rejects if the URL is not on the allowlist or if the optional
  * checksum doesn't match.
  */
-export async function loadExternalTheme(
+// Module memo, keyed by bundle URL. Versioned bundle URLs
+// (`/<slug>/<version>/theme.js`) are IMMUTABLE — the same URL always yields the
+// same module — so we cache the load promise and replay it on every subsequent
+// mount. Without this, each client navigation re-runs the full
+// fetch → verify → (checksum path) re-evaluate-the-whole-bundle cycle: the
+// checksum branch imports a FRESH blob URL each time, which the browser never
+// module-caches, so a ~480KB theme bundle re-evaluates on every page change.
+// A new theme version ships a new URL → cache miss → fresh load, so this never
+// serves a stale bundle. Failed loads are evicted so a retry can re-attempt.
+const _themeModuleCache = new Map<string, Promise<unknown>>();
+
+export function loadExternalTheme(
+  bundleUrl: string,
+  options: LoadOptions = {},
+): Promise<unknown> {
+  // Key on URL + checksum so a load is only replayed when the verification
+  // contract is identical (a given bundleUrl always pairs with the same
+  // checksum in practice; this just makes that explicit).
+  const key = `${bundleUrl}::${options.expectedChecksum ?? ""}`;
+  const cached = _themeModuleCache.get(key);
+  if (cached) return cached;
+  const p = _loadExternalThemeUncached(bundleUrl, options);
+  _themeModuleCache.set(key, p);
+  p.catch(() => _themeModuleCache.delete(key));
+  return p;
+}
+
+async function _loadExternalThemeUncached(
   bundleUrl: string,
   options: LoadOptions = {},
 ): Promise<unknown> {
