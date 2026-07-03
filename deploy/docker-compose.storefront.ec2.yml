@@ -25,6 +25,15 @@ services:
     image: ${NUMU_STOREFRONT_IMAGE:?NUMU_STOREFRONT_IMAGE must be set (e.g. ghcr.io/numu-io/numu-storefront:prod)}
     container_name: numu-storefront-prod
     restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/storefront
+        awslogs-create-group: "true"
+        awslogs-stream: storefront
+        mode: non-blocking
+        max-buffer-size: 4m
     # Server-side runtime env ONLY. NUMU_API_URL MUST include /api/v1 (used
     # as-is — the app does not append the prefix).
     env_file:
@@ -55,6 +64,18 @@ services:
     image: nginx:alpine
     container_name: numu-storefront-nginx
     restart: unless-stopped
+    # Only stderr (error_log) ships — access_log stays file-based on the box so
+    # we don't duplicate per-request lines. Needs error_log -> /dev/stderr in
+    # nginx/ec2-prod.conf (set there).
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/storefront-nginx
+        awslogs-create-group: "true"
+        awslogs-stream: nginx
+        mode: non-blocking
+        max-buffer-size: 4m
     depends_on:
       - storefront
     ports:
@@ -74,6 +95,15 @@ services:
     image: n8nio/n8n:latest
     container_name: numu-n8n
     restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: eu-west-1
+        awslogs-group: /numu/prod/n8n
+        awslogs-create-group: "true"
+        awslogs-stream: n8n
+        mode: non-blocking
+        max-buffer-size: 4m
     env_file:
       - ./.env.n8n
     environment:

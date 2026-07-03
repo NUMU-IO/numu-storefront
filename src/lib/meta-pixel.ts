@@ -18,6 +18,8 @@
  * helpers guard on `typeof window` and no-op during SSR.
  */
 
+import { FUNNEL_STEP_TO_TIKTOK, ttqTrack } from "./tiktok-pixel";
+
 // ── Store config → enabled pixel IDs ────────────────────────────────────────
 
 interface PixelEntry {
@@ -266,5 +268,10 @@ export function trackFunnel(
   const eventId = opts.eventId || getEventId();
   const metaEvent = FUNNEL_STEP_TO_META[step];
   if (metaEvent) fbqTrack(metaEvent, data, eventId);
+  // Fire the TikTok browser pixel with the SAME event_id so TikTok dedupes
+  // the browser event against the server-side Events API fire. One dispatcher,
+  // one /track POST — the backend fans the server side to BOTH Meta + TikTok.
+  const tiktokEvent = FUNNEL_STEP_TO_TIKTOK[step];
+  if (tiktokEvent) ttqTrack(tiktokEvent, data, eventId);
   postTrack({ event_id: eventId, step, step_data: cleanData(data) });
 }
