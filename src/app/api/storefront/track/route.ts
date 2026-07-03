@@ -48,6 +48,11 @@ interface TrackBody {
   // them in the body win; we only fill the blanks.
   fbp?: string;
   fbc?: string;
+  // TikTok browser-side identifiers — `ttclid` (click id, captured into a
+  // cookie from the URL by <TikTokPixel>) and `_ttp` (set by TikTok's SDK).
+  // Same fill-the-blanks contract as the Meta cookies above.
+  ttclid?: string;
+  ttp?: string;
 
   // Legacy / non-funnel shape — the SDK still posts these for pixel-
   // fanout events. We forward them but the backend's funnel_events
@@ -106,6 +111,14 @@ export async function POST(req: NextRequest) {
     if (!body.fbc) {
       const fbc = cookieStore.get("_fbc")?.value;
       if (fbc) body.fbc = fbc;
+    }
+    if (!body.ttclid) {
+      const ttclid = cookieStore.get("ttclid")?.value;
+      if (ttclid) body.ttclid = decodeURIComponent(ttclid);
+    }
+    if (!body.ttp) {
+      const ttp = cookieStore.get("_ttp")?.value;
+      if (ttp) body.ttp = ttp;
     }
   } catch {
     /* malformed cookie — leave fields absent */
