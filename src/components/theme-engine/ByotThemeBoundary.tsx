@@ -330,7 +330,40 @@ export default function ByotThemeBoundary({
           demo: computeDemo(),
           navigation,
         });
-        setLoading(false);
+        // Don't tear the skeleton down the instant mount() returns:
+        // createRoot().render() commits ASYNCHRONOUSLY (React 19), so the
+        // container is still empty for a frame or two. Flipping `loading`
+        // off here showed a blank body between the skeleton and the theme's
+        // first paint — the "empty for a sec" flash reported on every nav.
+        // Keep the skeleton up until the bundle actually paints content (or
+        // a safety deadline) so the swap reads skeleton → theme, never
+        // skeleton → blank → theme.
+        {
+          let revealed = false;
+          const reveal = () => {
+            if (revealed || cancelled) return;
+            revealed = true;
+            setLoading(false);
+          };
+          const hardDeadline = setTimeout(reveal, 1000);
+          const tick = () => {
+            if (revealed || cancelled) return;
+            const node = containerRef.current;
+            const painted =
+              !!node &&
+              ((node.textContent ?? "").trim().length > 0 ||
+                node.querySelector(
+                  "img, svg, picture, video, canvas, section, main, article, header, footer, h1, h2, p, button, a",
+                ) != null);
+            if (painted) {
+              clearTimeout(hardDeadline);
+              reveal();
+            } else {
+              requestAnimationFrame(tick);
+            }
+          };
+          requestAnimationFrame(tick);
+        }
       } catch (err) {
         if (cancelled) return;
         const e = err instanceof Error ? err : new Error(String(err));
