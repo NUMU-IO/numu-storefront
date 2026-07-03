@@ -1,0 +1,46 @@
+name: CI
+
+# Quality gate the repo previously lacked: typecheck (and lint when an ESLint
+# config is present) on every PR and push. The deploy branches (dev/prod) build
+# a Docker image with no standalone typecheck step, so a type error could ship
+# unnoticed — this catches it first.
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  quality:
+    name: Typecheck & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Lockfile is committed, so use a deterministic install (matches the
+      # Dockerfile). NOTE: after the @numueg/theme-sdk spec bump, package-lock
+      # must be resynced via a controlled `npm install` or this step (and the
+      # Docker build) will fail on the lockfile mismatch — see PR notes.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # `next lint` needs an ESLint config + the eslint toolchain, neither of
+      # which is wired up in this repo yet. Run it only when a config exists so
+      # a fresh checkout doesn't red-wall CI. Enabling lint = add
+      # eslint-config-next + an eslint config file; typecheck above is the hard
+      # gate today.
+      - name: Lint
+        run: |
+          if ls .eslintrc* eslint.config.* >/dev/null 2>&1; then
+            npm run lint
+          else
+            echo "No ESLint config found — skipping lint (add eslint-config-next to enable)."
+          fi

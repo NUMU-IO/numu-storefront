@@ -20,28 +20,99 @@ import type { StoreData } from "@/types";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
+/**
+ * Default per-request timeout (ms) for backend calls. A read that hasn't
+ * returned in 5s is almost always a hung/unreachable upstream, not a
+ * slow-but-healthy one — failing fast frees the render (and the serverless
+ * worker) instead of blocking on it. Overridable per call via `timeoutMs`.
+ */
+const DEFAULT_TIMEOUT_MS = 5_000;
+
+/**
+ * Distinguishable API-fetch failure. `kind` lets callers tell a request that
+ * never produced an HTTP response ("timeout"/"network" — an upstream
+ * availability problem, retry/503-worthy) apart from a real backend HTTP
+ * status ("http", 4xx/5xx). `status` is set only for `kind === "http"`.
+ *
+ * Backward-compatible: it subclasses Error, so existing callers that just
+ * `catch` and fall back keep working; the extra fields are opt-in.
+ */
+export class ApiFetchError extends Error {
+  readonly kind: "timeout" | "network" | "http";
+  readonly status?: number;
+  constructor(message: string, kind: ApiFetchError["kind"], status?: number) {
+    super(message);
+    this.name = "ApiFetchError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+/**
+ * Build the AbortSignal for a fetch: a fresh timeout signal, combined with
+ * the caller's own signal when one was passed (so EITHER firing aborts the
+ * request). `AbortSignal.timeout`/`AbortSignal.any` are both available on our
+ * floor (Node 20 runner / modern browsers); if `any` is somehow absent we
+ * prefer the caller's signal, else the timeout.
+ */
+function buildFetchSignal(
+  timeoutMs: number,
+  caller?: AbortSignal | null,
+): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  if (!caller) return timeout;
+  return typeof AbortSignal.any === "function"
+    ? AbortSignal.any([caller, timeout])
+    : caller;
+}
+
 interface FetchOptions extends RequestInit {
   tags?: string[];
   revalidate?: number;
+  /** Per-call timeout override (ms). Defaults to DEFAULT_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
 
 async function apiFetch<T>(
   path: string,
   options: FetchOptions = {},
 ): Promise<T> {
-  const { tags, revalidate, ...fetchOptions } = options;
+  const { tags, revalidate, timeoutMs, signal, ...fetchOptions } = options;
   const url = `${API_URL}${path}`;
 
-  const res = await fetch(url, {
-    ...fetchOptions,
-    next: {
-      tags: tags || [],
-      revalidate: revalidate ?? 60,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...fetchOptions,
+      // Bound every backend call so a hung upstream can't stall the render
+      // (or pin a serverless worker) indefinitely. Combined with the caller's
+      // signal when they supplied one.
+      signal: buildFetchSignal(timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
+      next: {
+        tags: tags || [],
+        revalidate: revalidate ?? 60,
+      },
+    });
+  } catch (err) {
+    // fetch only rejects (vs. resolving to a Response) on abort/timeout or a
+    // transport-level failure — never on a 4xx/5xx. Wrap so callers can
+    // distinguish "upstream never answered" from a real HTTP status below.
+    const isTimeout =
+      err instanceof DOMException && err.name === "TimeoutError";
+    throw new ApiFetchError(
+      isTimeout
+        ? `API timeout after ${timeoutMs ?? DEFAULT_TIMEOUT_MS}ms — ${url}`
+        : `API network error — ${url}: ${(err as Error).message}`,
+      isTimeout ? "timeout" : "network",
+    );
+  }
 
   if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText} — ${url}`);
+    throw new ApiFetchError(
+      `API error: ${res.status} ${res.statusText} — ${url}`,
+      "http",
+      res.status,
+    );
   }
 
   const json = await res.json();
@@ -214,7 +285,7 @@ async function buildPreviewThemePayload(
     // active theme" with the slug that didn't resolve.
     const res = await fetch(
       `${API_URL}/marketplace/catalog/themes/${encodeURIComponent(slug)}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS) },
     );
     if (!res.ok) {
       console.warn(
@@ -334,6 +405,7 @@ export async function fetchCurrentCustomer(
       method: "GET",
       headers: { cookie: cookieHeader },
       cache: "no-store",
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -357,6 +429,7 @@ export async function fetchCustomerOrders(
       method: "GET",
       headers: { cookie: cookieHeader },
       cache: "no-store",
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
     if (!res.ok) return [];
     const json = await res.json();
@@ -377,7 +450,12 @@ export async function fetchCustomerOrder(
   try {
     const res = await fetch(
       `${API_URL}/storefront/me/orders/${encodeURIComponent(orderId)}`,
-      { method: "GET", headers: { cookie: cookieHeader }, cache: "no-store" },
+      {
+        method: "GET",
+        headers: { cookie: cookieHeader },
+        cache: "no-store",
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      },
     );
     if (!res.ok) return null;
     const json = await res.json();
@@ -396,6 +474,7 @@ export async function fetchCustomerAddresses(
       method: "GET",
       headers: { cookie: cookieHeader },
       cache: "no-store",
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
     if (!res.ok) return [];
     const json = await res.json();

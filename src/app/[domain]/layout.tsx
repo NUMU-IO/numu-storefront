@@ -3,8 +3,9 @@ import {
   fetchThemeSettings,
   fetchStoreMenus,
 } from "@/lib/api-client";
-import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { resolveThemeSettings, byotProvidesOwnChrome } from "@/lib/resolve-theme";
 import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRenderer";
+import { ByotChromeFallback } from "@/components/theme-engine/ByotChromeFallback";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
 import { AttributionProvider } from "@/components/layout/AttributionProvider";
 import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvider";
@@ -213,6 +214,12 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
 
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
   const isByot = !!themeSettings.external_theme?.bundle_url && !isBuiltInTheme(themeSettings.theme_id);
+  // Phase 0 blocker fix: a BYOT theme that ships no header/footer/cart leaves
+  // the store un-navigable, because the host suppresses its own chrome for BYOT
+  // bundles. Render a neutral host fallback nav ONLY for those themes — never
+  // for the six themes that carry their own chrome (byotProvidesOwnChrome
+  // fail-safes to `true` whenever it can't classify the theme).
+  const byotNeedsChrome = isByot && !byotProvidesOwnChrome(themeSettings);
 
   // Phase 2.4 — store navigation menus, fetched once here and shared with
   // every page's BYOT bundle via ThemeDataProvider → ByotThemeBoundary
@@ -317,6 +324,14 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             storeData={store}
           />
         )}
+        {byotNeedsChrome && (
+          <ByotChromeFallback
+            part="header"
+            storeName={store.name || "Store"}
+            navigation={navigation}
+            locale={visitorLocale === "ar" ? "ar" : "en"}
+          />
+        )}
         {/* Skip-link target. BYOT bundles that render their own <main>
             win over this wrapper because the link's `#main` selector
             finds the FIRST element with that id; bundles render after
@@ -328,6 +343,14 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             group={themeSettings.section_groups.footer}
             themeId={themeSettings.theme_id}
             storeData={store}
+          />
+        )}
+        {byotNeedsChrome && (
+          <ByotChromeFallback
+            part="footer"
+            storeName={store.name || "Store"}
+            navigation={navigation}
+            locale={visitorLocale === "ar" ? "ar" : "en"}
           />
         )}
       </CustomerBridgeProvider>

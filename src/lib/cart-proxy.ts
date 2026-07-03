@@ -24,6 +24,12 @@ import { verifyCsrf } from "@/lib/csrf";
 // in this dev setup. Override with NUMU_API_URL in env for staging/prod.
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
+// Upstream call budget for cart mutations. These are interactive writes the
+// shopper is waiting on, so keep it tight — but a touch above a pure read
+// since a mutation may run discount/stock validation. A hung backend must
+// fail fast rather than pin a serverless worker open.
+const CART_TIMEOUT_MS = 8_000;
+
 export async function proxyCartMutation(
   req: NextRequest,
   backendPath: string,
@@ -55,12 +61,31 @@ export async function proxyCartMutation(
     (req.headers.get("host") || "").split(":")[0];
   if (subdomain) headers["x-numu-host"] = subdomain;
 
-  const res = await fetch(`${API_URL}${backendPath}`, {
-    method,
-    headers,
-    body,
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${backendPath}`, {
+      method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(CART_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // AbortSignal.timeout rejects with a DOMException named "TimeoutError";
+    // any other rejection is a transport failure. Either way the shopper gets
+    // a clean 504 instead of a hung request.
+    const timedOut =
+      err instanceof DOMException && err.name === "TimeoutError";
+    return NextResponse.json(
+      {
+        error: timedOut ? "upstream_timeout" : "upstream_unreachable",
+        message: timedOut
+          ? `Cart service did not respond within ${CART_TIMEOUT_MS}ms.`
+          : "Cart service is unreachable.",
+      },
+      { status: 504 },
+    );
+  }
   let text = await res.text();
   // Adapt the backend envelope/field-names to the SDK Cart shape so the SDK's
   // applyCart() updates the theme's cart state (only on success bodies).

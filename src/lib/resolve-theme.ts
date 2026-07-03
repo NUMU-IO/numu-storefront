@@ -184,6 +184,40 @@ function extractExternalTheme(raw: Record<string, any>): ExternalThemeMetadata {
   };
 }
 
+/**
+ * Does this BYOT theme render its OWN header/footer chrome?
+ *
+ * BYOT bundles are expected to render their own navigation; the host
+ * suppresses its platform chrome for them (see `layout.tsx`). But 10 of the
+ * 16 V3 themes ship NO header/footer/cart sections at all, so those stores
+ * render with no navigation and no way to reach the cart. This detector lets
+ * the host render a neutral fallback nav ONLY for those themes.
+ *
+ * Signal: the bundle's `section_schemas` declares a header- or footer-type
+ * section. Every chrome-carrying theme in the fleet registers a
+ * `*-header` / `*-footer` (or bare `header` / `footer`) section type; the
+ * chrome-less themes register only content sections (plus, in a few cases, a
+ * `*-announcement-bar`, which is deliberately NOT treated as chrome).
+ *
+ * Fail-safe: when `section_schemas` is absent/empty we can't classify the
+ * theme, so we return `true` ("has chrome") — the host then does NOT inject a
+ * fallback, which can never regress the live chrome-carrying themes. The
+ * fallback appears only when we positively see a populated schema with no
+ * header/footer section.
+ */
+const CHROME_TYPE_RE = /(?:^|[-_])(?:header|footer|navbar|topbar)(?:$|[-_])|header$|footer$/i;
+
+export function byotProvidesOwnChrome(settings: ThemeSettingsV3): boolean {
+  const schemas = settings.external_theme?.section_schemas;
+  if (!schemas || typeof schemas !== "object") return true; // unknown → assume chrome
+  const types = collectKnownTypes(schemas as Record<string, any>);
+  if (types.size === 0) return true; // unknown → assume chrome
+  for (const type of types) {
+    if (CHROME_TYPE_RE.test(type)) return true;
+  }
+  return false; // populated schema, no header/footer section → no own chrome
+}
+
 // ── sanitisation (drop unknown sections, fall back to presets) ────────────
 
 /**
