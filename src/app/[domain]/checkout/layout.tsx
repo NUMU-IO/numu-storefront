@@ -19,6 +19,7 @@ import { themeOwnsCheckout } from "@/lib/byot-fork";
 import type { CSSProperties } from "react";
 import { resolveBrandTokens, brandVarsToCss } from "@/lib/brand-tokens";
 import { CheckoutTrustBadges } from "@/components/checkout/CheckoutTrustBadges";
+import { SuspendExternalThemeCss } from "@/components/checkout/SuspendExternalThemeCss";
 import { NOINDEX_ROBOTS } from "@/lib/seo";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -95,6 +96,12 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
       style={brandVars as CSSProperties}
       data-checkout-root
     >
+      {/* The BYOT theme's (Tailwind v3, UNLAYERED) stylesheet survives soft
+          navigation and its preflight beats the host's LAYERED v4 utilities
+          (unlayered > layered in the cascade) — giant logo, unstyled inputs.
+          Suspend it while the platform checkout is on screen; restores on
+          unmount. Theme-owned checkouts use the passthrough above instead. */}
+      <SuspendExternalThemeCss />
       {/* Mirror the tokens onto :root so React portals (the map-picker dialog,
           rendered into document.body) inherit the same brand palette. Scoped
           to the checkout route — unmounts when the visitor leaves checkout. */}
