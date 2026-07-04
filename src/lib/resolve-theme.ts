@@ -26,8 +26,24 @@ import type {
  * (legacy V1/V2 flat shape).
  */
 export function resolveThemeSettings(raw: Record<string, any>): ThemeSettingsV3 {
-  const settings = normalizeRaw(raw);
-  return sanitizeAgainstSchemas(settings);
+  return sanitizeAgainstSchemas(normalizeThemeSettings(raw));
+}
+
+/**
+ * Pre-sanitization normalized settings: the SAME V1/V2→V3 normalization that
+ * `resolveThemeSettings` runs, but WITHOUT the schema-sanitization pass that
+ * strips section types absent from the BYOT bundle's `section_schemas`.
+ *
+ * The host uses this to render a chrome-less BYOT store's configured global
+ * `section_groups` (header/footer). Those groups carry `header`/`footer`
+ * section types which a chrome-less bundle's `section_schemas` never declares,
+ * so the normal (sanitized) `resolveThemeSettings` output strips them to empty
+ * — leaving nothing to render. Header/footer resolve via the platform's SHARED
+ * section components (theme-agnostic in `resolveSection`), so host-rendering
+ * them is safe for any theme id.
+ */
+export function normalizeThemeSettings(raw: Record<string, any>): ThemeSettingsV3 {
+  return normalizeRaw(raw);
 }
 
 // ── normalisation (V1 / V2 → V3) ──────────────────────────────────────────
@@ -182,6 +198,82 @@ function extractExternalTheme(raw: Record<string, any>): ExternalThemeMetadata {
     presets: raw.presets ?? null,
     theme_id: typeof raw.theme_id === "string" ? raw.theme_id : null,
   };
+}
+
+/**
+ * Does this BYOT theme render its OWN header/footer chrome?
+ *
+ * BYOT bundles are expected to render their own navigation; the host
+ * suppresses its platform chrome for them (see `layout.tsx`). But 10 of the
+ * 16 V3 themes ship NO header/footer/cart sections at all, so those stores
+ * render with no navigation and no way to reach the cart. This detector lets
+ * the host render a neutral fallback nav ONLY for those themes.
+ *
+ * Signal: the bundle's `section_schemas` declares a header- or footer-type
+ * section. Every chrome-carrying theme in the fleet registers a
+ * `*-header` / `*-footer` (or bare `header` / `footer`) section type; the
+ * chrome-less themes register only content sections (plus, in a few cases, a
+ * `*-announcement-bar`, which is deliberately NOT treated as chrome).
+ *
+ * Fail-safe: when `section_schemas` is absent/empty we can't classify the
+ * theme, so we return `true` ("has chrome") — the host then does NOT inject a
+ * fallback, which can never regress the live chrome-carrying themes. The
+ * fallback appears only when we positively see a populated schema with no
+ * header/footer section.
+ */
+const CHROME_TYPE_RE = /(?:^|[-_])(?:header|footer|navbar|topbar)(?:$|[-_])|header$|footer$/i;
+
+export function byotProvidesOwnChrome(settings: ThemeSettingsV3): boolean {
+  const schemas = settings.external_theme?.section_schemas;
+  if (!schemas || typeof schemas !== "object") return true; // unknown → assume chrome
+  const types = collectKnownTypes(schemas as Record<string, any>);
+  if (types.size === 0) return true; // unknown → assume chrome
+  for (const type of types) {
+    if (CHROME_TYPE_RE.test(type)) return true;
+  }
+  return false; // populated schema, no header/footer section → no own chrome
+}
+
+// ── template overrides (per-resource template variants) ───────────────────
+
+/**
+ * Resolve the template key for a route given a resource's `template_suffix`.
+ *
+ * Shopify OS 2.0-style: a product/collection/page can opt into an alternate
+ * template variant keyed `"<baseType>.<suffix>"` (e.g. `product.wholesale`).
+ * Falls back to the base type when there is no suffix or no matching variant —
+ * a missing variant must never 404.
+ */
+export function resolveTemplateKey(
+  baseType: string,
+  suffix: string | null | undefined,
+  templates: Record<string, PageTemplate> | undefined,
+): string {
+  if (suffix && templates) {
+    const variantKey = `${baseType}.${suffix}`;
+    if (templates[variantKey]) return variantKey;
+  }
+  return baseType;
+}
+
+/**
+ * Return themeSettings with the base template for `baseType` swapped to the
+ * resolved variant, so BOTH render paths honour the override with no SDK
+ * change: the BYOT bundle (which looks up `templates[page.type]`) and the host
+ * `PageTemplateRenderer` (which reads `templates[baseType]`) both pick up the
+ * variant's sections. Returns the SAME object when no variant applies, so
+ * callers can pass the result unconditionally.
+ */
+export function applyTemplateOverride(
+  settings: ThemeSettingsV3,
+  baseType: string,
+  suffix: string | null | undefined,
+): ThemeSettingsV3 {
+  const templates = settings.templates;
+  if (!suffix || !templates) return settings;
+  const key = resolveTemplateKey(baseType, suffix, templates);
+  if (key === baseType) return settings;
+  return { ...settings, templates: { ...templates, [baseType]: templates[key] } };
 }
 
 // ── sanitisation (drop unknown sections, fall back to presets) ────────────

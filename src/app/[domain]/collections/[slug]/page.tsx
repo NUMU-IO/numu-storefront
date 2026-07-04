@@ -1,5 +1,5 @@
 import { fetchStoreByDomain, fetchCollectionBySlug, fetchProducts, fetchThemeSettings } from "@/lib/api-client";
-import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
@@ -69,6 +69,14 @@ export default async function CollectionPage({ params }: PageProps) {
     : [];
   const themeRaw = await fetchThemeSettings(store.id);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
+  // Template overrides: honour an alternate collection template
+  // (collection.template_suffix → `collection.<suffix>`) in both render paths.
+  // No-ops until the collection payload carries template_suffix (backend follow-up).
+  const effectiveTheme = applyTemplateOverride(
+    themeSettings,
+    "collection",
+    (collection as { template_suffix?: string | null } | null)?.template_suffix ?? null,
+  );
 
   // JSON-LD: emit a CollectionPage block + breadcrumbs so search
   // engines surface "Collection: <name>" results with the right URL.
@@ -117,7 +125,7 @@ export default async function CollectionPage({ params }: PageProps) {
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
           cssUrl={themeSettings.external_theme.css_url}
-          themeSettings={themeSettings}
+          themeSettings={effectiveTheme}
           storeData={store}
           page={{
             type: "collection",
@@ -138,7 +146,7 @@ export default async function CollectionPage({ params }: PageProps) {
     );
   }
 
-  const collectionTemplate = themeSettings.templates?.collection;
+  const collectionTemplate = effectiveTheme.templates?.collection;
   if (collectionTemplate) {
     return (
       <>

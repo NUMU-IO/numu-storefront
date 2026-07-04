@@ -43,6 +43,12 @@ import { verifyCsrf } from "@/lib/csrf";
 const API_URL =
   process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
+// Upstream call budgets. Store lookups are quick reads; auth/account writes
+// (login/register may run bcrypt + send a verification email server-side) get
+// more headroom. Both bound the call so a hung backend can't pin the worker.
+const STORE_LOOKUP_TIMEOUT_MS = 5_000;
+const CUSTOMER_TIMEOUT_MS = 10_000;
+
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 interface ProxyOptions {
@@ -82,7 +88,10 @@ async function resolveStoreId(req: NextRequest): Promise<string | null> {
   try {
     const res = await fetch(
       `${API_URL}/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
-      { cache: "no-store" },
+      {
+        cache: "no-store",
+        signal: AbortSignal.timeout(STORE_LOOKUP_TIMEOUT_MS),
+      },
     );
     if (!res.ok) return null;
     const body = await res.json();
@@ -151,12 +160,34 @@ export async function proxyCustomer(
   const subdomainHeader = req.headers.get("x-numu-host");
   if (subdomainHeader) headers["x-numu-host"] = subdomainHeader;
 
-  const upstream = await fetch(`${API_URL}${path}`, {
-    method,
-    headers,
-    body,
-    cache: "no-store",
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(CUSTOMER_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // AbortSignal.timeout rejects with a DOMException named "TimeoutError";
+    // any other rejection is a transport failure. Return a clean 504 in the
+    // route's envelope shape rather than letting the request hang / 500.
+    const timedOut =
+      err instanceof DOMException && err.name === "TimeoutError";
+    return NextResponse.json(
+      {
+        success: false,
+        error: {
+          code: timedOut ? "upstream_timeout" : "upstream_unreachable",
+          message: timedOut
+            ? `Account service did not respond within ${CUSTOMER_TIMEOUT_MS}ms.`
+            : "Account service is unreachable.",
+        },
+      },
+      { status: 504 },
+    );
+  }
   const text = await upstream.text();
 
   // Build response with Set-Cookie passthrough (multi-cookie aware —

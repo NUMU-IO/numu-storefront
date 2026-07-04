@@ -7,6 +7,7 @@
 
 import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { sanitizeHtml } from "@/lib/sanitize-html";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { fetchArticleByHandle } from "@/lib/blogs";
@@ -71,12 +72,13 @@ export default async function ArticlePage({ params }: PageProps) {
             {a.author ? ` · by ${a.author}` : ""}
           </p>
         )}
-        {/* Article HTML is sanitized server-side before it lands in the
-            response. Built-in fallback renders it directly; BYOT themes
-            should use the SDK's <RichText> for layered sanitization. */}
+        {/* body_html is merchant-authored and arrives UN-sanitized from the
+            backend (see lib/blogs.ts). Sanitize here before it reaches
+            dangerouslySetInnerHTML (stored XSS). BYOT themes receive the raw
+            article and sanitize via the SDK's <RichText>. */}
         <div
           className="prose max-w-none"
-          dangerouslySetInnerHTML={{ __html: a.body_html || "" }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(a.body_html) }}
         />
       </article>
     </main>

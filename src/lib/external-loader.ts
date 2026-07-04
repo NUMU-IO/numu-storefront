@@ -96,6 +96,10 @@ interface BundleImportMap {
   plugin: string;
   federate: boolean;
   sdk_compat_major: number;
+  /** Optional (plugin >= the minor-gate release). In the pre-1.0 SDK line
+   *  minors are breaking, so this pins the exact minor the bundle was built
+   *  against. Absent on older bundles → the minor check is skipped. */
+  sdk_compat_minor?: number;
   host_provided: string[];
 }
 
@@ -123,6 +127,16 @@ interface HostRuntimeManifest {
 const BUNDLE_CACHE: RequestCache =
   process.env.NEXT_PUBLIC_NUMU_ENV === "development" ? "no-store" : "force-cache";
 
+// Bound the tiny theme-metadata fetches (import-map.json, manifest.json). A
+// hang here is worse than a failure: the boundary's reveal deadline tears the
+// skeleton down but the bundle never mounts, so the page silently goes blank
+// with NO error thrown. Timing out converts that into a fast, surfaced failure
+// (import-map falls back to "self-contained"; the manifest fetch rejects with a
+// clear compat error → error UI + telemetry). The large bundle download below
+// is intentionally left untimed — a naive timeout would false-abort slow-but-
+// healthy downloads, and its sibling non-checksum import() path takes no signal.
+const THEME_META_TIMEOUT_MS = 8_000;
+
 async function loadAndVerifyImportMap(
   bundleUrl: string,
 ): Promise<{ map: BundleImportMap | null; ok: boolean; reason?: string }> {
@@ -131,7 +145,10 @@ async function loadAndVerifyImportMap(
   mapUrl.pathname = mapUrl.pathname.replace(/[^/]+$/, "import-map.json");
   let bundleMap: BundleImportMap | null;
   try {
-    const res = await fetch(mapUrl.toString(), { cache: BUNDLE_CACHE });
+    const res = await fetch(mapUrl.toString(), {
+      cache: BUNDLE_CACHE,
+      signal: AbortSignal.timeout(THEME_META_TIMEOUT_MS),
+    });
     if (!res.ok) {
       // Older bundles built before plugin 0.2.0 don't ship one. Treat
       // as self-contained — skip the check rather than refuse to load.
@@ -149,6 +166,7 @@ async function loadAndVerifyImportMap(
   try {
     const res = await fetch("/__numu-runtime/manifest.json", {
       cache: BUNDLE_CACHE,
+      signal: AbortSignal.timeout(THEME_META_TIMEOUT_MS),
     });
     if (!res.ok) {
       return {
@@ -168,10 +186,9 @@ async function loadAndVerifyImportMap(
     };
   }
 
-  const hostMajor = parseInt(
-    hostManifest.sdk_version.split(".")[0] ?? "0",
-    10,
-  );
+  const versionParts = hostManifest.sdk_version.split(".");
+  const hostMajor = parseInt(versionParts[0] ?? "0", 10);
+  const hostMinor = parseInt(versionParts[1] ?? "0", 10);
   if (
     Number.isFinite(hostMajor) &&
     bundleMap.sdk_compat_major !== hostMajor
@@ -183,6 +200,31 @@ async function loadAndVerifyImportMap(
         `Bundle expects @numu/theme-sdk major ${bundleMap.sdk_compat_major}, ` +
         `host serves ${hostManifest.sdk_version}. Rebuild the theme against ` +
         `the current SDK before reactivating.`,
+    };
+  }
+
+  // 0.x minor gate. Semver treats 0.x minors as breaking and the SDK is still
+  // pre-1.0, so a bundle built against a NEWER minor than the host runtime
+  // serves can call SDK APIs the host doesn't provide → runtime crash. Reject
+  // with an actionable message instead. Guards:
+  //   - only in the 0.x line (at >=1.0 the major check already covers breaks);
+  //   - only when the bundle DECLARES a numeric sdk_compat_minor — older
+  //     bundles omit it and must keep loading (skip the check);
+  //   - only when that minor is strictly greater than the host's.
+  if (
+    hostMajor === 0 &&
+    Number.isFinite(hostMinor) &&
+    typeof bundleMap.sdk_compat_minor === "number" &&
+    Number.isFinite(bundleMap.sdk_compat_minor) &&
+    bundleMap.sdk_compat_minor > hostMinor
+  ) {
+    return {
+      map: bundleMap,
+      ok: false,
+      reason:
+        `Theme built against SDK 0.${bundleMap.sdk_compat_minor} but host ` +
+        `runtime serves ${hostManifest.sdk_version}; rebuild/redeploy the host ` +
+        `runtime (npm run build:runtime) before serving this theme.`,
     };
   }
 

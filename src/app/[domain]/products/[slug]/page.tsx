@@ -4,7 +4,7 @@ import {
   fetchThemeSettings,
   fetchProducts,
 } from "@/lib/api-client";
-import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
@@ -126,6 +126,14 @@ export default async function ProductPage({ params }: PageProps) {
     if (!msg.includes("API error: 404")) throw productResult.error;
   }
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
+  // Template overrides: if this product opts into an alternate template
+  // (product.template_suffix → `product.<suffix>`), swap it in so BOTH the BYOT
+  // bundle and the built-in renderer pick up the variant's sections.
+  const effectiveTheme = applyTemplateOverride(
+    themeSettings,
+    "product",
+    product?.template_suffix ?? null,
+  );
 
   const isByotTheme =
     !!themeSettings.external_theme?.bundle_url &&
@@ -213,7 +221,7 @@ export default async function ProductPage({ params }: PageProps) {
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
           cssUrl={themeSettings.external_theme.css_url}
-          themeSettings={themeSettings}
+          themeSettings={effectiveTheme}
           storeData={store}
           page={{
             type: "product",
@@ -237,7 +245,7 @@ export default async function ProductPage({ params }: PageProps) {
     );
   }
 
-  const productTemplate = themeSettings.templates?.product;
+  const productTemplate = effectiveTheme.templates?.product;
   if (productTemplate) {
     return (
       <>

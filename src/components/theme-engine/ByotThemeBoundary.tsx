@@ -215,8 +215,65 @@ class ThemeRenderBoundary extends Component<
   }
 }
 
-function postBundleError(error: Error) {
+/**
+ * Best-effort shopper-side telemetry: beacon a theme load/render failure to
+ * /api/theme-error (logged server-side, shipped to CloudWatch). SSR-guarded
+ * (navigator is client-only) and never throws — telemetry must not break the
+ * page. Unlike the editor postMessage below, this fires on real top-level
+ * shopper pages too, which is exactly where we're blind today.
+ */
+function beaconThemeError(payload: {
+  store?: string | null;
+  bundleUrl?: string | null;
+  message: string;
+  stack?: string | null;
+  themeSlug?: string | null;
+}): void {
+  if (
+    typeof navigator === "undefined" ||
+    typeof navigator.sendBeacon !== "function"
+  ) {
+    return;
+  }
+  try {
+    const body = JSON.stringify({
+      store: payload.store ?? null,
+      bundleUrl: payload.bundleUrl ?? null,
+      message: payload.message,
+      stack: payload.stack ?? null,
+      // Theme identity for the backend ingest (theme_slug). No theme_version is
+      // surfaced in the resolved theme model, so it's intentionally omitted.
+      themeSlug: payload.themeSlug ?? null,
+      url: typeof window !== "undefined" ? window.location.href : null,
+    });
+    navigator.sendBeacon(
+      "/api/theme-error",
+      new Blob([body], { type: "application/json" }),
+    );
+  } catch {
+    // sendBeacon can throw (e.g. payload too large / disabled) — ignore.
+  }
+}
+
+function postBundleError(
+  error: Error,
+  ctx?: {
+    store?: string | null;
+    bundleUrl?: string | null;
+    themeSlug?: string | null;
+  },
+) {
   if (typeof window === "undefined") return;
+  // Telemetry first — must run on real (top-level) shopper pages, not just
+  // inside the editor iframe.
+  beaconThemeError({
+    store: ctx?.store ?? null,
+    bundleUrl: ctx?.bundleUrl ?? null,
+    message: error.message,
+    stack: error.stack ?? null,
+    themeSlug: ctx?.themeSlug ?? null,
+  });
+  // Editor integration: only meaningful inside the customizer iframe.
   if (window.parent === window) return;
   try {
     window.parent.postMessage(
@@ -369,7 +426,15 @@ export default function ByotThemeBoundary({
         const e = err instanceof Error ? err : new Error(String(err));
         setError(e);
         setLoading(false);
-        postBundleError(e);
+        postBundleError(e, {
+          store:
+            storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
+          bundleUrl,
+          themeSlug:
+            themeSettings.external_theme?.theme_id ??
+            themeSettings.theme_id ??
+            null,
+        });
       }
     }
 
@@ -534,7 +599,20 @@ export default function ByotThemeBoundary({
     );
 
   return (
-    <ThemeRenderBoundary onError={postBundleError} fallback={fallbackUI}>
+    <ThemeRenderBoundary
+      onError={(err) =>
+        postBundleError(err, {
+          store:
+            storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
+          bundleUrl,
+          themeSlug:
+            themeSettings.external_theme?.theme_id ??
+            themeSettings.theme_id ??
+            null,
+        })
+      }
+      fallback={fallbackUI}
+    >
       {/* The page is prerendered, but a BYOT theme paints only after its
           bundle downloads + mounts on the client. This loading branch is part
           of the SSR HTML (loading starts true), so a skeleton — not a blank

@@ -17,6 +17,11 @@ import { fetchStoreByHost } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
+// Order-creation is heavier than a read (stock reservation, payment-intent
+// creation at the gateway), so give it more headroom than the 5s read tier —
+// but still bound it so a hung gateway can't hold the checkout open forever.
+const CHECKOUT_TIMEOUT_MS = 15_000;
+
 function backendHeaders(req: NextRequest): HeadersInit {
   const headers: HeadersInit = { "Content-Type": "application/json" };
   const cookie = req.headers.get("cookie");
@@ -84,12 +89,32 @@ export async function POST(req: NextRequest) {
     /* not JSON — forward verbatim */
   }
   const upstream = `${API_URL}/storefront/store/${store.id}/checkout`;
-  const res = await fetch(upstream, {
-    method: "POST",
-    headers: backendHeaders(req),
-    body,
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(upstream, {
+      method: "POST",
+      headers: backendHeaders(req),
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(CHECKOUT_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // AbortSignal.timeout rejects with a DOMException named "TimeoutError";
+    // anything else is a transport failure. The order was NOT created (or its
+    // state is unknown), so surface a 504 and let the review step tell the
+    // shopper to retry rather than hanging the page.
+    const timedOut =
+      err instanceof DOMException && err.name === "TimeoutError";
+    return NextResponse.json(
+      {
+        error: timedOut ? "upstream_timeout" : "upstream_unreachable",
+        message: timedOut
+          ? `Checkout service did not respond within ${CHECKOUT_TIMEOUT_MS}ms. Please try again.`
+          : "Checkout service is unreachable. Please try again.",
+      },
+      { status: 504 },
+    );
+  }
   // Pass status + body through unchanged so the page can branch on
   // 201 (success → redirect to payment_url or thank-you), 400 (form
   // errors), 409 (out-of-stock), etc., without us re-shaping anything.
