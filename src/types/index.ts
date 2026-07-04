@@ -87,6 +87,9 @@ export interface Product {
   category?: string;
   tags?: string[];
   in_stock: boolean;
+  /** Alternate template variant key suffix (e.g. "wholesale" → template
+   *  `product.wholesale`); null/undefined = the base `product` template. */
+  template_suffix?: string | null;
 }
 
 export interface ProductImage {

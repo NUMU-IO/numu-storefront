@@ -218,6 +218,48 @@ export function byotProvidesOwnChrome(settings: ThemeSettingsV3): boolean {
   return false; // populated schema, no header/footer section → no own chrome
 }
 
+// ── template overrides (per-resource template variants) ───────────────────
+
+/**
+ * Resolve the template key for a route given a resource's `template_suffix`.
+ *
+ * Shopify OS 2.0-style: a product/collection/page can opt into an alternate
+ * template variant keyed `"<baseType>.<suffix>"` (e.g. `product.wholesale`).
+ * Falls back to the base type when there is no suffix or no matching variant —
+ * a missing variant must never 404.
+ */
+export function resolveTemplateKey(
+  baseType: string,
+  suffix: string | null | undefined,
+  templates: Record<string, PageTemplate> | undefined,
+): string {
+  if (suffix && templates) {
+    const variantKey = `${baseType}.${suffix}`;
+    if (templates[variantKey]) return variantKey;
+  }
+  return baseType;
+}
+
+/**
+ * Return themeSettings with the base template for `baseType` swapped to the
+ * resolved variant, so BOTH render paths honour the override with no SDK
+ * change: the BYOT bundle (which looks up `templates[page.type]`) and the host
+ * `PageTemplateRenderer` (which reads `templates[baseType]`) both pick up the
+ * variant's sections. Returns the SAME object when no variant applies, so
+ * callers can pass the result unconditionally.
+ */
+export function applyTemplateOverride(
+  settings: ThemeSettingsV3,
+  baseType: string,
+  suffix: string | null | undefined,
+): ThemeSettingsV3 {
+  const templates = settings.templates;
+  if (!suffix || !templates) return settings;
+  const key = resolveTemplateKey(baseType, suffix, templates);
+  if (key === baseType) return settings;
+  return { ...settings, templates: { ...templates, [baseType]: templates[key] } };
+}
+
 // ── sanitisation (drop unknown sections, fall back to presets) ────────────
 
 /**

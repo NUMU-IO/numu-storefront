@@ -15,7 +15,7 @@ import {
   fetchStorePage,
   type StorefrontPage,
 } from "@/lib/api-client";
-import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme";
 import { sanitizeHtml } from "@/lib/sanitize-html";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -104,6 +104,14 @@ export default async function CmsPage({ params }: PageProps) {
   // <RichText>. See src/lib/sanitize-html.ts.
   const safeBody = resolvedBody ? sanitizeHtml(resolvedBody) : null;
 
+  // Template overrides: honour an alternate page template (page.template_suffix
+  // → `page.<suffix>`) in both the BYOT and built-in render paths.
+  const effectiveTheme = applyTemplateOverride(
+    themeSettings,
+    "page",
+    (page as { template_suffix?: string | null } | null)?.template_suffix ?? null,
+  );
+
   if (
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
@@ -112,7 +120,7 @@ export default async function CmsPage({ params }: PageProps) {
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
         cssUrl={themeSettings.external_theme.css_url}
-        themeSettings={themeSettings}
+        themeSettings={effectiveTheme}
         storeData={store}
         page={{
           type: "page",
@@ -151,7 +159,7 @@ export default async function CmsPage({ params }: PageProps) {
     );
   }
 
-  const pageTemplate = themeSettings.templates?.page;
+  const pageTemplate = effectiveTheme.templates?.page;
   if (pageTemplate) {
     return (
       <PageTemplateRenderer
