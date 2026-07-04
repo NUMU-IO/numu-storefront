@@ -82,7 +82,7 @@ async function resolveLocale(): Promise<{ lang: string; dir: "ltr" | "rtl" }> {
 type ThemeStaticTemplates = {
   errorUrl: string | null;
   loadingUrl: string | null;
-  /** BYOT bundle entry — modulepreloaded so it downloads during HTML parse. */
+  /** BYOT bundle entry — script-preloaded so it downloads during HTML parse. */
   bundleUrl: string | null;
   /** BYOT stylesheet — preloaded alongside the bundle. */
   cssUrl: string | null;
@@ -162,28 +162,42 @@ export default async function RootLayout({
           BYOT runtime import map — MUST be the FIRST module-related node in
           <head>. Federated theme bundles import `react`, `react/jsx-runtime`,
           `react-dom/client`, and `@numueg/theme-sdk` as bare specifiers. Per
-          the import-map spec the map must be parsed BEFORE any module load is
-          triggered — and that includes the `<link rel="modulepreload">` below,
-          which eagerly resolves the bundle's OWN static imports. If the map
-          comes after the preload, the browser resolves those bare specifiers
-          with no map in effect and throws "Failed to resolve module specifier
-          'react/jsx-runtime'" (the first bare import in every JSX file).
+          the import-map spec the map must be parsed BEFORE any module load or
+          modulepreload is triggered, or the browser ignores it and every bare
+          specifier throws "Failed to resolve module specifier". That's also
+          why the bundle preload below is `rel="preload"`, never
+          `rel="modulepreload"` — see the comment there.
           Self-contained themes (federate: false) don't need it.
         */}
         <RuntimeImportMap />
         {/*
           Preload the BYOT theme bundle + CSS so the browser fetches them
           DURING HTML parse (in parallel with hydration) instead of waiting
-          for the ByotThemeBoundary effect to fire post-hydration. This is the
-          single biggest cut to the "blank for a second" gap on every page —
-          modulepreload cascades to the bundle's static chunk imports too,
-          which is exactly why the import map above must precede it.
+          for the ByotThemeBoundary effect to fire post-hydration.
+
+          CRITICAL: `rel="preload" as="script"`, NOT `rel="modulepreload"`.
+          React 19 hoists <link> resources ABOVE inline scripts in the
+          streamed <head> regardless of JSX order — so a modulepreload always
+          beats the import map above, triggers module resolution of the
+          bundle's bare imports (react/jsx-runtime, …) with no map in effect,
+          and the browser then IGNORES the late map ("An import map is added
+          after module script load or preload") → every federated theme dies
+          with "Failed to resolve module specifier". A plain script preload
+          warms the HTTP cache (the later dynamic import() reuses the bytes)
+          without touching the module map, so hoisting order can't break it.
+          crossOrigin="anonymous" matches import()'s cors/same-origin mode so
+          the preload cache actually hits.
         */}
         {cdnOrigin && (
           <link rel="preconnect" href={cdnOrigin} crossOrigin="anonymous" />
         )}
         {bundleUrl && (
-          <link rel="modulepreload" href={bundleUrl} crossOrigin="anonymous" />
+          <link
+            rel="preload"
+            as="script"
+            href={bundleUrl}
+            crossOrigin="anonymous"
+          />
         )}
         {cssUrl && <link rel="preload" as="style" href={cssUrl} />}
       </head>
