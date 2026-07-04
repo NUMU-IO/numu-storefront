@@ -16,6 +16,7 @@ import {
   type StorefrontPage,
 } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { sanitizeHtml } from "@/lib/sanitize-html";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
@@ -97,6 +98,11 @@ export default async function CmsPage({ params }: PageProps) {
   const lang = (store as { default_language?: string })?.default_language || "en";
   const resolvedTitle = pick(page?.title, lang) || humanize(handle);
   const resolvedBody = pick(page?.body, lang) || null;
+  // Merchant-authored HTML → sanitize before any dangerouslySetInnerHTML.
+  // Used by BOTH built-in render paths below (routeFallback + no-template
+  // fallback). BYOT themes receive the raw body and sanitize via the SDK's
+  // <RichText>. See src/lib/sanitize-html.ts.
+  const safeBody = resolvedBody ? sanitizeHtml(resolvedBody) : null;
 
   if (
     themeSettings.external_theme?.bundle_url &&
@@ -131,10 +137,10 @@ export default async function CmsPage({ params }: PageProps) {
         routeFallback={
           <div className="max-w-4xl mx-auto p-8">
             <h1 className="text-3xl font-bold">{resolvedTitle}</h1>
-            {resolvedBody ? (
+            {safeBody ? (
               <div
                 className="prose mt-4 max-w-none"
-                dangerouslySetInnerHTML={{ __html: resolvedBody }}
+                dangerouslySetInnerHTML={{ __html: safeBody }}
               />
             ) : (
               <p className="text-gray-600 mt-4">No content yet.</p>
@@ -160,10 +166,10 @@ export default async function CmsPage({ params }: PageProps) {
   return (
     <div className="max-w-4xl mx-auto p-8">
       <h1 className="text-3xl font-bold">{resolvedTitle}</h1>
-      {resolvedBody ? (
+      {safeBody ? (
         <div
           className="prose mt-4 max-w-none"
-          dangerouslySetInnerHTML={{ __html: resolvedBody }}
+          dangerouslySetInnerHTML={{ __html: safeBody }}
         />
       ) : (
         <p className="text-gray-600 mt-4">No content yet.</p>
