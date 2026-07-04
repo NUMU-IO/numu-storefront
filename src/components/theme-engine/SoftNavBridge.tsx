@@ -85,13 +85,22 @@ export function SoftNavBridge() {
     };
   }, [router, domain]);
 
-  // Route committed → the new page is on screen; drop the bar.
+  // Route committed → the new page is on screen; drop the bar. For a
+  // navigation WE claimed, also force the viewport to the top: the BYOT
+  // page body mounts client-side AFTER commit, so at commit time the
+  // document is short and the browser clamps the old scroll offset to
+  // roughly the footer — the "page opens in the middle" bug. Router
+  // scroll handling can't see the late-mounting content; an explicit
+  // scroll can. Back/forward traversals never set `pending`, so their
+  // native scroll restoration is untouched.
   useEffect(() => {
+    if (pending) window.scrollTo({ top: 0, behavior: "instant" });
     setPending(false);
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
   if (!pending) return null;
