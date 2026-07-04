@@ -159,11 +159,25 @@ export default async function RootLayout({
     >
       <head>
         {/*
+          BYOT runtime import map — MUST be the FIRST module-related node in
+          <head>. Federated theme bundles import `react`, `react/jsx-runtime`,
+          `react-dom/client`, and `@numueg/theme-sdk` as bare specifiers. Per
+          the import-map spec the map must be parsed BEFORE any module load is
+          triggered — and that includes the `<link rel="modulepreload">` below,
+          which eagerly resolves the bundle's OWN static imports. If the map
+          comes after the preload, the browser resolves those bare specifiers
+          with no map in effect and throws "Failed to resolve module specifier
+          'react/jsx-runtime'" (the first bare import in every JSX file).
+          Self-contained themes (federate: false) don't need it.
+        */}
+        <RuntimeImportMap />
+        {/*
           Preload the BYOT theme bundle + CSS so the browser fetches them
           DURING HTML parse (in parallel with hydration) instead of waiting
           for the ByotThemeBoundary effect to fire post-hydration. This is the
           single biggest cut to the "blank for a second" gap on every page —
-          modulepreload cascades to the bundle's static chunk imports too.
+          modulepreload cascades to the bundle's static chunk imports too,
+          which is exactly why the import map above must precede it.
         */}
         {cdnOrigin && (
           <link rel="preconnect" href={cdnOrigin} crossOrigin="anonymous" />
@@ -172,19 +186,6 @@ export default async function RootLayout({
           <link rel="modulepreload" href={bundleUrl} crossOrigin="anonymous" />
         )}
         {cssUrl && <link rel="preload" as="style" href={cssUrl} />}
-        {/*
-          BYOT runtime import map. Federated theme bundles import
-          `react`, `react/jsx-runtime`, `react-dom/client`, and
-          `@numu/theme-sdk` as bare specifiers. Without an import map
-          parsed by the browser BEFORE the bundle's dynamic import runs,
-          those imports throw "Failed to resolve module specifier".
-
-          Must live in <head> so the HTML parser sees it before the
-          ByotThemeBoundary effect (which fires after hydration but
-          uses an import map that was committed at parse time, per
-          spec). Self-contained themes (federate: false) ignore it.
-        */}
-        <RuntimeImportMap />
       </head>
       {/* suppressHydrationWarning: browser extensions (Grammarly,
           LastPass, etc.) inject data-* attributes onto <body> before
