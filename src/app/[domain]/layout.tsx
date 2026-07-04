@@ -18,6 +18,7 @@ import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvid
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
 import { PreviewNavigationBridge } from "@/components/theme-engine/PreviewNavigationBridge";
+import { SoftNavBridge } from "@/components/theme-engine/SoftNavBridge";
 import { MetaPixel } from "@/components/tracking/MetaPixel";
 import { resolveMetaPixelIds } from "@/lib/meta-pixel";
 import { TikTokPixel } from "@/components/tracking/TikTokPixel";
@@ -362,6 +363,11 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
         {/* Turns editor page switches into client-side route changes inside
             the preview iframe (no full reload). Inert outside preview mode. */}
         <PreviewNavigationBridge />
+        {/* SDK 0.10 soft navigation: claims the theme Link's cancelable
+            numu:navigate event and router.push()es it, so shopper page-to-
+            page moves skip the full document reload + theme remount. No-op
+            under pre-0.10 runtimes (no events fire → Links hard-navigate). */}
+        <SoftNavBridge />
         {/* Abandoned-checkout capture: upserts the cart to the recovery store
             on every cart change (design: track from add-to-cart, not just at
             the contact step). */}
