@@ -40,6 +40,7 @@ import {
 } from "@/lib/checkout-state";
 import { EG_GOVERNORATES, governorateLabel } from "@/lib/eg-governorates";
 import { getSessionFingerprint, trackFunnel } from "@/lib/meta-pixel";
+import { trackCartState } from "@/lib/abandoned-cart";
 import {
   fetchCheckoutFieldsConfig,
   stdField,
@@ -294,6 +295,51 @@ export function CheckoutPage() {
       const { [key]: _omit, ...rest } = p;
       return rest;
     });
+
+  // Abandoned-checkout contact enrichment. The single-page checkout has no
+  // separate "contact step", so we enrich the abandoned_checkouts row as soon
+  // as the shopper has entered reachable contact info (email OR a full-length
+  // phone) — debounced so we don't POST on every keystroke. This is what makes
+  // a customer who fills the form but never pays recoverable by the merchant's
+  // WhatsApp/email flow; without it the row only ever carried line items.
+  const composedPhone = composePhone(phoneCc, phone);
+  const phoneDigits = composedPhone.replace(/\D/g, "");
+  const hasReachableContact =
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()) || phoneDigits.length >= 10;
+  useEffect(() => {
+    if (!hasReachableContact) return;
+    const id = setTimeout(() => {
+      void trackCartState({
+        email: email.trim() || undefined,
+        phone: composedPhone || undefined,
+        shipping_address: {
+          first_name: firstName,
+          last_name: lastName,
+          address_line1: line1,
+          address_line2: line2 || undefined,
+          city: city || stateGov,
+          state: stateGov || undefined,
+          postal_code: postalCode || undefined,
+          country,
+          phone: composedPhone || undefined,
+        },
+      });
+    }, 900);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hasReachableContact,
+    email,
+    composedPhone,
+    firstName,
+    lastName,
+    line1,
+    line2,
+    city,
+    stateGov,
+    postalCode,
+    country,
+  ]);
 
   // Shipping
   const [rates, setRates] = useState<ShippingRateOption[] | null>(null);
@@ -617,6 +663,26 @@ export function CheckoutPage() {
     );
 
     setSubmitting(true);
+
+    // Backstop the abandoned-checkout enrichment right before we attempt
+    // payment — if the shopper filled the form and clicked pay faster than the
+    // debounced effect fired, this guarantees the row carries their contact so
+    // a failed / abandoned payment is still recoverable. Best-effort.
+    void trackCartState({
+      email: email.trim() || undefined,
+      phone: submitPhone || undefined,
+      shipping_address: {
+        first_name: firstName,
+        last_name: lastName,
+        address_line1: line1,
+        address_line2: line2 || undefined,
+        city: city || stateGov,
+        state: stateGov || undefined,
+        postal_code: postalCode || undefined,
+        country,
+        phone: submitPhone || undefined,
+      },
+    });
 
     // Persist a snapshot so a refresh / processing-poll can recover.
     patchCheckoutState({
