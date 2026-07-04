@@ -26,8 +26,24 @@ import type {
  * (legacy V1/V2 flat shape).
  */
 export function resolveThemeSettings(raw: Record<string, any>): ThemeSettingsV3 {
-  const settings = normalizeRaw(raw);
-  return sanitizeAgainstSchemas(settings);
+  return sanitizeAgainstSchemas(normalizeThemeSettings(raw));
+}
+
+/**
+ * Pre-sanitization normalized settings: the SAME V1/V2→V3 normalization that
+ * `resolveThemeSettings` runs, but WITHOUT the schema-sanitization pass that
+ * strips section types absent from the BYOT bundle's `section_schemas`.
+ *
+ * The host uses this to render a chrome-less BYOT store's configured global
+ * `section_groups` (header/footer). Those groups carry `header`/`footer`
+ * section types which a chrome-less bundle's `section_schemas` never declares,
+ * so the normal (sanitized) `resolveThemeSettings` output strips them to empty
+ * — leaving nothing to render. Header/footer resolve via the platform's SHARED
+ * section components (theme-agnostic in `resolveSection`), so host-rendering
+ * them is safe for any theme id.
+ */
+export function normalizeThemeSettings(raw: Record<string, any>): ThemeSettingsV3 {
+  return normalizeRaw(raw);
 }
 
 // ── normalisation (V1 / V2 → V3) ──────────────────────────────────────────

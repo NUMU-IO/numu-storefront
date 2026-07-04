@@ -227,6 +227,7 @@ function beaconThemeError(payload: {
   bundleUrl?: string | null;
   message: string;
   stack?: string | null;
+  themeSlug?: string | null;
 }): void {
   if (
     typeof navigator === "undefined" ||
@@ -240,6 +241,9 @@ function beaconThemeError(payload: {
       bundleUrl: payload.bundleUrl ?? null,
       message: payload.message,
       stack: payload.stack ?? null,
+      // Theme identity for the backend ingest (theme_slug). No theme_version is
+      // surfaced in the resolved theme model, so it's intentionally omitted.
+      themeSlug: payload.themeSlug ?? null,
       url: typeof window !== "undefined" ? window.location.href : null,
     });
     navigator.sendBeacon(
@@ -253,7 +257,11 @@ function beaconThemeError(payload: {
 
 function postBundleError(
   error: Error,
-  ctx?: { store?: string | null; bundleUrl?: string | null },
+  ctx?: {
+    store?: string | null;
+    bundleUrl?: string | null;
+    themeSlug?: string | null;
+  },
 ) {
   if (typeof window === "undefined") return;
   // Telemetry first — must run on real (top-level) shopper pages, not just
@@ -263,6 +271,7 @@ function postBundleError(
     bundleUrl: ctx?.bundleUrl ?? null,
     message: error.message,
     stack: error.stack ?? null,
+    themeSlug: ctx?.themeSlug ?? null,
   });
   // Editor integration: only meaningful inside the customizer iframe.
   if (window.parent === window) return;
@@ -421,6 +430,10 @@ export default function ByotThemeBoundary({
           store:
             storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
           bundleUrl,
+          themeSlug:
+            themeSettings.external_theme?.theme_id ??
+            themeSettings.theme_id ??
+            null,
         });
       }
     }
@@ -592,6 +605,10 @@ export default function ByotThemeBoundary({
           store:
             storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
           bundleUrl,
+          themeSlug:
+            themeSettings.external_theme?.theme_id ??
+            themeSettings.theme_id ??
+            null,
         })
       }
       fallback={fallbackUI}
