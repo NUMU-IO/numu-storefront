@@ -6,6 +6,7 @@ import {
 import { resolveThemeSettings, byotProvidesOwnChrome } from "@/lib/resolve-theme";
 import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRenderer";
 import { ByotChromeFallback } from "@/components/theme-engine/ByotChromeFallback";
+import { AbandonedCartTracker } from "@/components/tracking/AbandonedCartTracker";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
 import { AttributionProvider } from "@/components/layout/AttributionProvider";
 import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvider";
@@ -302,6 +303,10 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
         {/* Turns editor page switches into client-side route changes inside
             the preview iframe (no full reload). Inert outside preview mode. */}
         <PreviewNavigationBridge />
+        {/* Abandoned-checkout capture: upserts the cart to the recovery store
+            on every cart change (design: track from add-to-cart, not just at
+            the contact step). */}
+        <AbandonedCartTracker />
         {announcementBar && (
           <AnnouncementBar
             promotion={announcementBar}
