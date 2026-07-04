@@ -17,6 +17,18 @@
     "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", "saudi_riyal";
 }
 
+/* BYOT pages mount client-side: the server HTML is short (host chrome/footer
+   only) and the theme bundle then injects the tall page body ABOVE it. With
+   default scroll anchoring, Chrome keeps the visible node (the footer) stable
+   by scrolling DOWN as that content lands — so every fresh navigation to a
+   BYOT page appears to open at the bottom/middle of the page instead of the
+   top. Disable anchoring document-wide: fresh loads stay at scroll 0, and
+   back/forward restoration is unaffected (the browser re-applies its saved
+   offset independently of anchoring). */
+html {
+  overflow-anchor: none;
+}
+
 /* ───────────────────────────────────────────────────────────────────────
    NUMU house brand tokens — mirror numo-merchant-hub's identity (navy +
    saffron + warm paper, IBM Plex Sans Arabic / Reem Kufi, 16px radius).

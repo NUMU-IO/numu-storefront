@@ -42,12 +42,29 @@ const DEFAULT_HOSTS = [
 const VALID_FORMATS = new Set(["webp", "avif", "jpeg", "jpg", "png"]);
 
 function getAllowedHosts(): string[] {
+  // Env EXTENDS the defaults — it must never replace them. The defaults are
+  // the platform's own image hosts (CDN/R2/uploads); every merchant image
+  // lives there, so an env override that drops them 403s every product image
+  // fleet-wide (exactly what happened in prod: a Heroku-era value replaced
+  // the list and matched nothing). NUMU_IMAGE_HOSTS is for ADDING custom
+  // hosts (e.g. a merchant's external DAM), not restricting platform ones.
+  //
+  // Entries are normalized to bare lowercase hostnames so common footguns
+  // ("https://cdn.example.com", "cdn.example.com/path", "*.example.com")
+  // still match `isHostAllowed`'s hostname comparison.
   const fromEnv = process.env.NUMU_IMAGE_HOSTS || "";
-  const list = fromEnv
+  const extra = fromEnv
     .split(",")
-    .map((s) => s.trim())
+    .map((s) =>
+      s
+        .trim()
+        .toLowerCase()
+        .replace(/^[a-z]+:\/\//, "") // strip protocol
+        .replace(/^\*\./, "") // strip wildcard prefix (suffix-match anyway)
+        .replace(/[/:].*$/, ""), // strip path/port
+    )
     .filter(Boolean);
-  return list.length > 0 ? list : DEFAULT_HOSTS;
+  return [...new Set([...DEFAULT_HOSTS, ...extra])];
 }
 
 function isHostAllowed(target: URL, allowed: string[]): boolean {
