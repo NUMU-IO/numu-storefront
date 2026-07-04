@@ -3,8 +3,15 @@ import {
   fetchThemeSettings,
   fetchStoreMenus,
 } from "@/lib/api-client";
-import { resolveThemeSettings } from "@/lib/resolve-theme";
+import {
+  resolveThemeSettings,
+  byotProvidesOwnChrome,
+  normalizeThemeSettings,
+} from "@/lib/resolve-theme";
 import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRenderer";
+import { ByotChromeFallback } from "@/components/theme-engine/ByotChromeFallback";
+import type { SectionGroup } from "@/types";
+import { AbandonedCartTracker } from "@/components/tracking/AbandonedCartTracker";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
 import { AttributionProvider } from "@/components/layout/AttributionProvider";
 import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvider";
@@ -42,6 +49,17 @@ import type { Metadata } from "next";
 interface LayoutProps {
   children: React.ReactNode;
   params: Promise<{ domain: string }>;
+}
+
+/** True when a section group has at least one ordered, present section. */
+function groupHasSections(
+  group: SectionGroup | undefined,
+): group is SectionGroup {
+  return (
+    !!group &&
+    (group.order?.length ?? 0) > 0 &&
+    Object.keys(group.sections ?? {}).length > 0
+  );
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ domain: string }> }): Promise<Metadata> {
@@ -211,8 +229,57 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
     );
   }
 
-  const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
+  const rawThemePayload = themeRaw?.theme_settings || themeRaw || {};
+  const themeSettings = resolveThemeSettings(rawThemePayload);
   const isByot = !!themeSettings.external_theme?.bundle_url && !isBuiltInTheme(themeSettings.theme_id);
+  // Phase 0 blocker fix: a BYOT theme that ships no header/footer/cart leaves
+  // the store un-navigable, because the host suppresses its own chrome for BYOT
+  // bundles. Render a neutral host fallback nav ONLY for those themes — never
+  // for the six themes that carry their own chrome (byotProvidesOwnChrome
+  // fail-safes to `true` whenever it can't classify the theme).
+  const byotNeedsChrome = isByot && !byotProvidesOwnChrome(themeSettings);
+
+  // Global-sections host-render (template/global-sections epic, storefront half)
+  // ─────────────────────────────────────────────────────────────────────────
+  // When a BYOT theme renders no global sections of its own (byotNeedsChrome),
+  // the HOST renders the store's CONFIGURED global `section_groups` (header /
+  // footer + any custom groups) via the same platform SectionGroupRenderer used
+  // for built-in themes — instead of only the neutral ByotChromeFallback.
+  //
+  // GATING SIGNAL: the bundle's `renders_global_sections` manifest flag (plugin
+  // I3) is NOT surfaced in the storefront's resolved theme model (external_theme
+  // carries no such field), so per the epic we reuse the existing
+  // `byotProvidesOwnChrome()` signal — a theme whose section_schemas declare no
+  // header/footer type is taken to not render its own global sections. Swap to
+  // `renders_global_sections !== true` here if/when that flag is plumbed through
+  // external_theme.
+  //
+  // Read from the PRE-sanitization settings: resolveThemeSettings strips the
+  // header/footer sections out of section_groups for these exact themes (the
+  // bundle's schemas don't declare those types), so the sanitized groups are
+  // empty. header/footer resolve via the platform's SHARED section components,
+  // so host-rendering them is safe for any BYOT theme id. CONSERVATIVE: gated
+  // entirely on `byotNeedsChrome`, so built-in themes and the chrome-carrying
+  // BYOT themes are completely unaffected.
+  const hostGlobalGroups = byotNeedsChrome
+    ? normalizeThemeSettings(rawThemePayload).section_groups
+    : undefined;
+  const hostHeaderGroup =
+    hostGlobalGroups && groupHasSections(hostGlobalGroups.header)
+      ? hostGlobalGroups.header
+      : undefined;
+  const hostFooterGroup =
+    hostGlobalGroups && groupHasSections(hostGlobalGroups.footer)
+      ? hostGlobalGroups.footer
+      : undefined;
+  const hostExtraGroups: Array<[string, SectionGroup]> = hostGlobalGroups
+    ? Object.entries(hostGlobalGroups).filter(
+        (entry): entry is [string, SectionGroup] =>
+          entry[0] !== "header" &&
+          entry[0] !== "footer" &&
+          groupHasSections(entry[1]),
+      )
+    : [];
 
   // Phase 2.4 — store navigation menus, fetched once here and shared with
   // every page's BYOT bundle via ThemeDataProvider → ByotThemeBoundary
@@ -295,6 +362,10 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
         {/* Turns editor page switches into client-side route changes inside
             the preview iframe (no full reload). Inert outside preview mode. */}
         <PreviewNavigationBridge />
+        {/* Abandoned-checkout capture: upserts the cart to the recovery store
+            on every cart change (design: track from add-to-cart, not just at
+            the contact step). */}
+        <AbandonedCartTracker />
         {announcementBar && (
           <AnnouncementBar
             promotion={announcementBar}
@@ -317,6 +388,35 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             storeData={store}
           />
         )}
+        {/* Chrome-less BYOT: host-render the store's configured header group
+            when it has sections; else fall back to the neutral navigability
+            header. The fallback is the last resort ONLY. */}
+        {byotNeedsChrome &&
+          (hostHeaderGroup ? (
+            <SectionGroupRenderer
+              group={hostHeaderGroup}
+              themeId={themeSettings.theme_id}
+              storeData={store}
+            />
+          ) : (
+            <ByotChromeFallback
+              part="header"
+              storeName={store.name || "Store"}
+              navigation={navigation}
+              locale={visitorLocale === "ar" ? "ar" : "en"}
+            />
+          ))}
+        {/* Any additional (non-header/footer) global groups the store
+            configured, rendered top-of-body. Additive; chrome-less BYOT only. */}
+        {byotNeedsChrome &&
+          hostExtraGroups.map(([key, group]) => (
+            <SectionGroupRenderer
+              key={key}
+              group={group}
+              themeId={themeSettings.theme_id}
+              storeData={store}
+            />
+          ))}
         {/* Skip-link target. BYOT bundles that render their own <main>
             win over this wrapper because the link's `#main` selector
             finds the FIRST element with that id; bundles render after
@@ -330,6 +430,23 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             storeData={store}
           />
         )}
+        {/* Chrome-less BYOT: host-render the store's configured footer group
+            when it has sections; else the neutral fallback footer. */}
+        {byotNeedsChrome &&
+          (hostFooterGroup ? (
+            <SectionGroupRenderer
+              group={hostFooterGroup}
+              themeId={themeSettings.theme_id}
+              storeData={store}
+            />
+          ) : (
+            <ByotChromeFallback
+              part="footer"
+              storeName={store.name || "Store"}
+              navigation={navigation}
+              locale={visitorLocale === "ar" ? "ar" : "en"}
+            />
+          ))}
       </CustomerBridgeProvider>
       </AttributionProvider>
     </ThemeDataProvider>

@@ -20,6 +20,20 @@ const POST_DOMAIN_SEGMENTS = new Set([
   "password",
 ]);
 
+// Genuine static assets bypass the tenant rewrite entirely. We match by
+// extension rather than the old naive `pathname.includes(".")` — that dot-check
+// also swallowed the DYNAMIC per-store metadata routes `/robots.txt` and
+// `/sitemap.xml` (see [domain]/robots.ts + [domain]/sitemap.ts), which contain
+// a dot but must be rewritten under the store's path segment like any other
+// tenant route. `.txt`/`.xml` stay listed for real static files; the two
+// metadata paths are special-cased ahead of this check below.
+const STATIC_FILE_EXT_RE =
+  /\.(?:js|mjs|cjs|css|map|json|txt|xml|ico|png|jpe?g|gif|svg|webp|avif|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|pdf|wasm)$/i;
+
+// Dotted paths that MUST route through the subdomain→path rewrite so the
+// `[domain]/{robots,sitemap}.ts` metadata handlers are reachable per store.
+const TENANT_METADATA_PATHS = new Set(["/robots.txt", "/sitemap.xml"]);
+
 // Phase 6 — locale URL prefixes. We accept any 2-character ISO 639-1
 // code in the first path segment; the SSR layer validates against the
 // store's actual locale list and falls back to default_language for
@@ -95,8 +109,14 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Skip static assets.
-  if (pathname.startsWith("/_next/") || pathname.includes(".")) {
+  // Skip Next internals + genuine static assets. Unlike the old naive
+  // `pathname.includes(".")`, this lets the dotted tenant metadata routes
+  // (/robots.txt, /sitemap.xml) fall through to the subdomain→path rewrite
+  // below while real assets (.js/.css/images/fonts/.map/…) still bypass.
+  if (
+    !TENANT_METADATA_PATHS.has(pathname) &&
+    (pathname.startsWith("/_next/") || STATIC_FILE_EXT_RE.test(pathname))
+  ) {
     return NextResponse.next();
   }
 

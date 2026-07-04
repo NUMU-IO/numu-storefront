@@ -32,6 +32,38 @@ export default function StoreError({
   const [themeHtml, setThemeHtml] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
+  // Shopper-side telemetry: beacon the route error to /api/theme-error (logged
+  // server-side → CloudWatch). SSR-guarded and never throws. bundleUrl is
+  // usually unknown at this boundary (the crash may predate theme mount), so we
+  // send what we have — the store is recoverable from the host subdomain.
+  useEffect(() => {
+    if (
+      typeof navigator === "undefined" ||
+      typeof navigator.sendBeacon !== "function"
+    ) {
+      return;
+    }
+    try {
+      const store =
+        typeof window !== "undefined"
+          ? window.location.hostname.split(".")[0]
+          : null;
+      const body = JSON.stringify({
+        store,
+        bundleUrl: null,
+        message: error?.message ?? "storefront route error",
+        stack: error?.stack ?? null,
+        url: typeof window !== "undefined" ? window.location.href : null,
+      });
+      navigator.sendBeacon(
+        "/api/theme-error",
+        new Blob([body], { type: "application/json" }),
+      );
+    } catch {
+      /* telemetry must never break the error page */
+    }
+  }, [error]);
+
   useEffect(() => {
     mountedRef.current = true;
     const url =
@@ -41,7 +73,12 @@ export default function StoreError({
     if (!url) return;
     // Theme templates are static — light caching is safe and keeps
     // the error path off the network during repeated retries.
-    fetch(url, { cache: "force-cache" })
+    fetch(url, {
+      cache: "force-cache",
+      // Bound it so a hung template host can't leave a request pending on the
+      // error page; the built-in fallback is already rendered meanwhile.
+      signal: AbortSignal.timeout(5000),
+    })
       .then((r) => (r.ok ? r.text() : null))
       .then((html) => {
         if (mountedRef.current && html) setThemeHtml(html);

@@ -39,6 +39,9 @@ export async function POST(req: NextRequest) {
       },
       body,
       cache: "no-store",
+      // Bound the upstream call so a stalled backend can't hold this
+      // serverless invocation open (best-effort tracking write).
+      signal: AbortSignal.timeout(5000),
     });
   } catch {
     /* best-effort */

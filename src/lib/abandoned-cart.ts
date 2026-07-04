@@ -1,0 +1,107 @@
+/**
+ * Abandoned-checkout emission (single source of truth).
+ *
+ * System design — see the NUMU-api `AbandonedCheckout` entity + the
+ * `POST /storefront/store/{id}/cart/track` endpoint. The storefront upserts
+ * an `abandoned_checkouts` row keyed by a stable `session_fingerprint`:
+ *   - on every cart change (add / remove / quantity), and
+ *   - at the checkout contact step (enriched with email / phone / address).
+ * A background job flips the row to "abandoned" after inactivity and the
+ * merchant's recovery flow (WhatsApp / email) acts on it; a completed order
+ * graduates the row (`mark_recovered`, matched by fingerprint / email).
+ *
+ * This module is the ONE emit point so cart-change tracking and contact-step
+ * tracking can never drift in payload shape.
+ */
+
+import { getSessionFingerprint } from "@/lib/meta-pixel";
+
+export type CartTrackOverrides = {
+  email?: string;
+  phone?: string;
+  shipping_address?: Record<string, unknown>;
+  coupon_code?: string;
+};
+
+type CartItem = Record<string, unknown>;
+
+// Skip re-POSTing an unchanged snapshot: a global cart-change listener would
+// otherwise re-fire on every SPA navigation that re-emits `numu:cart:updated`.
+// Reset naturally on a full page reload (module re-evaluates).
+let lastSignature: string | null = null;
+
+/**
+ * Read the current cart and upsert it into the backend's abandoned-checkout
+ * store. Best-effort: never throws, never blocks the shopper. Pass
+ * `overrides` (email / phone / shipping_address / coupon) at the contact
+ * step to enrich the row; omit them for plain cart-change tracking (the
+ * backend fills a logged-in customer's email from the forwarded cookie).
+ */
+export async function trackCartState(
+  overrides: CartTrackOverrides = {},
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const res = await fetch("/api/cart", {
+      cache: "no-store",
+      credentials: "include",
+    });
+    if (!res.ok) return;
+    const json = await res.json();
+    const cart = (json?.data ?? json) as {
+      subtotal?: number;
+      currency?: string;
+      items?: CartItem[];
+    };
+    const items = Array.isArray(cart?.items) ? cart.items : [];
+    if (!items.length) return; // empty cart — nothing to recover
+
+    const line_items = items.map((li) => {
+      const quantity = Number(li.quantity) || 1;
+      const total_price = Number(li.total_price) || 0;
+      return {
+        product_id: li.product_id,
+        product_name: li.product_name ?? li.name,
+        variant_id: li.variant_id ?? undefined,
+        variant_name: li.variant_name ?? undefined,
+        sku: li.sku ?? undefined,
+        quantity,
+        unit_price: Number(li.unit_price) || Math.round(total_price / quantity),
+        total_price,
+      };
+    });
+
+    const payload: Record<string, unknown> = {
+      session_fingerprint: getSessionFingerprint(),
+      line_items,
+      subtotal: Number(cart?.subtotal) || 0,
+      currency: cart?.currency || "EGP",
+    };
+    if (overrides.email) payload.email = overrides.email;
+    if (overrides.phone) payload.phone = overrides.phone;
+    if (overrides.shipping_address)
+      payload.shipping_address = overrides.shipping_address;
+    if (overrides.coupon_code) payload.coupon_code = overrides.coupon_code;
+
+    const body = JSON.stringify(payload);
+    // Contact/address enrichment must always be sent; plain cart snapshots
+    // are de-duped so browsing navigation doesn't spam the endpoint.
+    const hasOverrides = Boolean(
+      overrides.email ||
+        overrides.phone ||
+        overrides.shipping_address ||
+        overrides.coupon_code,
+    );
+    if (!hasOverrides && body === lastSignature) return;
+    lastSignature = body;
+
+    await fetch("/api/storefront/cart-track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body,
+    });
+  } catch {
+    /* best-effort — never block the shopper on a tracking write */
+  }
+}

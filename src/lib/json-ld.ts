@@ -209,7 +209,23 @@ export function buildWebsiteLd({
  * undefined keys (recursive) so the emitted JSON stays clean. Use the
  * return value as `dangerouslySetInnerHTML={{ __html: serialized }}`
  * inside a `<script type="application/ld+json">` element.
+ *
+ * SECURITY: the returned string is injected verbatim via
+ * `dangerouslySetInnerHTML`. Plain `JSON.stringify` does NOT escape `<`,
+ * so a merchant-controlled field (product `name`, `seo_description`, …)
+ * containing `</script><script>…` would terminate the ld+json block and
+ * inject an executable script — stored XSS. We escape the characters that
+ * can break out of, or be misparsed inside, an HTML `<script>` element:
+ *   `<` `>` `&`  → prevent closing/opening tags and entity tricks
+ *   U+2028 U+2029 → JS line separators that break naive JS parsers
+ * The result is still valid JSON (these are legal `\uXXXX` escapes), so
+ * search engines parse it unchanged.
  */
 export function serializeLd(ld: unknown): string {
-  return JSON.stringify(ld, (_key, value) => (value === undefined ? null : value));
+  return JSON.stringify(ld, (_key, value) => (value === undefined ? null : value))
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
