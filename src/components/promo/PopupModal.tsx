@@ -195,19 +195,39 @@ export function PopupModal({
                 {busy ? "…" : ctaLabel || (isAr ? "اشترك" : "Subscribe")}
               </button>
             </form>
-          ) : ctaUrl ? (
-            <a
-              href={ctaUrl}
-              onClick={() =>
-                postPromo(promotion.promotion_id, "events", {
-                  event_type: "click",
-                  metadata: { surface: "popup" },
-                })
-              }
-              className="inline-block rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
-            >
-              {ctaLabel || (isAr ? "تسوّق الآن" : "Shop now")}
-            </a>
+          ) : ctaUrl || ctaLabel ? (
+            // Show the merchant's CTA whenever they set a label OR a URL.
+            // With a URL it's a link; a label-only CTA acts as an
+            // acknowledge button that closes the popup (previously a
+            // label without a URL rendered no button at all).
+            ctaUrl ? (
+              <a
+                href={ctaUrl}
+                onClick={() =>
+                  postPromo(promotion.promotion_id, "events", {
+                    event_type: "click",
+                    metadata: { surface: "popup" },
+                  })
+                }
+                className="inline-block rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+              >
+                {ctaLabel || (isAr ? "تسوّق الآن" : "Shop now")}
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  postPromo(promotion.promotion_id, "events", {
+                    event_type: "click",
+                    metadata: { surface: "popup" },
+                  });
+                  close();
+                }}
+                className="inline-block rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-800"
+              >
+                {ctaLabel}
+              </button>
+            )
           ) : null}
         </div>
           </>
