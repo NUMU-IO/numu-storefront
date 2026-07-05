@@ -71,10 +71,18 @@ export async function trackCartState(
       };
     });
 
+    const subtotal =
+      Number(cart?.subtotal) ||
+      line_items.reduce((n, li) => n + (Number(li.total_price) || 0), 0);
     const payload: Record<string, unknown> = {
       session_fingerprint: getSessionFingerprint(),
       line_items,
-      subtotal: Number(cart?.subtotal) || 0,
+      subtotal,
+      // Shipping/tax aren't known until the shipping step, so the recoverable
+      // value is the cart subtotal. Populating `total` (was left at the
+      // backend's 0 default) is what the merchant dashboard's "Value" column
+      // reads — without it every abandoned checkout showed 0.
+      total: subtotal,
       currency: cart?.currency || "EGP",
     };
     if (overrides.email) payload.email = overrides.email;

@@ -220,12 +220,22 @@ export function proxy(request: NextRequest) {
     // marketplace_theme_installations.
     const previewSlug = request.nextUrl.searchParams.get("preview_theme_slug");
     const editorFlavor = request.nextUrl.searchParams.get("editor");
+    // Offers-v2 promotion preview. The merchant hub's "Preview in store"
+    // opens `<subdomain>.numueg.app/?_npt=<jwt>`; forward the token as a
+    // request header so the SSR layout (which can't see searchParams) can
+    // pass it to the promotions fetch, which surfaces DRAFT/SCHEDULED/PAUSED
+    // promos the merchant hasn't published yet. Same channel as the theme
+    // preview slug above.
+    const promoPreviewToken = request.nextUrl.searchParams.get("_npt");
     const requestHeaders = new Headers(request.headers);
     if (previewSlug) {
       requestHeaders.set("x-numu-preview-slug", previewSlug);
     }
     if (editorFlavor) {
       requestHeaders.set("x-numu-editor", editorFlavor);
+    }
+    if (promoPreviewToken) {
+      requestHeaders.set("x-numu-promo-preview-token", promoPreviewToken);
     }
 
     const url = request.nextUrl.clone();

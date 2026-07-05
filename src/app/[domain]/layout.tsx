@@ -307,10 +307,15 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   const tiktokPixelIds = resolveTikTokPixelIds(store);
 
   // Promotions — server-driven announcement bar (offers-v2), rendered in the
-  // shell so it shows for built-in + BYOT alike. Best-effort: null when the
-  // `ff_storefront_promo_render` flag is off or none are active.
+  // shell so it shows for built-in + BYOT alike. Best-effort: null when none
+  // are active. `x-numu-promo-preview-token` (bridged by proxy.ts from the
+  // hub's `?_npt=` "Preview in store" link) lets the merchant see unpublished
+  // DRAFT/SCHEDULED/PAUSED promos; absent for real shoppers.
+  const promoPreviewToken =
+    localeHeaders.get("x-numu-promo-preview-token") || undefined;
   const promotions = await getActivePromotions(store.id, {
     locale: visitorLocale === "ar" ? "ar" : "en",
+    previewToken: promoPreviewToken,
   }).catch(() => null);
   const announcementBar = promotions?.announcement_bars?.[0] ?? null;
 
