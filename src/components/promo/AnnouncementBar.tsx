@@ -21,6 +21,11 @@ interface AnnouncementContent {
   text_color?: string;
   dismissible?: boolean;
   link_url?: string | null;
+  icon?: string | null;
+  background_gradient_to?: string | null;
+  font_size?: "sm" | "md" | "lg";
+  text_align?: "start" | "center" | "end";
+  animation?: "none" | "pulse" | "marquee";
 }
 interface AnnouncementTranslations {
   headline?: { ar?: string; en?: string };
@@ -94,6 +99,25 @@ export function AnnouncementBar({
   const dismissible = content.dismissible ?? true;
   const bg = content.background || "#0f172a";
   const fg = content.text_color || "#ffffff";
+  // Merchant styling controls (optional; safe defaults when absent).
+  const barStyle: React.CSSProperties = content.background_gradient_to
+    ? { backgroundImage: `linear-gradient(90deg, ${bg}, ${content.background_gradient_to})`, color: fg }
+    : { backgroundColor: bg, color: fg };
+  const sizeClass =
+    content.font_size === "sm"
+      ? "text-xs"
+      : content.font_size === "lg"
+        ? "text-base"
+        : "text-sm";
+  const align = content.text_align || "center";
+  const alignClass =
+    align === "start"
+      ? "justify-start text-start"
+      : align === "end"
+        ? "justify-end text-end"
+        : "justify-center text-center";
+  const isMarquee = content.animation === "marquee";
+  const isPulse = content.animation === "pulse";
 
   if (!headline && !body) return null;
 
@@ -117,11 +141,27 @@ export function AnnouncementBar({
       metadata: { surface: "announcement_bar" },
     });
 
-  const inner = (
-    <div className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium">
+  const row = (
+    <div
+      className={`flex items-center gap-2 ${sizeClass} font-medium ${
+        isMarquee ? "" : alignClass
+      } ${isPulse ? "animate-pulse" : ""} ${isMarquee ? "whitespace-nowrap" : ""}`}
+    >
+      {content.icon && <span aria-hidden="true">{content.icon}</span>}
       {headline && <span>{headline}</span>}
       {body && <span className="opacity-90 hidden sm:inline">— {body}</span>}
     </div>
+  );
+
+  const inner = isMarquee ? (
+    // Scrolling ticker for long copy — one keyframe, GPU-cheap translateX.
+    <div className="overflow-hidden px-4 py-2">
+      <div className="numu-ann-marquee inline-block will-change-transform">
+        {row}
+      </div>
+    </div>
+  ) : (
+    <div className="px-4 py-2">{row}</div>
   );
 
   return (
@@ -129,8 +169,14 @@ export function AnnouncementBar({
       role="region"
       aria-label="Announcement"
       className="relative w-full border-b border-current/10"
-      style={{ backgroundColor: bg, color: fg }}
+      style={barStyle}
     >
+      {isMarquee && (
+        <style>{
+          "@keyframes numu-ann-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}" +
+          ".numu-ann-marquee{animation:numu-ann-marquee 18s linear infinite}"
+        }</style>
+      )}
       <div className="relative mx-auto max-w-screen-xl">
         {linkUrl ? (
           <a
