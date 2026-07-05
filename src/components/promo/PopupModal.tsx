@@ -94,6 +94,15 @@ export function PopupModal({
   const isCustom =
     content.layout === "custom" && !!content.custom_html?.trim();
 
+  // Wrap the merchant/AI snippet in a minimal document so the iframe body has
+  // no default 8px margin (which showed as a white gutter around the design)
+  // and the root can fill the full height. The snippet's own root element owns
+  // the background edge-to-edge, so the modal reads as one intentional card
+  // instead of a dark box floating on white.
+  const customDoc = isCustom
+    ? `<!doctype html><html dir="${isAr ? "rtl" : "ltr"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}html,body{margin:0;padding:0;height:100%}body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}</style></head><body>${content.custom_html ?? ""}</body></html>`
+    : "";
+
   const headline = pickBi(promotion.translated_content, "headline", isAr);
   const body = pickBi(promotion.translated_content, "body", isAr);
   const ctaLabel = pickBi(promotion.translated_content, "cta_label", isAr);
@@ -155,8 +164,8 @@ export function PopupModal({
           <iframe
             title="promotion"
             sandbox="allow-popups allow-top-navigation-by-user-activation"
-            srcDoc={content.custom_html ?? ""}
-            className="h-[70vh] max-h-[560px] w-full border-0"
+            srcDoc={customDoc}
+            className="block h-[540px] max-h-[75vh] w-full border-0"
           />
         ) : (
           <>
