@@ -22,6 +22,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { NumuDefaultShell } from "@/components/storefront/NumuDefaultShell";
+import { RuntimeImportMap } from "@/components/theme-engine/RuntimeImportMap";
 
 export default async function StoreNotFound() {
   const headerList = await headers();
@@ -76,14 +77,27 @@ export default async function StoreNotFound() {
 
   if (isByot && store) {
     return (
-      <ByotThemeBoundary
-        bundleUrl={themeSettings.external_theme!.bundle_url!}
-        cssUrl={themeSettings.external_theme!.css_url}
-        themeSettings={themeSettings}
-        storeData={store}
-        page={{ type: "404", title: "Page not found" }}
-        routeFallback={fallback404}
-      />
+      <>
+        {/*
+          CRITICAL: Next.js does NOT emit the root layout's <head> children
+          (including <RuntimeImportMap>) on notFound() responses — only the
+          <html> attributes survive. Without the import map, the federated
+          theme bundle's bare imports (`react/jsx-runtime`, …) can't resolve
+          and the 404 dies with "Failed to load theme — Failed to resolve
+          module specifier react/jsx-runtime". Emitting the map here restores
+          it for this render. Valid in body: no module loads before the
+          client-side dynamic import, so the map is parsed in time.
+        */}
+        <RuntimeImportMap />
+        <ByotThemeBoundary
+          bundleUrl={themeSettings.external_theme!.bundle_url!}
+          cssUrl={themeSettings.external_theme!.css_url}
+          themeSettings={themeSettings}
+          storeData={store}
+          page={{ type: "404", title: "Page not found" }}
+          routeFallback={fallback404}
+        />
+      </>
     );
   }
 
