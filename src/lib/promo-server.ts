@@ -65,10 +65,13 @@ export const getActivePromotions = cache(
 
     const init: RequestInit & {
       next?: { revalidate: number; tags: string[] };
-    } = {
-      next: { revalidate: 300, tags: [`promotions:${storeId}`] },
-    };
-    if (previewToken) init.headers = { "X-Preview-Token": previewToken };
+    } = previewToken
+      ? // Preview (merchant "Preview in store"): never cache — the merchant
+        // must see the latest unpublished draft on every reload, and this
+        // path is low-traffic so bypassing the data cache is cheap.
+        { headers: { "X-Preview-Token": previewToken }, cache: "no-store" }
+      : // Shopper path: ISR-tagged so a merchant publish busts it.
+        { next: { revalidate: 300, tags: [`promotions:${storeId}`] } };
 
     try {
       // Bound SSR latency — a slow promo endpoint must not stall page render.

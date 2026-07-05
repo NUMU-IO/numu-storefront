@@ -19,10 +19,13 @@ import {
 } from "@/lib/promo-client";
 
 interface PopupContent {
+  layout?: "centered" | "side" | "custom" | string;
   image_url?: string | null;
   discount_code_to_reveal?: string | null;
   form_fields?: string[];
   show_after_dismiss_days?: number;
+  /** Merchant-authored HTML rendered when layout === "custom". */
+  custom_html?: string | null;
 }
 interface Display {
   trigger?: string;
@@ -83,6 +86,12 @@ export function PopupModal({
 
   if (!open) return null;
 
+  // Custom-HTML mode: the merchant pasted their own markup (e.g. AI-generated).
+  // Rendered in a sandboxed iframe below — no scripts, no access to the parent
+  // page / cookies — so untrusted HTML can't run code against shoppers.
+  const isCustom =
+    content.layout === "custom" && !!content.custom_html?.trim();
+
   const headline = pickBi(promotion.translated_content, "headline", isAr);
   const body = pickBi(promotion.translated_content, "body", isAr);
   const ctaLabel = pickBi(promotion.translated_content, "cta_label", isAr);
@@ -123,7 +132,11 @@ export function PopupModal({
       dir={isAr ? "rtl" : "ltr"}
     >
       <div className="absolute inset-0 bg-black/50" onClick={close} aria-hidden />
-      <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl">
+      <div
+        className={`relative w-full overflow-hidden rounded-2xl bg-white shadow-xl ${
+          isCustom ? "max-w-lg" : "max-w-md"
+        }`}
+      >
         <button
           type="button"
           onClick={close}
@@ -132,6 +145,19 @@ export function PopupModal({
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
         </button>
+        {isCustom ? (
+          // Untrusted markup — `sandbox` without `allow-scripts` blocks JS and
+          // isolates it from the storefront origin. `allow-popups` +
+          // `allow-top-navigation-by-user-activation` let a CTA link navigate
+          // on a real click without granting script access.
+          <iframe
+            title="promotion"
+            sandbox="allow-popups allow-top-navigation-by-user-activation"
+            srcDoc={content.custom_html ?? ""}
+            className="h-[70vh] max-h-[560px] w-full border-0"
+          />
+        ) : (
+          <>
         {content.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={content.image_url} alt="" className="h-40 w-full object-cover" />
@@ -184,6 +210,8 @@ export function PopupModal({
             </a>
           ) : null}
         </div>
+          </>
+        )}
       </div>
     </div>
   );
