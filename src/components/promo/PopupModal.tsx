@@ -16,6 +16,7 @@ import {
   isPromoDismissed,
   markPromoDismissed,
   pickBi,
+  promoCtaHref,
 } from "@/lib/promo-client";
 
 interface PopupContent {
@@ -26,6 +27,7 @@ interface PopupContent {
   show_after_dismiss_days?: number;
   /** Merchant-authored HTML rendered when layout === "custom". */
   custom_html?: string | null;
+  auto_apply_code?: string | null;
 }
 interface Display {
   trigger?: string;
@@ -202,7 +204,7 @@ export function PopupModal({
             // label without a URL rendered no button at all).
             ctaUrl ? (
               <a
-                href={ctaUrl}
+                href={promoCtaHref(ctaUrl, content.auto_apply_code) ?? ctaUrl}
                 onClick={() =>
                   postPromo(promotion.promotion_id, "events", {
                     event_type: "click",

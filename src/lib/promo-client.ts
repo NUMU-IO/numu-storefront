@@ -80,3 +80,19 @@ export function pickBi(
   if (!f) return "";
   return ((isAr ? f.ar ?? f.en : f.en ?? f.ar) ?? "").toString();
 }
+
+/**
+ * Build a promo CTA href. When the merchant set an auto-apply discount code,
+ * route the click through /api/promo-discount so the coupon is pinned to the
+ * shopper's cart before they land on the product/collection; otherwise return
+ * the plain CTA url. Returns null when there's no destination.
+ */
+export function promoCtaHref(
+  ctaUrl: string | null | undefined,
+  autoApplyCode: string | null | undefined,
+): string | null {
+  if (!ctaUrl) return ctaUrl ?? null;
+  const code = (autoApplyCode ?? "").trim();
+  if (!code) return ctaUrl;
+  return `/api/promo-discount?code=${encodeURIComponent(code)}&to=${encodeURIComponent(ctaUrl)}`;
+}

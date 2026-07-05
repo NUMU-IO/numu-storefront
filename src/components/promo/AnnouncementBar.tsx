@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ResolvedPromotion } from "@/lib/promo-server";
+import { promoCtaHref } from "@/lib/promo-client";
 
 interface AnnouncementContent {
   background?: string;
@@ -26,6 +27,7 @@ interface AnnouncementContent {
   font_size?: "sm" | "md" | "lg";
   text_align?: "start" | "center" | "end";
   animation?: "none" | "pulse" | "marquee";
+  auto_apply_code?: string | null;
 }
 interface AnnouncementTranslations {
   headline?: { ar?: string; en?: string };
@@ -96,6 +98,9 @@ export function AnnouncementBar({
   const body = pick(promotion, "body", locale);
   const tx = promotion.translated_content as AnnouncementTranslations | undefined;
   const linkUrl = tx?.cta_url ?? content.link_url ?? null;
+  // Route the click through the discount-pin endpoint when the merchant set an
+  // auto-apply code, so the coupon is on the cart before the shopper arrives.
+  const linkHref = promoCtaHref(linkUrl, content.auto_apply_code);
   const dismissible = content.dismissible ?? true;
   const bg = content.background || "#0f172a";
   const fg = content.text_color || "#ffffff";
@@ -178,9 +183,9 @@ export function AnnouncementBar({
         }</style>
       )}
       <div className="relative mx-auto max-w-screen-xl">
-        {linkUrl ? (
+        {linkHref ? (
           <a
-            href={linkUrl}
+            href={linkHref}
             onClick={onClick}
             className="block transition-opacity hover:opacity-90"
           >

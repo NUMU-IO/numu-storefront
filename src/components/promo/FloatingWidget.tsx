@@ -13,17 +13,23 @@ import {
   isPromoDismissed,
   markPromoDismissed,
   pickBi,
+  promoCtaHref,
 } from "@/lib/promo-client";
 
 interface WidgetContent {
   position?: string;
   expanded_default?: boolean;
   color_bg?: string;
+  auto_apply_code?: string | null;
 }
 
+// Bottom-anchored widgets sit higher on mobile so they clear the theme's
+// fixed bottom nav bar (Menu/Home/Search/Shop/Cart), then drop to the corner
+// on ≥sm where that bar isn't shown. `bottom-24` ≈ 6rem clears the ~64px bar
+// plus the iOS home-indicator safe area.
 const POS: Record<string, string> = {
-  "bottom-right": "bottom-4 end-4",
-  "bottom-left": "bottom-4 start-4",
+  "bottom-right": "bottom-24 end-4 sm:bottom-4",
+  "bottom-left": "bottom-24 start-4 sm:bottom-4",
   "top-right": "top-20 end-4",
   "top-left": "top-20 start-4",
 };
@@ -112,7 +118,7 @@ export function FloatingWidget({
       {body && <p className="mb-3 text-xs text-gray-600">{body}</p>}
       {ctaUrl && (
         <a
-          href={ctaUrl}
+          href={promoCtaHref(ctaUrl, content.auto_apply_code) ?? ctaUrl}
           onClick={() =>
             postPromo(promotion.promotion_id, "events", {
               event_type: "click",
