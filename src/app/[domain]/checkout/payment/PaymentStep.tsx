@@ -123,6 +123,8 @@ function methodLabel(opt: MethodOption | string, isAr: boolean): string {
     paymob_card: ["Credit / debit card (Paymob)", "بطاقة ائتمان / خصم (Paymob)"],
     kashier: ["Credit / debit card (Kashier)", "بطاقة ائتمان / خصم (Kashier)"],
     moyasar: ["Card / mada / Apple Pay (Moyasar)", "بطاقة / مدى / Apple Pay (Moyasar)"],
+    paymob_applepay: ["Apple Pay", "Apple Pay"],
+    kashier_applepay: ["Apple Pay", "Apple Pay"],
     fawry: ["Fawry", "فوري"],
     fawaterak: ["Fawaterak", "فواتيرك"],
     instapay: ["InstaPay", "إنستاباي"],
@@ -172,6 +174,9 @@ export function PaymentStep() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState("en");
+  // Apple Pay only exists in Safari on Apple devices — false until detected on
+  // mount, so the dedicated Apple Pay options stay hidden everywhere else.
+  const [canApplePay, setCanApplePay] = useState(false);
 
   const isAr = locale === "ar";
   const t = (k: keyof typeof T) => (isAr ? T[k].ar : T[k].en);
@@ -179,6 +184,18 @@ export function PaymentStep() {
   useEffect(() => {
     if (typeof document !== "undefined") {
       setLocale(document.documentElement.lang === "ar" ? "ar" : "en");
+    }
+    try {
+      const AP = (
+        window as unknown as {
+          ApplePaySession?: { canMakePayments?: () => boolean };
+        }
+      ).ApplePaySession;
+      setCanApplePay(
+        !!AP && typeof AP.canMakePayments === "function" && AP.canMakePayments(),
+      );
+    } catch {
+      setCanApplePay(false);
     }
     const s = readCheckoutState();
     if (!hasShippingStep(s)) {
@@ -282,7 +299,12 @@ export function PaymentStep() {
     router.push(`/${params.domain}/checkout/review`);
   }
 
-  const methods = config?.methods || [];
+  // Apple Pay options (paymob_applepay / kashier_applepay) only render on
+  // Apple devices that can pay; everywhere else they're filtered out so a buyer
+  // never picks a method their device can't complete.
+  const methods = (config?.methods || []).filter(
+    (m) => canApplePay || !m.code.endsWith("_applepay"),
+  );
   const showDepositPicker = method === "cod" && Boolean(config?.cod.enabled);
   const savedCardsForMethod = (savedCards || []).filter(
     (c) =>
