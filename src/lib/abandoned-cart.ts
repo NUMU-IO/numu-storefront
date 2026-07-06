@@ -14,6 +14,7 @@
  * tracking can never drift in payload shape.
  */
 
+import { resolveTrafficSource } from "@/lib/cart-track-attribution";
 import { getSessionFingerprint } from "@/lib/meta-pixel";
 
 export type CartTrackOverrides = {
@@ -76,6 +77,10 @@ export async function trackCartState(
       line_items.reduce((n, li) => n + (Number(li.total_price) || 0), 0);
     const payload: Record<string, unknown> = {
       session_fingerprint: getSessionFingerprint(),
+      // Where the shopper came from — explicit UTMs, else derived from ad
+      // click ids (fbclid→facebook, gclid→google, ttclid→tiktok). Feeds the
+      // merchant dashboard's traffic-source icon on abandoned checkouts.
+      ...resolveTrafficSource(),
       line_items,
       subtotal,
       // Shipping/tax aren't known until the shipping step, so the recoverable
