@@ -131,6 +131,40 @@ const FALLBACK_PAYMENT: PaymentConfig = {
   cod: { enabled: false, deposit_gateways: [] },
   saved_cards_enabled: true,
 };
+/**
+ * Collapse the gateway-centric method list into CUSTOMER-facing choices.
+ * Merchants enable acquirers (Paymob, Kashier, …) but a shopper picks "Card",
+ * not a gateway — showing "Card / Wallet (Paymob)" AND "Card (Kashier)" (plus
+ * one Apple Pay per acquirer) reads as duplicates and leaks plumbing. Keep the
+ * FIRST gateway of each group (backend order = merchant priority) as the
+ * submitted method; strip its gateway-branded label so the neutral customer
+ * label ("Credit / debit card", "Apple Pay") renders instead.
+ */
+const CARD_GATEWAYS = new Set([
+  "paymob", "paymob_card", "kashier", "moyasar", "stripe", "tap", "jt",
+]);
+function methodGroup(code: string): string {
+  const c = code.toLowerCase();
+  if (c.includes("apple")) return "apple_pay";
+  if (CARD_GATEWAYS.has(c)) return "card";
+  return c;
+}
+function dedupeMethods(methods: MethodOption[]): MethodOption[] {
+  const seen = new Set<string>();
+  const out: MethodOption[] = [];
+  for (const m of methods) {
+    const group = methodGroup(m.code);
+    if (seen.has(group)) continue;
+    seen.add(group);
+    // Grouped entries drop the merchant/gateway label ("Card (Kashier)") so
+    // methodLabel falls back to the neutral per-code copy.
+    if (group === "card") out.push({ ...m, label: undefined, label_ar: undefined });
+    else if (group === "apple_pay") out.push({ ...m, label: "Apple Pay", label_ar: "Apple Pay" });
+    else out.push(m);
+  }
+  return out;
+}
+
 function normalizePayment(raw: RawPaymentConfig | null | undefined): PaymentConfig {
   if (!raw) return FALLBACK_PAYMENT;
   let methods: MethodOption[] = [];
@@ -139,6 +173,7 @@ function normalizePayment(raw: RawPaymentConfig | null | undefined): PaymentConf
   } else if (Array.isArray(raw.enabled_payment_methods)) {
     methods = raw.enabled_payment_methods.map((code) => ({ code }));
   }
+  methods = dedupeMethods(methods);
   const codEnabled = Boolean(
     raw.cod?.deposit_required ?? raw.cod?.enabled ?? raw.cod_deposit_policy?.enabled,
   );
@@ -508,9 +543,19 @@ export function CheckoutPage() {
         /* free/flat rates still resolve */
       }
       try {
+        // Backend CSRF is double-submit (numu_csrf cookie + x-numu-csrf header);
+        // without the header this call 403'd and checkout silently fell back to
+        // default rates — merchant zone rates never showed.
+        const csrf =
+          typeof document === "undefined"
+            ? ""
+            : document.cookie.match(/(?:^|; )numu_csrf=([^;]+)/)?.[1] ?? "";
         const res = await fetch("/api/shipping/options", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(csrf ? { "x-numu-csrf": csrf } : {}),
+          },
           body: JSON.stringify({
             governorate_code: governorate,
             cart_subtotal_cents: cartSubtotalCents,
