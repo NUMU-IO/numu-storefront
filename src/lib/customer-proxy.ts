@@ -69,7 +69,14 @@ interface ProxyOptions {
  * revalidation window.
  */
 async function resolveStoreId(req: NextRequest): Promise<string | null> {
-  const host = (req.headers.get("x-numu-host") || "").split(":")[0].toLowerCase();
+  // Prefer the middleware-canonicalized header, but FALL BACK to the raw
+  // `host` header (same as the promotions proxy): the middleware only stamps
+  // `x-numu-host` on /api/* for DEEP platform hosts, so on 1-level hosts
+  // (`<store>.numueg.app`, `<store>.localhost`) the header is absent and
+  // every auth request failed with "Cannot resolve store from host".
+  const host = (req.headers.get("x-numu-host") || req.headers.get("host") || "")
+    .split(":")[0]
+    .toLowerCase();
   if (!host) return null;
 
   // Subdomain pattern: <sub>.numueg.app or <sub>.localhost.
