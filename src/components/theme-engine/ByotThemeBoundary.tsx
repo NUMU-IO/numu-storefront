@@ -2,6 +2,7 @@
 
 import {
   Component,
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -619,13 +620,23 @@ export default function ByotThemeBoundary({
           frame — is what ships in the prerender and shows instantly, then the
           container below swaps in the real theme as soon as it mounts. Keeps
           the layout's shape (no CLS) and kills the empty flash on every page. */}
-      {loading && !error && <StorefrontSkeleton />}
-      {error && fallbackUI}
+      {/* Explicit keys: these siblings appear/disappear as loading/error/
+          bundleEmpty flip, and `routeFallback` is an element created by the
+          calling PAGE — without keys React key-diffs the shifting list and
+          warns ("child from RegisterPage" etc.) on every fallback route. */}
+      {loading && !error && <StorefrontSkeleton key="byot-skeleton" />}
+      {error && <Fragment key="byot-error-fallback">{fallbackUI}</Fragment>}
       {/* ENG-2 — keep the bundle container mounted always; HIDE (not unmount)
           it when the bundle rendered blank so a late async render can still
           reconcile underneath the fallback without forcing a remount. */}
-      <div ref={containerRef} style={bundleEmpty ? { display: "none" } : undefined} />
-      {bundleEmpty && !error && routeFallback}
+      <div
+        key="byot-bundle-container"
+        ref={containerRef}
+        style={bundleEmpty ? { display: "none" } : undefined}
+      />
+      {bundleEmpty && !error && (
+        <Fragment key="byot-route-fallback">{routeFallback}</Fragment>
+      )}
     </ThemeRenderBoundary>
   );
 }

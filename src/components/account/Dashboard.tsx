@@ -21,6 +21,13 @@ const inputCls =
   "block w-full rounded-[var(--numu-radius)] border border-[var(--numu-border)] bg-[var(--numu-surface)] px-3 py-2 text-[var(--numu-ink)] focus:outline-none focus:ring-2 focus:ring-[var(--numu-navy)]/30 focus:border-[var(--numu-navy)]";
 const buttonCls =
   "numu-btn-navy rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-50";
+// Inline styles because BYOT theme CSS (unlayered Tailwind v3 output) can
+// override the host's LAYERED v4 utilities: a theme preflight's
+// `button { background-color: transparent }` beat `.bg-black` here and made
+// the submit buttons render white-on-white (invisible, though clickable).
+// Inline style outranks any stylesheet, so the control is visible on every theme.
+const buttonStyle = { backgroundColor: "#111111", color: "#ffffff" } as const;
+
 const ghostBtn =
   "rounded-full border border-[var(--numu-border)] bg-[var(--numu-surface)] px-4 py-1.5 text-sm font-medium text-[var(--numu-ink)] hover:bg-[var(--numu-cream)] disabled:opacity-50";
 const errorCls =
@@ -401,7 +408,7 @@ export function AddressesPage({
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Saved addresses</h2>
         {!adding && !editing && (
-          <button onClick={() => setAdding(true)} className={buttonCls}>
+          <button onClick={() => setAdding(true)} className={buttonCls} style={buttonStyle}>
             Add address
           </button>
         )}
@@ -539,7 +546,7 @@ function AddressForm({
         <span>Set as default address</span>
       </label>
       <div className="flex gap-2">
-        <button type="submit" disabled={busy} className={buttonCls}>
+        <button type="submit" disabled={busy} className={buttonCls} style={buttonStyle}>
           {busy ? "Saving…" : "Save address"}
         </button>
         <button type="button" onClick={onCancel} className={ghostBtn}>
@@ -650,7 +657,7 @@ export function ProfilePage({ customer }: { customer: any }) {
             />
             <span>Receive marketing emails.</span>
           </label>
-          <button type="submit" disabled={busy} className={buttonCls}>
+          <button type="submit" disabled={busy} className={buttonCls} style={buttonStyle}>
             {busy ? "Saving…" : "Save profile"}
           </button>
         </form>
@@ -685,7 +692,7 @@ export function ProfilePage({ customer }: { customer: any }) {
               className={inputCls}
             />
           </div>
-          <button type="submit" disabled={pwBusy} className={buttonCls}>
+          <button type="submit" disabled={pwBusy} className={buttonCls} style={buttonStyle}>
             {pwBusy ? "Updating…" : "Update password"}
           </button>
         </form>

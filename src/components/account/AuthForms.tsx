@@ -20,6 +20,13 @@ const inputCls =
   "block w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black";
 const buttonCls =
   "w-full rounded-md bg-black px-4 py-2 text-white font-medium disabled:opacity-50";
+// Inline styles because BYOT theme CSS (unlayered Tailwind v3 output) can
+// override the host's LAYERED v4 utilities: a theme preflight's
+// `button { background-color: transparent }` beat `.bg-black` here and made
+// the submit buttons render white-on-white (invisible, though clickable).
+// Inline style outranks any stylesheet, so the control is visible on every theme.
+const buttonStyle = { backgroundColor: "#111111", color: "#ffffff" } as const;
+
 const errorCls = "rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-800";
 const okCls = "rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-800";
 
@@ -109,7 +116,7 @@ export function LoginForm({ redirectTo = "/account" }: { redirectTo?: string }) 
           className={inputCls}
         />
       </div>
-      <button type="submit" disabled={busy} className={buttonCls}>
+      <button type="submit" disabled={busy} className={buttonCls} style={buttonStyle}>
         {busy ? "Signing in…" : "Sign in"}
       </button>
       <div className="text-sm text-gray-600 flex justify-between">
@@ -223,7 +230,7 @@ export function RegisterForm({ redirectTo = "/account" }: { redirectTo?: string 
         />
         <span>Send me marketing emails about new products and offers.</span>
       </label>
-      <button type="submit" disabled={busy} className={buttonCls}>
+      <button type="submit" disabled={busy} className={buttonCls} style={buttonStyle}>
         {busy ? "Creating account…" : "Create account"}
       </button>
       <div className="text-sm text-gray-600 text-center">
@@ -280,7 +287,7 @@ export function RecoverForm() {
           className={inputCls}
         />
       </div>
-      <button type="submit" disabled={busy} className={buttonCls}>
+      <button type="submit" disabled={busy} className={buttonCls} style={buttonStyle}>
         {busy ? "Sending…" : "Send reset link"}
       </button>
       <div className="text-sm text-gray-600 text-center">
@@ -324,7 +331,7 @@ export function ResetForm({ token }: { token: string }) {
         <div className={okCls}>
           Password reset. You can now sign in with the new password.
         </div>
-        <a href="/account/login" className={buttonCls + " inline-block text-center"}>
+        <a href="/account/login" className={buttonCls + " inline-block text-center"} style={buttonStyle}>
           Sign in
         </a>
       </div>
@@ -357,7 +364,7 @@ export function ResetForm({ token }: { token: string }) {
           className={inputCls}
         />
       </div>
-      <button type="submit" disabled={busy} className={buttonCls}>
+      <button type="submit" disabled={busy} className={buttonCls} style={buttonStyle}>
         {busy ? "Resetting…" : "Reset password"}
       </button>
     </form>
