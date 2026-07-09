@@ -30,10 +30,20 @@ function safeReturnPath(raw: string | null): string {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const dest = new URL(safeReturnPath(req.nextUrl.searchParams.get("to")), req.nextUrl.origin);
+  // Relative Location — the browser resolves it against the public host it
+  // requested. Building an absolute URL from req.nextUrl.origin yields the
+  // container's internal https://0.0.0.0:3000 behind the nginx/Cloudflare
+  // proxy. `to` is validated root-relative by safeReturnPath (no open redirect).
+  const to = safeReturnPath(req.nextUrl.searchParams.get("to"));
   const code = (req.nextUrl.searchParams.get("code") || "").trim();
 
-  if (!code) return NextResponse.redirect(dest, 303);
+  const redirectTo = (setCookies: string[] = []): NextResponse => {
+    const out = new NextResponse(null, { status: 303, headers: { Location: to } });
+    for (const c of setCookies) out.headers.append("set-cookie", c);
+    return out;
+  };
+
+  if (!code) return redirectTo();
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const cookie = req.headers.get("cookie");
@@ -54,10 +64,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const sc =
       (res.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ??
       (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
-    const out = NextResponse.redirect(dest, 303);
-    for (const c of sc) out.headers.append("set-cookie", c);
-    return out;
+    return redirectTo(sc);
   } catch {
-    return NextResponse.redirect(dest, 303);
+    return redirectTo();
   }
 }

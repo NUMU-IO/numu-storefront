@@ -21,18 +21,26 @@ const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 const RECOVER_TIMEOUT_MS = 8_000;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const cartDest = new URL("/cart", req.nextUrl.origin);
   const recoverId = req.nextUrl.searchParams.get("cart");
 
-  // Redirect to /cart regardless of outcome; attach any Set-Cookie the
-  // backend issued so the rebuilt session cart is bound to the browser.
-  const redirectWithCookies = (setCookies: string[]): NextResponse => {
-    const res = NextResponse.redirect(cartDest, 303);
+  // Redirect to /cart regardless of outcome, attaching any Set-Cookie the
+  // backend issued so the rebuilt session cart binds to this browser.
+  //
+  // Use a RELATIVE Location ("/cart") — the browser resolves it against the
+  // public host it actually requested (<store>.numueg.app). Building an
+  // absolute URL from req.nextUrl.origin returns the container's internal
+  // bind address (https://0.0.0.0:3000) behind the nginx/Cloudflare proxy,
+  // which sent shoppers to a dead 0.0.0.0 host.
+  const toCart = (setCookies: string[] = []): NextResponse => {
+    const res = new NextResponse(null, {
+      status: 303,
+      headers: { Location: "/cart" },
+    });
     for (const c of setCookies) res.headers.append("set-cookie", c);
     return res;
   };
 
-  if (!recoverId) return NextResponse.redirect(cartDest, 303);
+  if (!recoverId) return toCart();
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const cookie = req.headers.get("cookie");
@@ -54,9 +62,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const sc =
       (res.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ??
       (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
-    return redirectWithCookies(sc);
+    return toCart(sc);
   } catch {
     // Timeout / transport failure — still show the shopper their cart.
-    return NextResponse.redirect(cartDest, 303);
+    return toCart();
   }
 }
