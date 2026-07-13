@@ -71,6 +71,13 @@ export interface StoreData {
   country?: string;
   default_language: string;
   use_nextjs_storefront: boolean;
+  /**
+   * Platform → URL/handle map the merchant sets in the customizer's Social
+   * Links panel (e.g. `{ whatsapp: "https://wa.me/2010…", instagram: "…" }`).
+   * Returned by `_serialize_public_store`; drives the footer social icons and
+   * the host-shell WhatsApp float.
+   */
+  social_links?: Record<string, string> | null;
 }
 
 // Product types
