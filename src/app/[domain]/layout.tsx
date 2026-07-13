@@ -27,6 +27,7 @@ import { getActivePromotions } from "@/lib/promo-server";
 import { resolveBrandTokens } from "@/lib/brand-tokens";
 import { AnnouncementBar } from "@/components/promo/AnnouncementBar";
 import { PromoMounts } from "@/components/promo/PromoMounts";
+import { WhatsAppFloat } from "@/components/storefront/WhatsAppFloat";
 import {
   canonicalOriginFor,
   storeRobots,
@@ -390,6 +391,19 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             cookieBanner={promotions.cookie_banner ?? null}
             locale={visitorLocale === "ar" ? "ar" : "en"}
             brandVars={brandVars}
+          />
+        )}
+        {/* Theme-agnostic WhatsApp click-to-chat button. Shows on every theme
+            whenever the merchant has added a WhatsApp entry to the store's
+            Social Links; raised above a promo floating widget if one shares
+            the corner. */}
+        {store.social_links?.whatsapp && (
+          <WhatsAppFloat
+            whatsapp={store.social_links.whatsapp}
+            storeName={store.name || "Store"}
+            locale={visitorLocale === "ar" ? "ar" : "en"}
+            country={store.country}
+            raised={Boolean(promotions?.floating_widgets?.length)}
           />
         )}
         {!isByot && themeSettings.section_groups?.header && (
