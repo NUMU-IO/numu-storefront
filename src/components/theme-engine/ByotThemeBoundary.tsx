@@ -587,8 +587,13 @@ export default function ByotThemeBoundary({
       );
   }, [storeData, page, effectiveLocale, navigation, resolveCtx]);
 
+  // Load errors on routes that supplied a `routeFallback` (themed 404 /
+  // default cart / page body) degrade to that fallback — a branded page
+  // beats a raw "Failed to load theme" box. Routes without one keep the
+  // diagnostic box (or an explicit `fallback` override).
   const fallbackUI =
-    fallback || (
+    fallback ||
+    routeFallback || (
       <div className="min-h-screen flex flex-col items-center justify-center gap-2">
         <div className="text-red-500">Failed to load theme</div>
         {error && (
