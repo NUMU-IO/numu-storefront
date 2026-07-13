@@ -402,6 +402,7 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             whatsapp={store.social_links.whatsapp}
             storeName={store.name || "Store"}
             locale={visitorLocale === "ar" ? "ar" : "en"}
+            country={store.country}
             raised={Boolean(promotions?.floating_widgets?.length)}
           />
         )}

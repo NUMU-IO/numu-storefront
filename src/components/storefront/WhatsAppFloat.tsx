@@ -19,24 +19,51 @@ const LABEL: Record<"ar" | "en", string> = {
   en: "Chat with us on WhatsApp",
 };
 
+// Country → international calling code, for turning a national number
+// ("01060082542") into a wa.me-dialable one. Merchant hub stores the WhatsApp
+// contact as whatever the merchant typed, which is often the local format with
+// a leading trunk "0" and no country code. Covers NUMU's served markets; falls
+// back to EG (the primary market) for anything unmapped.
+const CALLING_CODE: Record<string, string> = {
+  EG: "20", SA: "966", AE: "971", KW: "965", QA: "974", BH: "973", OM: "968",
+  JO: "962", LB: "961", IQ: "964", YE: "967", PS: "970", SD: "249", LY: "218",
+  TN: "216", DZ: "213", MA: "212", US: "1", GB: "44", TR: "90",
+};
+
+/** Normalize a phone value to international dialing digits (no "+"). Strips a
+ * "00" intl access prefix and converts a leading national trunk "0" to the
+ * store's country calling code. Returns null when there are no digits. */
+export function toIntlDigits(raw: string, country?: string): string | null {
+  let digits = (raw || "").replace(/\D/g, "");
+  if (!digits) return null;
+  const cc = CALLING_CODE[(country || "EG").toUpperCase()] || "20";
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = cc + digits.slice(1);
+  return digits || null;
+}
+
 /**
  * Turn a merchant-entered WhatsApp value into a click-to-chat href carrying the
- * greeting. Accepts a bare/formatted number ("+20 100 123 4567", "201001234567")
- * or a full link (wa.me/<num>, api.whatsapp.com/send?phone=<num>). For a
- * link we pull the digits out so we can still attach the greeting; a code-style
- * link with no number (wa.me/message/<code>) is used verbatim. Returns null when
- * there's nothing dialable.
+ * greeting. Accepts a bare/formatted/national number ("01060082542",
+ * "+20 100 123 4567") or a full link (wa.me/<num>, api.whatsapp.com/send?phone=).
+ * A code-style link with no number (wa.me/message/<code>) is used verbatim.
+ * Returns null when there's nothing dialable.
  */
-export function toWhatsAppHref(raw: string, greeting: string): string | null {
+export function toWhatsAppHref(
+  raw: string,
+  greeting: string,
+  country?: string,
+): string | null {
   const value = (raw || "").trim();
   if (!value) return null;
   const text = encodeURIComponent(greeting);
+  let source = value;
   if (/^https?:\/\//i.test(value)) {
     const match = value.match(/(?:wa\.me\/|[?&]phone=)(\+?\d[\d\s-]*)/i);
-    const digits = match?.[1]?.replace(/\D/g, "");
-    return digits ? `https://wa.me/${digits}?text=${text}` : value;
+    if (!match) return value; // e.g. wa.me/message/<code> — chat-link, use as-is
+    source = match[1];
   }
-  const digits = value.replace(/\D/g, "");
+  const digits = toIntlDigits(source, country);
   return digits ? `https://wa.me/${digits}?text=${text}` : null;
 }
 
@@ -44,16 +71,23 @@ export function WhatsAppFloat({
   whatsapp,
   storeName,
   locale = "ar",
+  country,
   raised = false,
 }: {
   whatsapp: string;
   storeName: string;
   locale?: "ar" | "en";
+  /** Store market (ISO 3166-1 alpha-2) — resolves a national number to intl. */
+  country?: string;
   /** Lift above a promo floating widget sharing the bottom-end corner. */
   raised?: boolean;
 }) {
   const lang: "ar" | "en" = locale === "ar" ? "ar" : "en";
-  const href = toWhatsAppHref(whatsapp, GREETING[lang](storeName || "Store"));
+  const href = toWhatsAppHref(
+    whatsapp,
+    GREETING[lang](storeName || "Store"),
+    country,
+  );
   if (!href) return null;
 
   // Bottom-end (right in LTR / left in RTL). `bottom-24` on mobile clears the
