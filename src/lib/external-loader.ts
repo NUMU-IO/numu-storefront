@@ -271,6 +271,62 @@ export function loadExternalTheme(
   return p;
 }
 
+/**
+ * Self-heal the federation import map before evaluating a federate:true
+ * bundle. On `notFound()` responses Next does NOT emit the layout <head>
+ * into the initial HTML — the `<script type="importmap">` only reaches the
+ * client inside React Flight data, and React inserts script tags WITHOUT
+ * executing them, so the browser never registers the map and the bundle's
+ * bare imports (`react/jsx-runtime`, `@numueg/theme-sdk`, …) throw
+ * "Failed to resolve module specifier". (This regressed the themed-404
+ * backstop for every federated theme.)
+ *
+ * Probe: actually import `react/jsx-runtime` — if a parser-registered map
+ * exists this resolves instantly from cache. If it throws, rebuild the map
+ * from the public runtime manifest and insert it imperatively; Chrome 133+
+ * registers dynamically-inserted import maps. One-shot per document.
+ */
+let _importMapEnsure: Promise<void> | null = null;
+function ensureRuntimeImportMap(): Promise<void> {
+  if (typeof document === "undefined") return Promise.resolve();
+  if (_importMapEnsure) return _importMapEnsure;
+  _importMapEnsure = (async () => {
+    try {
+      await dynamicImport("react/jsx-runtime");
+      return; // a live import map already resolves the runtime
+    } catch {
+      /* unresolvable → the map never registered on this document */
+    }
+    try {
+      const res = await fetch("/__numu-runtime/manifest.json", { cache: "force-cache" });
+      if (!res.ok) return;
+      const manifest = (await res.json()) as { files?: Record<string, string> };
+      const files = manifest.files ?? {};
+      const urlFor = (f: string) =>
+        `/__numu-runtime/${f}${files[f] ? `?v=${files[f]}` : ""}`;
+      const map = {
+        imports: {
+          react: urlFor("react.js"),
+          "react/jsx-runtime": urlFor("react-jsx-runtime.js"),
+          "react/jsx-dev-runtime": urlFor("react-jsx-dev-runtime.js"),
+          "react-dom": urlFor("react-dom.js"),
+          "react-dom/client": urlFor("react-dom-client.js"),
+          "@numueg/theme-sdk": urlFor("sdk.js"),
+          "@numu/theme-sdk": urlFor("sdk.js"),
+        },
+      };
+      const s = document.createElement("script");
+      s.type = "importmap";
+      s.setAttribute("data-numu-live", "1");
+      s.textContent = JSON.stringify(map);
+      document.head.appendChild(s);
+    } catch (err) {
+      console.warn("[external-loader] import-map self-heal failed", err);
+    }
+  })();
+  return _importMapEnsure;
+}
+
 async function _loadExternalThemeUncached(
   bundleUrl: string,
   options: LoadOptions = {},
@@ -278,6 +334,10 @@ async function _loadExternalThemeUncached(
   if (!isAllowedBundleUrl(bundleUrl)) {
     throw new Error(`Refusing to load bundle from disallowed host: ${bundleUrl}`);
   }
+
+  // Federated bundles need the runtime import map registered on THIS
+  // document before evaluation (see ensureRuntimeImportMap docstring).
+  await ensureRuntimeImportMap();
 
   // Federation compat check: a bundle built against an incompatible
   // SDK major would crash on first hook call with a confusing error.
