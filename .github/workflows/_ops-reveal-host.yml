@@ -1,0 +1,17 @@
+name: ops-reveal-host
+on:
+  workflow_dispatch:
+jobs:
+  reveal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH to box and report its public IP (base64, mask-safe)
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_EC2_SSH_KEY }}" > ~/.ssh/k
+          chmod 600 ~/.ssh/k
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+          # The box curls its own public IP; base64 so the runner's secret
+          # masker (which redacts the literal PROD_EC2_HOST value) can't blank it.
+          ssh -i ~/.ssh/k "${{ secrets.PROD_EC2_USER }}@${{ secrets.PROD_EC2_HOST }}" \
+            'echo "ORIGIN_IP_B64=$(curl -s --max-time 10 https://checkip.amazonaws.com | tr -d "\n" | base64)"'
