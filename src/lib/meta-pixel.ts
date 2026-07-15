@@ -275,3 +275,23 @@ export function trackFunnel(
   if (tiktokEvent) ttqTrack(tiktokEvent, data, eventId);
   postTrack({ event_id: eventId, step, step_data: cleanData(data) });
 }
+
+/**
+ * First-party navigation tracking: POST the step to `/api/storefront/track`
+ * WITHOUT firing any browser pixel.
+ *
+ * Used by <PageViewTracker> for the generic page_view / collection_view
+ * steps that power NUMU's own sessions / bounce / conversion analytics.
+ * The browser Meta PageView is <MetaPixel>'s job (initial snippet + its
+ * route-change effect) — firing it here too would double every PageView.
+ * Known polish item: the backend still enqueues a CAPI PageView for this
+ * POST whose event_id doesn't match the un-ID'd browser PageView; sharing
+ * one event_id between <MetaPixel> and this call is a follow-up.
+ */
+export function trackFirstPartyNavigation(
+  step: string,
+  data: Record<string, unknown> = {},
+): void {
+  if (typeof window === "undefined") return;
+  postTrack({ event_id: getEventId(), step, step_data: cleanData(data) });
+}
