@@ -20,6 +20,7 @@ import { PreviewBridge } from "@/components/theme-engine/PreviewBridge";
 import { PreviewNavigationBridge } from "@/components/theme-engine/PreviewNavigationBridge";
 import { SoftNavBridge } from "@/components/theme-engine/SoftNavBridge";
 import { MetaPixel } from "@/components/tracking/MetaPixel";
+import { PageViewTracker } from "@/components/tracking/PageViewTracker";
 import { resolveMetaPixelIds } from "@/lib/meta-pixel";
 import { TikTokPixel } from "@/components/tracking/TikTokPixel";
 import { resolveTikTokPixelIds } from "@/lib/tiktok-pixel";
@@ -341,6 +342,11 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
       <base href={`/${domain}/`} />
       {metaPixelIds.length > 0 && <MetaPixel pixelIds={metaPixelIds} />}
       {tiktokPixelIds.length > 0 && <TikTokPixel pixelIds={tiktokPixelIds} />}
+      {/* First-party page-view/session tracking — unconditional (unlike the
+          pixels above, this feeds NUMU's own analytics, not an ad platform).
+          PDP navigations are skipped: the PDP's <FunnelTracker
+          step="product_view"> records those. */}
+      <PageViewTracker />
       {/* Phase 5.7 WCAG-AA — skip-to-content link.
           Keyboard users tab through the header before reaching the
           page body; a skip link lets them jump straight to main
