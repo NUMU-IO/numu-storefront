@@ -553,16 +553,36 @@ export const fetchProducts = cache(async (storeId: string, limit = 20, categoryI
   const categoryQs = categoryId
     ? `&category_id=${encodeURIComponent(categoryId)}`
     : "";
-  const wrapped = await apiFetch<Record<string, any>>(
-    `/storefront/store/${storeId}/products?limit=${limit}${categoryQs}`,
-    { tags: [`products:${storeId}`], revalidate: 60 },
-  );
-  const items: any[] = Array.isArray(wrapped)
-    ? wrapped
-    : wrapped && Array.isArray(wrapped.items)
-      ? wrapped.items
-      : [];
-  return items.map(normalizeProduct);
+  // The backend validates `limit` as 1..100 (anything above 422s, which the
+  // callers' catch-alls would turn into an EMPTY storefront). Page through in
+  // chunks of 100 until we have `limit` items or the catalog runs out.
+  const PAGE_MAX = 100;
+  const fetchPage = (page: number, pageLimit: number) =>
+    apiFetch<Record<string, any>>(
+      `/storefront/store/${storeId}/products?limit=${pageLimit}&page=${page}${categoryQs}`,
+      { tags: [`products:${storeId}`], revalidate: 60 },
+    );
+  const first = await fetchPage(1, Math.min(limit, PAGE_MAX));
+  const unwrap = (wrapped: any): any[] =>
+    Array.isArray(wrapped)
+      ? wrapped
+      : wrapped && Array.isArray(wrapped.items)
+        ? wrapped.items
+        : [];
+  let items = unwrap(first);
+  const total: number =
+    typeof (first as any)?.total === "number" ? (first as any).total : items.length;
+  const want = Math.min(limit, total);
+  if (items.length > 0 && items.length < want) {
+    const pages = Math.ceil(want / PAGE_MAX);
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) =>
+        fetchPage(i + 2, PAGE_MAX).catch(() => null),
+      ),
+    );
+    for (const w of rest) if (w) items = items.concat(unwrap(w));
+  }
+  return items.slice(0, want).map(normalizeProduct);
 });
 
 export const fetchProductBySlug = cache(
