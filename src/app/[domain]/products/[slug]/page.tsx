@@ -3,6 +3,7 @@ import {
   fetchProductBySlug,
   fetchThemeSettings,
   fetchProducts,
+  fetchCollections,
 } from "@/lib/api-client";
 import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
@@ -107,13 +108,15 @@ export default async function ProductPage({ params }: PageProps) {
   //     wrong"); empty settings → no bundle_url → built-in PDP fallback renders
   //     the product, add-to-cart intact.
   //   - catalogue: only feeds the bundle's "you may also like" rail.
-  const [productResult, themeRaw, catalogue] = await Promise.all([
+  const [productResult, themeRaw, catalogue, collections] = await Promise.all([
     fetchProductBySlug(store.id, slug).then(
       (p) => ({ ok: true as const, product: p }),
       (err: unknown) => ({ ok: false as const, error: err }),
     ),
     fetchThemeSettings(store.id).catch(() => null),
     fetchProducts(store.id, 12).catch(() => []),
+    // header collections dropdown parity with the home route
+    fetchCollections(store.id).catch(() => []),
   ]);
   let product = null;
   if (productResult.ok) {
@@ -227,7 +230,9 @@ export default async function ProductPage({ params }: PageProps) {
             type: "product",
             title: product?.name,
             handle: slug,
-            data: product ? { product, products: catalogue } : undefined,
+            data: product
+              ? { product, products: catalogue, collections }
+              : undefined,
           }}
           // ENG-2 defense-in-depth: every registered theme ships a `product`
           // template, but if a bundle renders blank fall back to the functional

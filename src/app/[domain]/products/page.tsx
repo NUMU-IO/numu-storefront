@@ -2,6 +2,7 @@ import {
   fetchStoreByDomain,
   fetchThemeSettings,
   fetchProducts,
+  fetchCollections,
 } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -61,11 +62,15 @@ export default async function ProductsListingPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
-    // Pull a starter batch the bundle can render against. The bundle's
-    // own grid section can request more via `useProducts({ limit })`
-    // if it wants pagination; this lands a sensible default for the
-    // common "show a grid of 50" case.
-    const products = await fetchProducts(store.id, 50).catch(() => []);
+    // Pull the full catalog for the bundle to render — themes paginate
+    // client-side, and capping this at 50 silently hid the rest of the
+    // catalog on stores with more products (vionne has 250+). Collections
+    // ride along so header nav (collections dropdown) renders here too,
+    // not just on the home route.
+    const [products, collections] = await Promise.all([
+      fetchProducts(store.id, 500).catch(() => []),
+      fetchCollections(store.id).catch(() => []),
+    ]);
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
@@ -75,7 +80,7 @@ export default async function ProductsListingPage({ params }: PageProps) {
         page={{
           type: "products",
           title: "All products",
-          data: { products },
+          data: { products, collections },
         }}
       />
     );

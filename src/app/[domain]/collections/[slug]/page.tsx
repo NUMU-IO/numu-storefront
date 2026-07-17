@@ -1,4 +1,4 @@
-import { fetchStoreByDomain, fetchCollectionBySlug, fetchProducts, fetchThemeSettings } from "@/lib/api-client";
+import { fetchStoreByDomain, fetchCollectionBySlug, fetchProducts, fetchCollections, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -65,8 +65,11 @@ export default async function CollectionPage({ params }: PageProps) {
   // render. Without this the listing falls back to an empty catalog
   // (useProducts() does NOT self-fetch) and shows "No results".
   const products = collection?.id
-    ? await fetchProducts(store.id, 50, collection.id).catch(() => [])
+    ? await fetchProducts(store.id, 500, collection.id).catch(() => [])
     : [];
+  // Full collections list so the header's collections dropdown renders on
+  // collection pages too (not just home).
+  const collections = await fetchCollections(store.id).catch(() => []);
   const themeRaw = await fetchThemeSettings(store.id);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
   // Template overrides: honour an alternate collection template
@@ -137,6 +140,7 @@ export default async function CollectionPage({ params }: PageProps) {
             // CollectionProvider — harmless until then.
             data: {
               products,
+              collections,
               collection: collection ? { ...collection, products } : undefined,
             },
           }}
