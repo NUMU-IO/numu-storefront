@@ -108,7 +108,10 @@ export default async function HomePage({ params }: PageProps) {
   // best-effort — never blocks the render).
   const [themeRaw, products, collections] = await Promise.all([
     fetchThemeSettings(store.id),
-    fetchProducts(store.id, 20).catch(() => []),
+    // 300 (was 20) so home sections pinning products by id (featured rows)
+    // can reference any item in the catalog — pins outside the fetched window
+    // silently drop and the whole row hides.
+    fetchProducts(store.id, 300).catch(() => []),
     fetchCollections(store.id).catch(() => []),
   ]);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
