@@ -25,6 +25,28 @@ const DEV_HOSTS = new Set(["localhost", "127.0.0.1"]);
 // NEXT_PUBLIC_BYOT_BUNDLE_HOSTS, never r2.dev.
 const DEV_HOST_SUFFIXES = ["r2.dev"];
 
+/**
+ * Is bundle-checksum verification enforced?
+ *
+ * OFF by default, deliberately. Verification fails CLOSED — a mismatch throws
+ * and the storefront renders the theme error state instead of the shop — so
+ * anything that changes the delivered bytes without updating the stored digest
+ * (a CDN that minifies or injects, a bundle re-uploaded in place) would take a
+ * live store down. House rule for theme changes is to feature-flag them, so
+ * this ships dark: the digest is plumbed end to end and can be validated
+ * against real CDN-served bytes on the test stack, then switched on.
+ *
+ * Set NEXT_PUBLIC_BYOT_CHECKSUM_ENFORCE=1 to enforce. It doubles as the kill
+ * switch — flip it back to 0 to restore service without a rollback.
+ *
+ * Note the gate is only reachable for themes activated after the digest was
+ * added to the activation payload; earlier installs carry no checksum and are
+ * unaffected either way.
+ */
+function isChecksumEnforced(): boolean {
+  return process.env.NEXT_PUBLIC_BYOT_CHECKSUM_ENFORCE === "1";
+}
+
 function isProdEnv(): boolean {
   // We treat "production" as any environment where dev-only hosts are
   // forbidden. Explicit NEXT_PUBLIC_NUMU_ENV always wins so a built
@@ -351,7 +373,7 @@ async function _loadExternalThemeUncached(
   // If we have a checksum, fetch the bundle bytes first, verify, then
   // create a blob URL we can dynamically import. This keeps untrusted JS
   // from running before verification.
-  if (options.expectedChecksum) {
+  if (options.expectedChecksum && isChecksumEnforced()) {
     const res = await fetch(bundleUrl, { cache: BUNDLE_CACHE });
     if (!res.ok) {
       throw new Error(

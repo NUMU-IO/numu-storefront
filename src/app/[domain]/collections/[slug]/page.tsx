@@ -127,6 +127,7 @@ export default async function CollectionPage({ params }: PageProps) {
         {ldScripts}
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
+          bundleChecksum={themeSettings.external_theme.checksum}
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={effectiveTheme}
           storeData={store}

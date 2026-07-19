@@ -223,6 +223,7 @@ export default async function ProductPage({ params }: PageProps) {
         {headExtras}
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
+          bundleChecksum={themeSettings.external_theme.checksum}
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={effectiveTheme}
           storeData={store}
