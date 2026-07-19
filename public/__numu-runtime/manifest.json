@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-07-04T17:01:56.949Z",
+  "built_at": "2026-07-19T14:24:17.420Z",
   "sdk_version": "0.10.0",
   "react_version": "19.2.5",
   "react_dom_version": "19.2.5",
@@ -12,6 +12,6 @@
     "chunk-IA5QTEFP.js": "05834c3b831da091",
     "chunk-BHNQUPPO.js": "9a3686111b5499e1",
     "chunk-EK7ODJWE.js": "06b1bf39b7cee1b3",
-    "sdk.js": "87244f6262e24924"
+    "sdk.js": "2428432ff7d9cc2c"
   }
 }
