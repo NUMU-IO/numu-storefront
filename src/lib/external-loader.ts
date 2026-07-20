@@ -43,6 +43,13 @@ const DEV_HOST_SUFFIXES = ["r2.dev"];
  * added to the activation payload; earlier installs carry no checksum and are
  * unaffected either way.
  */
+/**
+ * A bare `from "./chunk.js"` / `import("./chunk.js")` in a built bundle — the
+ * signature of a code-split build whose sibling chunks the stored checksum
+ * does not cover.
+ */
+const RELATIVE_IMPORT = /(?:from|import)\s*\(?\s*["']\.\.?\//;
+
 function isChecksumEnforced(): boolean {
   return process.env.NEXT_PUBLIC_BYOT_CHECKSUM_ENFORCE === "1";
 }
@@ -385,6 +392,23 @@ async function _loadExternalThemeUncached(
     if (got !== options.expectedChecksum.toLowerCase()) {
       throw new Error(
         `Bundle checksum mismatch (expected ${options.expectedChecksum}, got ${got})`,
+      );
+    }
+
+    // The stored digest covers dist/theme.js and nothing else. A code-split
+    // build makes that entry a thin shim that imports sibling chunks holding
+    // the actual code — those chunks are never hashed, so a verified entry
+    // would grant false confidence in unverified JavaScript. (Real example:
+    // luxury-minimal 0.3.3 published a 94-byte entry importing ./main-*.js.)
+    // Refuse rather than pretend: integrity is the one thing this branch
+    // exists to provide.
+    const source = new TextDecoder().decode(bytes);
+    if (RELATIVE_IMPORT.test(source)) {
+      throw new Error(
+        "Bundle is code-split: the checksum covers only the entry chunk, so " +
+          "its sibling chunks cannot be integrity-verified. Rebuild the theme " +
+          "as a single file, or extend the stored checksum to cover every " +
+          "emitted asset.",
       );
     }
     const blobUrl = URL.createObjectURL(
