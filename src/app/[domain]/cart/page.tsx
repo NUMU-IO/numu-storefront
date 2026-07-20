@@ -80,6 +80,7 @@ export default async function CartPage({ params }: PageProps) {
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
         cssUrl={themeSettings.external_theme.css_url}
+        bundleChecksum={themeSettings.external_theme.checksum}
         themeSettings={themeSettings}
         storeData={store}
         page={{ type: "cart", title: "Cart" }}

@@ -8,6 +8,8 @@ import {
   buildWebsiteLd,
   serializeLd,
 } from "@/lib/json-ld";
+import { SsrHomeContent } from "@/components/seo/SsrContentLayer";
+import { headers } from "next/headers";
 import type { ThemeSettingsV3 } from "@/types";
 
 interface PageProps {
@@ -171,11 +173,18 @@ export default async function HomePage({ params }: PageProps) {
   // links against. Failures are non-fatal — the bundle's own sections
   // gracefully empty out.
   if (themeSettings.external_theme?.bundle_url && !isBuiltInTheme(themeSettings.theme_id)) {
+    // ADR-7 — locale for the crawler-facing content layer (see the PDP route).
+    const hl = await headers();
+    const ssrLocale =
+      hl.get("x-numu-locale") ||
+      (store as { default_language?: string })?.default_language ||
+      "en";
     return (
       <>
         {ldScripts}
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
+          bundleChecksum={themeSettings.external_theme.checksum}
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={themeSettings}
           storeData={store}
@@ -184,6 +193,18 @@ export default async function HomePage({ params }: PageProps) {
             title: store.name,
             data: { products, collections },
           }}
+          // ADR-7 — store name/description + collection and product links in
+          // the initial HTML. Dropped on hydration, before the theme paints.
+          seoContent={
+            <SsrHomeContent
+              storeName={store?.name}
+              storeDescription={(store as { description?: string })?.description}
+              collections={collections}
+              products={products}
+              storeCurrency={store?.currency}
+              locale={ssrLocale}
+            />
+          }
         />
       </>
     );

@@ -56,6 +56,23 @@ interface ByotThemeBoundaryProps {
    * which is the load/render ERROR UI.
    */
   routeFallback?: ReactNode;
+  /**
+   * ADR-7 — server-rendered content layer. Semantic, crawler-facing HTML
+   * (h1 / description / price / images / links) rendered by the HOST from data
+   * the route already fetched. Unlike `routeFallback` (which appears only when
+   * the theme ships no template) this is present in the INITIAL RESPONSE even
+   * when the theme renders fine — that's the whole point: a crawler that runs
+   * no JS, and a no-JS visitor, get real content instead of "Loading…".
+   *
+   * It is rendered as the mount container's initial children and dropped by
+   * this component the instant React hydrates (see `hydrated` below) — i.e.
+   * before the theme bundle has even finished downloading. So a real visitor
+   * never sees it duplicated alongside the theme, and — because host React
+   * removes the nodes itself rather than letting the bundle's
+   * `createRoot(el)` clear them out from under it — there is no DOM-ownership
+   * conflict between the two React trees.
+   */
+  seoContent?: ReactNode;
 }
 
 // The two shapes a bundle's `mount` may return:
@@ -300,6 +317,7 @@ export default function ByotThemeBoundary({
   locale,
   fallback,
   routeFallback,
+  seoContent,
 }: ByotThemeBoundaryProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<BundleHandle | null>(null);
@@ -308,6 +326,16 @@ export default function ByotThemeBoundary({
   // ENG-2 — set once the grace window elapses if the mounted bundle rendered
   // no meaningful content into the container, so we can show `routeFallback`.
   const [bundleEmpty, setBundleEmpty] = useState(false);
+  // ADR-7 — the server-rendered content layer is part of the SSR HTML and is
+  // dropped as soon as JS runs. `false` on the server AND on the first client
+  // render (so hydration matches the markup byte-for-byte), flipped in an
+  // effect that runs long before the awaited dynamic import resolves — so the
+  // container is already empty and host-React-clean when `mount()` is called.
+  const [hydrated, setHydrated] = useState(false);
+  const hasSeoContent = seoContent != null;
+  useEffect(() => {
+    if (hasSeoContent) setHydrated(true);
+  }, [hasSeoContent]);
   // Phase 2.4 — store nav menus injected once by the layout. Stable per
   // session; read here (non-throwing) and forwarded into every mount ctx.
   // ENG-3 R1 — the layout also threads the resolved visitor locale here; fall
@@ -629,7 +657,29 @@ export default function ByotThemeBoundary({
           bundleEmpty flip, and `routeFallback` is an element created by the
           calling PAGE — without keys React key-diffs the shifting list and
           warns ("child from RegisterPage" etc.) on every fallback route. */}
-      {loading && !error && <StorefrontSkeleton key="byot-skeleton" />}
+      {loading && !error && (
+        <Fragment key="byot-skeleton">
+          {/* ADR-7: with a content layer present, a no-JS visitor would
+              otherwise have to scroll past a full-viewport shimmer that will
+              never resolve (the bundle needs JS) before reaching the real
+              content. `<noscript>` CSS hides the skeleton for exactly those
+              visitors and is inert for everyone else — no JS involved either
+              way. `dangerouslySetInnerHTML` is the documented way to put
+              markup in a <noscript> without a hydration mismatch (browsers
+              with scripting on parse noscript children as raw text). */}
+          {hasSeoContent && (
+            <noscript
+              dangerouslySetInnerHTML={{
+                __html:
+                  "<style>[data-numu-theme-skeleton]{display:none!important}</style>",
+              }}
+            />
+          )}
+          <div data-numu-theme-skeleton="">
+            <StorefrontSkeleton />
+          </div>
+        </Fragment>
+      )}
       {error && <Fragment key="byot-error-fallback">{fallbackUI}</Fragment>}
       {/* ENG-2 — keep the bundle container mounted always; HIDE (not unmount)
           it when the bundle rendered blank so a late async render can still
@@ -638,7 +688,14 @@ export default function ByotThemeBoundary({
         key="byot-bundle-container"
         ref={containerRef}
         style={bundleEmpty ? { display: "none" } : undefined}
-      />
+      >
+        {/* ADR-7 content layer — crawler/no-JS baseline, removed on hydration.
+            Rendering it INSIDE the container keeps it in the same box the
+            theme will occupy (no layout shift when it goes) and means that
+            even if the removal effect never ran, the bundle's
+            `createRoot(el)` would clear it on its first commit. */}
+        {!hydrated && seoContent ? seoContent : null}
+      </div>
       {bundleEmpty && !error && (
         <Fragment key="byot-route-fallback">{routeFallback}</Fragment>
       )}

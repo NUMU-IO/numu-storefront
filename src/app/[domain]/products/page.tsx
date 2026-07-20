@@ -74,6 +74,7 @@ export default async function ProductsListingPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
+        bundleChecksum={themeSettings.external_theme.checksum}
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={themeSettings}
         storeData={store}

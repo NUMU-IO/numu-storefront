@@ -119,6 +119,7 @@ export default async function CmsPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
+        bundleChecksum={themeSettings.external_theme.checksum}
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={effectiveTheme}
         storeData={store}

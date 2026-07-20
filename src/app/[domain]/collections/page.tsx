@@ -6,6 +6,8 @@ import {
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import BuiltInCollectionsIndex from "@/components/storefront/BuiltInCollectionsIndex";
+import { headers } from "next/headers";
 import type { Metadata } from "next";
 
 /**
@@ -53,17 +55,37 @@ export default async function CollectionsIndexPage({ params }: PageProps) {
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
     const collections = await fetchCollections(store.id).catch(() => []);
+    const hl = await headers();
+    const locale =
+      hl.get("x-numu-locale") ||
+      (store as { default_language?: string })?.default_language ||
+      "en";
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
+        bundleChecksum={themeSettings.external_theme.checksum}
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={themeSettings}
         storeData={store}
+        locale={locale}
         page={{
           type: "collections",
           title: "Collections",
           data: { collections },
         }}
+        // ENG-2 no-blank backstop. Only ONE of the sixteen V3 themes ships a
+        // `collections` template; the rest render an empty wrapper here — and
+        // because their header/footer live INLINE in each template rather than
+        // in `section_groups`, an absent template meant this route came out
+        // completely blank: no nav, no footer, no content, no error. The
+        // header's "All collections" link points straight at it.
+        routeFallback={
+          <BuiltInCollectionsIndex
+            collections={collections}
+            storeName={store?.name}
+            locale={locale}
+          />
+        }
       />
     );
   }

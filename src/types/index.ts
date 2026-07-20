@@ -38,6 +38,15 @@ export interface BlockInstance {
 export interface ExternalThemeMetadata {
   bundle_url: string;
   css_url?: string | null;
+  /**
+   * SHA-256 hex digest of the published bundle, set at activation from
+   * `marketplace_theme_versions.checksum`. When present the loader verifies
+   * the fetched bytes before evaluating them, so a bundle swapped at the CDN
+   * after review fails closed. Absent for dev-mode bundles (a live Vite
+   * server's bytes change on every save) — then the host allowlist is the
+   * only gate.
+   */
+  checksum?: string | null;
   mode?: string;
   settings_schema?: Record<string, any> | null;
   section_schemas?: Record<string, any> | null;
