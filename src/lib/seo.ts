@@ -154,3 +154,43 @@ export function buildTwitter(opts: {
     ...(opts.image ? { images: [opts.image] } : {}),
   };
 }
+
+/**
+ * Resolve which store a metadata route (sitemap.ts / robots.ts) is serving.
+ *
+ * These routes live under the `[domain]` segment but Next only supplies
+ * `params` when the route also exports `generateSitemaps()`. Store subdomains
+ * are created at runtime, so there is no fixed set to enumerate and no
+ * `generateSitemaps()` — which means Next invokes the handler with NO
+ * argument, and reading `params` off it throws.
+ *
+ * The request host is the reliable source: the proxy injects a canonical
+ * `x-numu-host`, and every other server path resolves the store this way.
+ *
+ * @param params optional, honoured when Next does supply it
+ * @param headerList the route's `await headers()`
+ * @returns the subdomain (or a custom domain, passed through whole), or null
+ */
+export function resolveStoreDomainFromHeaders(
+  headerList: { get(name: string): string | null },
+): string | null {
+  const raw = (
+    headerList.get("x-numu-host") ||
+    headerList.get("host") ||
+    ""
+  ).trim();
+  if (!raw) return null;
+
+  const hostname = raw.split(":")[0].toLowerCase();
+  const platformDomain = (process.env.NUMU_PLATFORM_DOMAIN || "numueg.app")
+    .split(":")[0]
+    .toLowerCase();
+
+  // `sub.numueg.app` / `sub.localhost` -> `sub`. A custom domain carries no
+  // platform suffix to strip, so it passes through whole and
+  // fetchStoreByDomain resolves it.
+  if (hostname.endsWith(`.${platformDomain}`)) {
+    return hostname.slice(0, -(platformDomain.length + 1)) || null;
+  }
+  return hostname;
+}

@@ -1,10 +1,15 @@
 import type { MetadataRoute } from "next";
+import { headers } from "next/headers";
 import {
   fetchStoreByDomain,
   fetchProducts,
   fetchCollections,
 } from "@/lib/api-client";
-import { storeBlocksIndexing, type StoreForSeo } from "@/lib/seo";
+import {
+  resolveStoreDomainFromHeaders,
+  storeBlocksIndexing,
+  type StoreForSeo,
+} from "@/lib/seo";
 
 /**
  * Per-store sitemap.
@@ -34,13 +39,31 @@ import { storeBlocksIndexing, type StoreForSeo } from "@/lib/seo";
  */
 
 interface SitemapProps {
-  params: Promise<{ domain: string }>;
+  params?: Promise<{ domain: string }>;
 }
 
-export default async function sitemap({
-  params,
-}: SitemapProps): Promise<MetadataRoute.Sitemap> {
-  const { domain } = await params;
+/**
+ * ⚠️ Next invokes this with NO ARGUMENT.
+ *
+ * A `sitemap.ts` inside a dynamic segment only receives `params` when the
+ * route also exports `generateSitemaps()`. This one doesn't (there is no fixed
+ * set of stores to enumerate — they're created at runtime), so Next called it
+ * with `undefined` and destructuring `{ params }` threw before a single line
+ * of the defensive code below could run:
+ *
+ *     TypeError: Cannot destructure property 'params' of 'undefined'
+ *
+ * That is why `/sitemap.xml` returned 500 on every store, in production,
+ * silently — search engines could not discover a single product or collection
+ * URL. The `props` parameter is therefore optional, and the store is resolved
+ * from the request host (what the rest of the app does) rather than from
+ * params.
+ */
+export default async function sitemap(
+  props?: SitemapProps,
+): Promise<MetadataRoute.Sitemap> {
+  const domain = await resolveDomain(props?.params);
+  if (!domain) return [];
   const baseUrl = await resolveBaseUrl(domain);
 
   const entries: MetadataRoute.Sitemap = [
@@ -104,6 +127,28 @@ export default async function sitemap({
 }
 
 /**
+ * Which store is this sitemap for?
+ *
+ * `params` is preferred when Next actually supplies it, but it usually won't
+ * (see the note on the default export), so the real source is the request
+ * host — the proxy already injects a canonical `x-numu-host`, and every other
+ * server path in the app resolves the store the same way.
+ */
+async function resolveDomain(
+  params?: Promise<{ domain: string }>,
+): Promise<string | null> {
+  if (params) {
+    try {
+      const resolved = await params;
+      if (resolved?.domain) return resolved.domain;
+    } catch {
+      // fall through to the host header
+    }
+  }
+  return resolveStoreDomainFromHeaders(await headers());
+}
+
+/**
  * Compute the storefront base URL for the given subdomain. Production:
  *   `https://<subdomain>.<NUMU_PLATFORM_DOMAIN>` (or the store's
  *   custom domain if configured). Dev: whatever Next is running under,
@@ -119,9 +164,11 @@ async function resolveBaseUrl(domain: string): Promise<string> {
     // <link rel="canonical"> on the rendered pages.
     return `https://${domain}.${platformDomain}`;
   }
-  // Dev: path-segment routing under the same host the sitemap is on.
-  // Next.js doesn't expose the request host inside `sitemap.ts`, so
-  // we hard-code localhost:3000 — fine for dev sitemaps which aren't
-  // submitted anywhere.
-  return `http://localhost:3000/${domain}`;
+  // Dev: use the host the request actually arrived on. This used to be
+  // hardcoded to `localhost:3000` on the assumption that the request host was
+  // unavailable here — it isn't, and the storefront runs on 3100 anyway, so
+  // every dev sitemap URL pointed at a port with nothing on it.
+  const h = await headers();
+  const host = (h.get("host") || "localhost:3100").trim();
+  return `http://${host}`;
 }
