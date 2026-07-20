@@ -8,6 +8,8 @@ import {
   buildCollectionLd,
   serializeLd,
 } from "@/lib/json-ld";
+import { SsrCollectionContent } from "@/components/seo/SsrContentLayer";
+import { headers } from "next/headers";
 import type { Metadata } from "next";
 
 /**
@@ -122,6 +124,12 @@ export default async function CollectionPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
+    // ADR-7 — locale for the crawler-facing content layer (see the PDP route).
+    const hl = await headers();
+    const ssrLocale =
+      hl.get("x-numu-locale") ||
+      (store as { default_language?: string })?.default_language ||
+      "en";
     return (
       <>
         {ldScripts}
@@ -146,6 +154,18 @@ export default async function CollectionPage({ params }: PageProps) {
             },
           }}
           routeFallback={builtInCollection}
+          // ADR-7 — semantic collection body (title, description, the grid as
+          // real product links with prices) in the initial HTML. Dropped on
+          // hydration; present even when the theme's template renders.
+          seoContent={
+            <SsrCollectionContent
+              collection={collection}
+              products={products}
+              storeName={store?.name}
+              storeCurrency={store?.currency}
+              locale={ssrLocale}
+            />
+          }
         />
       </>
     );

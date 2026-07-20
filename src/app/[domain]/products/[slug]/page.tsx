@@ -17,6 +17,8 @@ import {
 } from "@/lib/json-ld";
 import { FunnelTracker } from "@/components/tracking/FunnelTracker";
 import { storeRobots, NOINDEX_ROBOTS, type StoreForSeo } from "@/lib/seo";
+import { SsrProductContent } from "@/components/seo/SsrContentLayer";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
@@ -218,6 +220,13 @@ export default async function ProductPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
+    // ADR-7 — locale for the crawler-facing content layer. `x-numu-locale` is
+    // stamped by the proxy (URL prefix › ?locale › cookie › store default);
+    // this route already renders dynamically (the layout reads headers/cookies)
+    // so reading it here costs nothing.
+    const hl = await headers();
+    const ssrLocale =
+      hl.get("x-numu-locale") || store?.default_language || "en";
     return (
       <>
         {headExtras}
@@ -245,6 +254,17 @@ export default async function ProductPage({ params }: PageProps) {
                 product={{ ...product, currency: product.currency || store?.currency }}
               />
             ) : undefined
+          }
+          // ADR-7 — semantic, crawler-facing PDP body in the initial HTML.
+          // Unlike routeFallback this ships even when the theme renders; the
+          // boundary drops it on hydration, before the bundle paints.
+          seoContent={
+            <SsrProductContent
+              product={product}
+              storeName={store?.name}
+              storeCurrency={store?.currency}
+              locale={ssrLocale}
+            />
           }
         />
       </>
