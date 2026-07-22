@@ -689,9 +689,72 @@ export const fetchStoreMenus = cache(
         map[menu.handle] = Array.isArray(menu.items) ? menu.items : [];
       }
     }
+    await addBlogLinkIfUnlinked(storeId, map);
     return map;
   },
 );
+
+/**
+ * Put a "Blog" entry in the main menu once a store actually has a blog.
+ *
+ * The blog routes shipped working but unreachable: nothing linked to `/blogs`,
+ * so a merchant had to know the page existed AND go add a menu item by hand in
+ * Hub → Online Store → Navigation before a single shopper could find it. A CMS
+ * nobody can navigate to is a CMS nobody reads.
+ *
+ * Conservative on purpose:
+ *   - only when the store has at least one PUBLISHED blog, so stores that
+ *     never touch the feature see no change;
+ *   - only when no existing item already points at /blogs — a merchant who
+ *     placed their own link (anywhere, under any label) keeps full control of
+ *     the position and wording;
+ *   - appended last, so it never displaces the merchant's ordering;
+ *   - best-effort: a blogs-fetch failure leaves the menu exactly as it was.
+ */
+async function addBlogLinkIfUnlinked(
+  storeId: string,
+  map: Record<string, any[]>,
+): Promise<void> {
+  try {
+    const { fetchBlogsList } = await import("./blogs");
+    const blogs = await fetchBlogsList(storeId);
+    if (!Array.isArray(blogs) || blogs.length === 0) return;
+
+    const linksToBlogs = (items: any[]): boolean =>
+      items.some((item) => {
+        const url = typeof item?.url === "string" ? item.url : "";
+        if (/(^|\/)blogs(\/|$|\?)/i.test(url)) return true;
+        return Array.isArray(item?.children) && linksToBlogs(item.children);
+      });
+
+    // Whichever menu the theme reads for its primary nav. `main-menu` is the
+    // handle every theme defaults to; fall back to the only menu present.
+    const handles = Object.keys(map);
+    const target =
+      handles.find((h) => h === "main-menu") ??
+      (handles.length === 1 ? handles[0] : undefined);
+    if (!target) return;
+
+    const items = map[target];
+    if (linksToBlogs(items)) return;
+    // Any menu already linking blogs counts — the merchant may have put it in
+    // the footer instead, and two Blog links is worse than none.
+    if (handles.some((h) => linksToBlogs(map[h]))) return;
+
+    map[target] = [
+      ...items,
+      {
+        id: "numu-auto-blog",
+        label: { en: "Blog", ar: "المدونة" },
+        url: "/blogs",
+        type: "http",
+        children: [],
+      },
+    ];
+  } catch {
+    /* menus render unchanged */
+  }
+}
 
 // ── Content pages (Phase 4.4b) ──────────────────────────────────────────────
 

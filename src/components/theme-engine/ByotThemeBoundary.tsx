@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
 import StorefrontSkeleton from "@/components/theme-engine/StorefrontSkeleton";
 import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
@@ -25,6 +26,9 @@ import type {
   Collection,
   PageContextData,
 } from "@/types";
+
+/** Marks host-injected fallback content so the emptiness probe skips it. */
+const FALLBACK_MARKER = "data-numu-route-fallback";
 
 interface ByotThemeBoundaryProps {
   bundleUrl: string;
@@ -406,6 +410,10 @@ export default function ByotThemeBoundary({
   const navigation = themeData?.navigation;
   const effectiveLocale = locale ?? themeData?.locale;
   const hasRouteFallback = routeFallback != null;
+  // The theme's <main>, when the bundle rendered chrome but no body for this
+  // route. Non-null → portal the host's fallback in there so the shopper keeps
+  // the store's header, navigation, cart and footer on the page.
+  const [fallbackSlot, setFallbackSlot] = useState<HTMLElement | null>(null);
 
   // Dynamic-source resolution (host→bundle seam). Bind context from the store
   // (always present) plus the current product/collection the route supplied via
@@ -582,18 +590,59 @@ export default function ByotThemeBoundary({
     const el = containerRef.current;
     if (!el) return;
 
-    const hasContent = () =>
-      (el.textContent ?? "").trim().length > 0 ||
-      el.querySelector(
-        "img, svg, input, button, a, picture, video, iframe, canvas",
-      ) != null;
+    // Look at the BODY, not the whole container. Themes render their chrome
+    // (header/footer) for every route, including ones they ship no template
+    // for — so measuring the container as a whole says "not empty" purely
+    // because the header exists, and the route's real content never appears.
+    // When the theme marks a <main>, that region alone decides.
+    const bodyOf = (root: HTMLElement): HTMLElement =>
+      (root.querySelector("main") as HTMLElement | null) ?? root;
+
+    // Anything WE portalled in must not count as content, or the measurement
+    // feeds on its own output: portal in → <main> is no longer empty → decide
+    // the theme rendered after all → unmount the portal → <main> empty again →
+    // portal in… The page visibly flickered on a ~2s cycle.
+    const isHostInjected = (node: Node | null): boolean => {
+      let e: Element | null =
+        node instanceof Element ? node : (node?.parentElement ?? null);
+      while (e) {
+        if (e.hasAttribute?.(FALLBACK_MARKER)) return true;
+        e = e.parentElement;
+      }
+      return false;
+    };
+
+    const hasContent = () => {
+      const body = bodyOf(el);
+      for (const node of Array.from(
+        body.querySelectorAll(
+          "img, svg, input, button, a, picture, video, iframe, canvas",
+        ),
+      )) {
+        if (!isHostInjected(node)) return true;
+      }
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let text: Node | null;
+      while ((text = walker.nextNode())) {
+        if ((text.textContent ?? "").trim() && !isHostInjected(text)) return true;
+      }
+      return false;
+    };
 
     let graceOver = false;
     // Before the grace ceiling: keep the fallback hidden (bundle may still be
     // committing). After: reflect the live DOM — show the fallback only while
     // the bundle is genuinely blank, and yield to it the instant real content
     // arrives (covers late <Suspense>/lazy section chunks without flicker).
-    const sync = () => setBundleEmpty(graceOver && !hasContent());
+    const sync = () => {
+      const empty = graceOver && !hasContent();
+      setBundleEmpty(empty);
+      // A <main> means the theme gave us somewhere to put the body WITHOUT
+      // throwing its chrome away. No <main> → legacy behaviour (hide the
+      // container, render the fallback standalone).
+      const main = el.querySelector("main") as HTMLElement | null;
+      setFallbackSlot(empty ? main : null);
+    };
 
     const obs = new MutationObserver(sync);
     obs.observe(el, { childList: true, subtree: true, characterData: true });
@@ -772,7 +821,7 @@ export default function ByotThemeBoundary({
         <div
           key="byot-bundle-container"
           ref={containerRef}
-          style={bundleEmpty ? { display: "none" } : undefined}
+          style={bundleEmpty && !fallbackSlot ? { display: "none" } : undefined}
         >
           {/* ADR-7 content layer — crawler/no-JS baseline, removed on hydration.
               Rendering it INSIDE the container keeps it in the same box the
@@ -782,9 +831,15 @@ export default function ByotThemeBoundary({
           {!hydrated && seoContent ? seoContent : null}
         </div>
       )}
-      {bundleEmpty && !error && (
+      {bundleEmpty && !error && !fallbackSlot && (
         <Fragment key="byot-route-fallback">{routeFallback}</Fragment>
       )}
+      {bundleEmpty && !error && fallbackSlot
+        ? createPortal(
+            <div {...{ [FALLBACK_MARKER]: "" }}>{routeFallback}</div>,
+            fallbackSlot,
+          )
+        : null}
     </ThemeRenderBoundary>
   );
 }
