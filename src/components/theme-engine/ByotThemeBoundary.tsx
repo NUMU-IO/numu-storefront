@@ -3,11 +3,13 @@
 import {
   Component,
   Fragment,
+  memo,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
 import StorefrontSkeleton from "@/components/theme-engine/StorefrontSkeleton";
@@ -16,15 +18,13 @@ import {
   resolveThemeSettingsDynamicSources,
   type DynamicResolveContext,
 } from "@/lib/resolve-dynamic-sources";
-import type { ThemeSettingsV3, StoreData, Product, Collection } from "@/types";
-
-interface PageContextData {
-  /** "home" | "product" | "collection" | "cart" | "page" | "404" | … */
-  type: string;
-  title?: string;
-  handle?: string;
-  data?: Record<string, unknown>;
-}
+import type {
+  ThemeSettingsV3,
+  StoreData,
+  Product,
+  Collection,
+  PageContextData,
+} from "@/types";
 
 interface ByotThemeBoundaryProps {
   bundleUrl: string;
@@ -73,6 +73,21 @@ interface ByotThemeBoundaryProps {
    * conflict between the two React trees.
    */
   seoContent?: ReactNode;
+  /**
+   * Isolated theme SSR (opt-in, `NUMU_SSR_THEME=1`) — the theme's OWN markup,
+   * rendered server-side in a sandboxed child process from the identical mount
+   * ctx (`src/lib/ssr-theme.ts`). When present it is injected into the mount
+   * container as raw HTML and the bundle ADOPTS it via `hydrateRoot`
+   * (`ctx.hydrate`), so the visitor sees the real theme in the first paint —
+   * no skeleton, no blank flash — instead of waiting for the bundle.
+   *
+   * Null on every path where SSR is off, the theme isn't server-capable, or
+   * the render failed: the component then behaves exactly as before. It is
+   * deliberately mutually exclusive with `seoContent` — the theme's own markup
+   * is strictly better for a crawler than the platform's semantic baseline,
+   * and rendering both would duplicate the page's content.
+   */
+  ssrHtml?: string | null;
 }
 
 // The two shapes a bundle's `mount` may return:
@@ -105,6 +120,11 @@ interface BundleMountProps {
   themeSettings: ThemeSettingsV3;
   storeData: StoreData;
   page?: PageContextData;
+  /** Isolated SSR — tells the SDK the container already holds server-rendered
+   *  markup for this exact ctx, so it adopts it via `hydrateRoot` instead of
+   *  rendering from scratch. Ignored (plain mount) on an empty container, so
+   *  a failed server render degrades silently. */
+  hydrate?: boolean;
   /** Visitor's active locale (Phase 3.6). Bundles forward this into
    *  NuMuProvider as `initialLocale`. Older bundles that don't read it
    *  fall through to `store.default_language` as before. */
@@ -307,6 +327,41 @@ function postBundleError(
   }
 }
 
+/**
+ * The mount container when the theme was server-rendered.
+ *
+ * `memo` here is load-bearing, not an optimisation. React re-applies
+ * `dangerouslySetInnerHTML` on the FIRST update after hydration even when the
+ * `__html` string is byte-identical — measured: the server markup was hydrated
+ * fine, then the very next render (a `setState` elsewhere in this component)
+ * called `set innerHTML` with the same 39,745 characters, destroying all 11
+ * server nodes and recreating them. The theme then mounted into a container
+ * that had just been rebuilt, so `hydrate` was pointless and the whole subtree
+ * was rendered twice.
+ *
+ * Memoising on a stable `html` string + a stable ref object means this element
+ * never re-renders, so React never touches its children again and the theme's
+ * `hydrateRoot` adopts the original DOM. Nothing here may depend on changing
+ * state — that is the entire point.
+ */
+const SsrThemeContainer = memo(function SsrThemeContainer({
+  html,
+  containerRef,
+}: {
+  html: string;
+  containerRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      ref={containerRef}
+      // The server markup belongs to the THEME's React root, not this one —
+      // host React must not try to reconcile it.
+      suppressHydrationWarning
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+});
+
 export default function ByotThemeBoundary({
   bundleUrl,
   cssUrl,
@@ -318,11 +373,15 @@ export default function ByotThemeBoundary({
   fallback,
   routeFallback,
   seoContent,
+  ssrHtml,
 }: ByotThemeBoundaryProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<BundleHandle | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [loading, setLoading] = useState(true);
+  // With server-rendered theme markup already on screen there is nothing to
+  // wait for — showing a skeleton over real content would be a regression.
+  const hasSsrHtml = typeof ssrHtml === "string" && ssrHtml.length > 0;
+  const [loading, setLoading] = useState(!hasSsrHtml);
   // ENG-2 — set once the grace window elapses if the mounted bundle rendered
   // no meaningful content into the container, so we can show `routeFallback`.
   const [bundleEmpty, setBundleEmpty] = useState(false);
@@ -334,7 +393,10 @@ export default function ByotThemeBoundary({
   const [hydrated, setHydrated] = useState(false);
   const hasSeoContent = seoContent != null;
   useEffect(() => {
-    if (hasSeoContent) setHydrated(true);
+    // Only meaningful for the ADR-7 content layer. With server-rendered theme
+    // markup there is no content layer on screen to drop, and skipping the
+    // state change removes a render that would otherwise touch the container.
+    if (hasSeoContent && !hasSsrHtml) setHydrated(true);
   }, [hasSeoContent]);
   // Phase 2.4 — store nav menus injected once by the layout. Stable per
   // session; read here (non-throwing) and forwarded into every mount ctx.
@@ -415,6 +477,13 @@ export default function ByotThemeBoundary({
           locale: effectiveLocale,
           demo: computeDemo(),
           navigation,
+          // Isolated SSR: the container already holds this theme's markup for
+          // this exact ctx, so the SDK adopts it with `hydrateRoot` instead of
+          // re-rendering from scratch (no flash, no double paint). Guarded on
+          // the container actually still having content — the SDK downgrades
+          // to a plain client mount on an empty container anyway, but not
+          // asking for hydration we can't honour keeps the intent honest.
+          hydrate: hasSsrHtml && el.childNodes.length > 0,
         });
         // Don't tear the skeleton down the instant mount() returns:
         // createRoot().render() commits ASYNCHRONOUSLY (React 19), so the
@@ -684,18 +753,35 @@ export default function ByotThemeBoundary({
       {/* ENG-2 — keep the bundle container mounted always; HIDE (not unmount)
           it when the bundle rendered blank so a late async render can still
           reconcile underneath the fallback without forcing a remount. */}
-      <div
-        key="byot-bundle-container"
-        ref={containerRef}
-        style={bundleEmpty ? { display: "none" } : undefined}
-      >
-        {/* ADR-7 content layer — crawler/no-JS baseline, removed on hydration.
-            Rendering it INSIDE the container keeps it in the same box the
-            theme will occupy (no layout shift when it goes) and means that
-            even if the removal effect never ran, the bundle's
-            `createRoot(el)` would clear it on its first commit. */}
-        {!hydrated && seoContent ? seoContent : null}
-      </div>
+      {/* Two shapes of the same container, because React forbids children
+          alongside dangerouslySetInnerHTML. */}
+      {hasSsrHtml ? (
+        /* Isolated SSR — the theme's own server-rendered markup, adopted by
+           `hydrateRoot` when the bundle mounts. Rendered through a memoised
+           child so no later state change in this component can make React
+           re-apply the innerHTML and blow the server DOM away (see
+           SsrThemeContainer). Deliberately carries no `bundleEmpty` styling:
+           a server-rendered theme is by definition not empty, and making the
+           element depend on changing state would defeat the memo. */
+        <SsrThemeContainer
+          key="byot-bundle-container"
+          html={ssrHtml as string}
+          containerRef={containerRef}
+        />
+      ) : (
+        <div
+          key="byot-bundle-container"
+          ref={containerRef}
+          style={bundleEmpty ? { display: "none" } : undefined}
+        >
+          {/* ADR-7 content layer — crawler/no-JS baseline, removed on hydration.
+              Rendering it INSIDE the container keeps it in the same box the
+              theme will occupy (no layout shift when it goes) and means that
+              even if the removal effect never ran, the bundle's
+              `createRoot(el)` would clear it on its first commit. */}
+          {!hydrated && seoContent ? seoContent : null}
+        </div>
+      )}
       {bundleEmpty && !error && (
         <Fragment key="byot-route-fallback">{routeFallback}</Fragment>
       )}

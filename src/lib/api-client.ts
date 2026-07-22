@@ -593,7 +593,13 @@ export const fetchProductBySlug = cache(
     // The single endpoint wraps the result in `{ data: {...} }`.
     const wrapped = await apiFetch<Record<string, any>>(
       `/storefront/store/${storeId}/products/${encodeURIComponent(slug)}`,
-      { tags: [`product:${storeId}:${slug}`], revalidate: 60 },
+      // Two tags on purpose. The per-slug tag is what a single-product edit
+      // busts; the store-wide one is what a change that affects EVERY product
+      // at once busts — a metafield definition flipped public→private, say,
+      // where enumerating the affected slugs server-side isn't practical.
+      // Without the second tag such a change stays visible to shoppers for the
+      // rest of the ISR window even though the API is already correct.
+      { tags: [`product:${storeId}:${slug}`, `products:${storeId}`], revalidate: 60 },
     );
     let raw: Record<string, any> | null;
     if (wrapped && typeof wrapped === "object" && "data" in wrapped) {
@@ -696,6 +702,8 @@ export interface StorefrontPage {
   body: Record<string, string>;
   seo: Record<string, unknown>;
   template: string;
+  /** Public merchant-defined typed fields (private ones never leave the API). */
+  metafields?: { namespace: string; key: string; type: string; value: unknown }[];
 }
 
 /**

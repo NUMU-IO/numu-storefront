@@ -12,6 +12,8 @@ import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import {
   fetchBlogByHandle,
   fetchArticlesList,
+  pickText,
+  resolveVisitorLang,
   type ArticleSummary,
 } from "@/lib/blogs";
 import Link from "next/link";
@@ -29,8 +31,12 @@ export async function generateMetadata({
   try {
     const store = await fetchStoreByDomain(domain);
     const blog = await fetchBlogByHandle(store.id, handle).catch(() => null);
+    const lang = await resolveVisitorLang(store);
+    const title = blog ? pickText(blog.title, lang) : "";
     return {
-      title: blog ? `${blog.title} | ${store.name}` : `Blog | ${store.name}`,
+      title: title ? `${title} | ${store.name}` : `Blog | ${store.name}`,
+      description:
+        (blog && pickText(blog.description ?? undefined, lang)) || undefined,
     };
   } catch {
     return { title: "Blog" };
@@ -65,17 +71,27 @@ export default async function BlogPage({ params }: PageProps) {
 
   const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
+  const lang = await resolveVisitorLang(store);
+  const isAr = lang === "ar";
+  const blogTitle = pickText(blog.title, lang) || blog.handle;
+  const blogDescription = pickText(blog.description ?? undefined, lang);
 
   // Built-in article list + ENG-2 no-blank backstop for themes with no `blog`
   // template.
   const builtInBlog = (
-    <main className="max-w-3xl mx-auto px-4 py-12" id="main">
-      <h1 className="text-3xl font-semibold mb-2">{blog.title}</h1>
-      {blog.description && (
-        <p className="text-gray-600 mb-6">{blog.description}</p>
+    <main
+      className="max-w-3xl mx-auto px-4 py-12"
+      id="main"
+      dir={isAr ? "rtl" : "ltr"}
+    >
+      <h1 className="text-3xl font-semibold mb-2">{blogTitle}</h1>
+      {blogDescription && (
+        <p className="text-gray-600 mb-6">{blogDescription}</p>
       )}
       {articles.length === 0 ? (
-        <p className="text-gray-600">No articles in this blog yet.</p>
+        <p className="text-gray-600">
+          {isAr ? "لا توجد مقالات في هذه المدونة بعد." : "No articles in this blog yet."}
+        </p>
       ) : (
         <ul className="space-y-6">
           {articles.map((a) => (
@@ -84,15 +100,19 @@ export default async function BlogPage({ params }: PageProps) {
                 href={`/${domain}/blogs/${blog.handle}/${a.handle}`}
                 className="text-xl font-medium underline text-blue-700"
               >
-                {a.title}
+                {pickText(a.title, lang) || a.handle}
               </Link>
               {a.published_at && (
                 <p className="text-xs text-gray-500 mt-1">
-                  {new Date(a.published_at).toLocaleDateString()}
+                  {new Date(a.published_at).toLocaleDateString(
+                    isAr ? "ar-EG" : "en-US",
+                  )}
                 </p>
               )}
-              {a.excerpt && (
-                <p className="text-gray-700 text-sm mt-2">{a.excerpt}</p>
+              {pickText(a.excerpt ?? undefined, lang) && (
+                <p className="text-gray-700 text-sm mt-2">
+                  {pickText(a.excerpt ?? undefined, lang)}
+                </p>
               )}
             </li>
           ))}
@@ -112,9 +132,10 @@ export default async function BlogPage({ params }: PageProps) {
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={themeSettings}
         storeData={store}
+        locale={lang}
         page={{
           type: "blog",
-          title: blog.title,
+          title: blogTitle,
           handle: blog.handle,
           data: { blog, articles },
         }}

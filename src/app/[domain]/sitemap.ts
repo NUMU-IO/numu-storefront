@@ -5,6 +5,7 @@ import {
   fetchProducts,
   fetchCollections,
 } from "@/lib/api-client";
+import { fetchBlogsList, fetchArticlesList } from "@/lib/blogs";
 import {
   resolveStoreDomainFromHeaders,
   storeBlocksIndexing,
@@ -90,10 +91,19 @@ export default async function sitemap(
   let store: { id?: string } | null = null;
   try {
     store = await fetchStoreByDomain(domain);
-  } catch {
+  } catch (err) {
+    // Non-fatal by design — a 500 here is worse than a thin sitemap. But it
+    // must not be SILENT: a store that fails to resolve degrades to exactly
+    // the three static URLs above, which reads like "this store has no
+    // products" rather than "the lookup broke". That is how a resolver gap
+    // went unnoticed until someone counted the <loc> elements.
+    console.error("[sitemap] store resolution failed", { domain, err });
     return entries;
   }
-  if (!store?.id) return entries;
+  if (!store?.id) {
+    console.error("[sitemap] store resolved without an id", { domain });
+    return entries;
+  }
 
   // Indexing gate — a suspended / opted-out store gets an empty sitemap so
   // search engines have no URLs to crawl (pairs with robots.ts Disallow: /).
@@ -121,6 +131,37 @@ export default async function sitemap(
       priority: 0.6,
       lastModified: c.updated_at ? new Date(c.updated_at) : undefined,
     });
+  }
+
+  // Blogs + published articles (phase-3: articles ship sitemap-included
+  // from day 1). Failures are non-fatal like everything else here.
+  const blogs = await fetchBlogsList(store.id).catch(() => []);
+  if (blogs.length > 0) {
+    entries.push({
+      url: `${baseUrl}/blogs`,
+      changeFrequency: "weekly",
+      priority: 0.5,
+    });
+  }
+  for (const b of blogs) {
+    if (!b?.handle) continue;
+    entries.push({
+      url: `${baseUrl}/blogs/${encodeURIComponent(b.handle)}`,
+      changeFrequency: "weekly",
+      priority: 0.5,
+    });
+    const articles = await fetchArticlesList(store.id, b.handle).catch(
+      () => [],
+    );
+    for (const a of articles) {
+      if (!a?.handle) continue;
+      entries.push({
+        url: `${baseUrl}/blogs/${encodeURIComponent(b.handle)}/${encodeURIComponent(a.handle)}`,
+        changeFrequency: "monthly",
+        priority: 0.6,
+        lastModified: a.published_at ? new Date(a.published_at) : undefined,
+      });
+    }
   }
 
   return entries;

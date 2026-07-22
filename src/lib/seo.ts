@@ -192,5 +192,15 @@ export function resolveStoreDomainFromHeaders(
   if (hostname.endsWith(`.${platformDomain}`)) {
     return hostname.slice(0, -(platformDomain.length + 1)) || null;
   }
+  // Dev convenience, mirroring the same rule in `proxy.ts`: `<sub>.localhost`
+  // is always a subdomain. Without this the whole host was handed to
+  // fetchStoreByDomain as if it were a CUSTOM domain, the lookup threw, and
+  // the metadata routes swallowed it — `/sitemap.xml` silently degraded to its
+  // three static URLs (no products, no collections, no blogs) and
+  // `/robots.txt` rendered an error document. Every local SEO check was
+  // therefore measuring the failure path.
+  if (hostname.endsWith(".localhost")) {
+    return hostname.slice(0, -".localhost".length) || null;
+  }
   return hostname;
 }

@@ -9,6 +9,7 @@ import {
   serializeLd,
 } from "@/lib/json-ld";
 import { SsrHomeContent } from "@/components/seo/SsrContentLayer";
+import { resolveThemeSsrHtml } from "@/lib/ssr-theme-request";
 import { headers } from "next/headers";
 import type { ThemeSettingsV3 } from "@/types";
 
@@ -179,6 +180,20 @@ export default async function HomePage({ params }: PageProps) {
       hl.get("x-numu-locale") ||
       (store as { default_language?: string })?.default_language ||
       "en";
+    // ONE page descriptor for both render paths — the server render and the
+    // client mount must receive the identical object or hydration mismatches.
+    const pageCtx = {
+      type: "home" as const,
+      title: store.name,
+      data: { products, collections },
+    };
+    // Isolated theme SSR (dark unless NUMU_SSR_THEME=1). null → today's
+    // behavior: skeleton + client mount, with the content layer for crawlers.
+    const ssrHtml = await resolveThemeSsrHtml({
+      themeSettings,
+      store,
+      page: pageCtx,
+    });
     return (
       <>
         {ldScripts}
@@ -188,11 +203,8 @@ export default async function HomePage({ params }: PageProps) {
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={themeSettings}
           storeData={store}
-          page={{
-            type: "home",
-            title: store.name,
-            data: { products, collections },
-          }}
+          page={pageCtx}
+          ssrHtml={ssrHtml}
           // ADR-7 — store name/description + collection and product links in
           // the initial HTML. Dropped on hydration, before the theme paints.
           seoContent={

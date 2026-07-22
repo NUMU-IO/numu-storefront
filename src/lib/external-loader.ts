@@ -17,13 +17,17 @@
  *   3. Localhost is allowed only when NEXT_PUBLIC_NUMU_ENV !== "production".
  */
 
-const PROD_HOST_SUFFIXES_BUILTIN = ["numueg.app", "numu.io"];
-const DEV_HOSTS = new Set(["localhost", "127.0.0.1"]);
-// Session G (file 08): the dev R2 canary serves theme bundles over the
-// managed r2.dev subdomain (pub-<hash>.r2.dev). DEV-ONLY allow-list —
-// production theme delivery uses cdn.numueg.app via
-// NEXT_PUBLIC_BYOT_BUNDLE_HOSTS, never r2.dev.
-const DEV_HOST_SUFFIXES = ["r2.dev"];
+// Provenance rules (allowlist + digest + code-split refusal) live in
+// `bundle-allowlist.ts` — a server-safe module — so the SSR worker path
+// (src/lib/ssr-theme.ts) enforces the IDENTICAL gates without a second
+// implementation of the trust boundary.
+import {
+  RELATIVE_IMPORT,
+  isAllowedBundleUrl,
+  sha256Hex,
+} from "./bundle-allowlist";
+
+export { isAllowedBundleUrl } from "./bundle-allowlist";
 
 /**
  * Is bundle-checksum verification enforced?
@@ -43,76 +47,8 @@ const DEV_HOST_SUFFIXES = ["r2.dev"];
  * added to the activation payload; earlier installs carry no checksum and are
  * unaffected either way.
  */
-/**
- * A bare `from "./chunk.js"` / `import("./chunk.js")` in a built bundle — the
- * signature of a code-split build whose sibling chunks the stored checksum
- * does not cover.
- */
-const RELATIVE_IMPORT = /(?:from|import)\s*\(?\s*["']\.\.?\//;
-
 function isChecksumEnforced(): boolean {
   return process.env.NEXT_PUBLIC_BYOT_CHECKSUM_ENFORCE === "1";
-}
-
-function isProdEnv(): boolean {
-  // We treat "production" as any environment where dev-only hosts are
-  // forbidden. Explicit NEXT_PUBLIC_NUMU_ENV always wins so a built
-  // bundle can be served on a dev machine for smoke tests without
-  // rebuilding (set NEXT_PUBLIC_NUMU_ENV=development or =staging in
-  // the host's env). Otherwise fall back to NODE_ENV.
-  const explicit = process.env.NEXT_PUBLIC_NUMU_ENV;
-  if (explicit === "production") return true;
-  if (explicit === "development" || explicit === "staging") return false;
-  return process.env.NODE_ENV === "production";
-}
-
-function allowedHostSuffixes(): string[] {
-  const builtin = [...PROD_HOST_SUFFIXES_BUILTIN];
-  const extras = process.env.NEXT_PUBLIC_BYOT_BUNDLE_HOSTS ?? "";
-  for (const raw of extras.split(",")) {
-    const h = raw.trim().toLowerCase().replace(/^\*\./, "");
-    if (h) builtin.push(h);
-  }
-  return builtin;
-}
-
-/**
- * Validate a URL against the BYOT allowlist. Returns true if loading is
- * permitted, false otherwise. Does NOT throw — caller decides how to surface
- * the rejection.
- */
-export function isAllowedBundleUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  const host = parsed.hostname.toLowerCase();
-  const inDev = !isProdEnv();
-
-  if (inDev) {
-    if (DEV_HOSTS.has(host)) return true;
-    // r2.dev canary bundles (https) are allowed in dev only.
-    if (DEV_HOST_SUFFIXES.some((s) => host === s || host.endsWith("." + s)))
-      return true;
-  }
-
-  if (parsed.protocol !== "https:") return false;
-  return allowedHostSuffixes().some(
-    (suffix) => host === suffix || host.endsWith("." + suffix),
-  );
-}
-
-/**
- * Compute the SHA-256 hex digest of a buffer. Used for SRI verification
- * when the marketplace stores a checksum on the version row.
- */
-async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 interface LoadOptions {

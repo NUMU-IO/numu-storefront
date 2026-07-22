@@ -72,10 +72,20 @@ function normalizeRaw(raw: Record<string, any>): ThemeSettingsV3 {
     // branch above, so this never disturbs ?preview_theme_slug.)
     if (raw?.bundle_url) {
       const prev = v3.external_theme ?? null;
+      const outerBundleUrl = String(raw.bundle_url);
+      // Integrity digest for the ACTIVE version's bundle. The envelope's
+      // `bundle_checksum` is authoritative (it describes the outer
+      // bundle_url). The nested `prev.checksum` was captured at activation
+      // for prev.bundle_url — inherit it ONLY when the URLs match, or a
+      // theme update would pair the new bundle with the old digest and
+      // fail closed under NEXT_PUBLIC_BYOT_CHECKSUM_ENFORCE.
+      const checksum =
+        (typeof raw.bundle_checksum === "string" && raw.bundle_checksum) ||
+        (prev?.bundle_url === outerBundleUrl ? (prev?.checksum ?? null) : null);
       return {
         ...v3,
         external_theme: {
-          bundle_url: String(raw.bundle_url),
+          bundle_url: outerBundleUrl,
           css_url: raw.css_url ?? prev?.css_url ?? null,
           mode: prev?.mode ?? "production",
           settings_schema: raw.settings_schema ?? prev?.settings_schema ?? null,
@@ -85,6 +95,7 @@ function normalizeRaw(raw: Record<string, any>): ThemeSettingsV3 {
             (typeof raw.theme_id === "string" ? raw.theme_id : null) ??
             prev?.theme_id ??
             null,
+          checksum: checksum || null,
         },
       };
     }
@@ -189,6 +200,7 @@ function normalizeRaw(raw: Record<string, any>): ThemeSettingsV3 {
 }
 
 function extractExternalTheme(raw: Record<string, any>): ExternalThemeMetadata {
+  const checksum = raw.checksum ?? raw.bundle_checksum ?? null;
   return {
     bundle_url: String(raw.bundle_url),
     css_url: raw.css_url ?? null,
@@ -197,6 +209,7 @@ function extractExternalTheme(raw: Record<string, any>): ExternalThemeMetadata {
     section_schemas: raw.section_schemas ?? null,
     presets: raw.presets ?? null,
     theme_id: typeof raw.theme_id === "string" ? raw.theme_id : null,
+    checksum: typeof checksum === "string" && checksum ? checksum : null,
   };
 }
 

@@ -3,6 +3,7 @@ import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { resolveThemeSsrHtml } from "@/lib/ssr-theme-request";
 import {
   buildBreadcrumbLd,
   buildCollectionLd,
@@ -130,6 +131,27 @@ export default async function CollectionPage({ params }: PageProps) {
       hl.get("x-numu-locale") ||
       (store as { default_language?: string })?.default_language ||
       "en";
+    // ONE page descriptor shared by the server render and the client mount.
+    const pageCtx = {
+      type: "collection" as const,
+      title: collection?.name,
+      handle: slug,
+      // `products` feeds useProducts() (what the grid actually reads
+      // today). `collection` carries name/description + its products
+      // for useCollectionOptional() once the SDK wires the singular
+      // CollectionProvider — harmless until then.
+      data: {
+        products,
+        collections,
+        collection: collection ? { ...collection, products } : undefined,
+      },
+    };
+    // Isolated theme SSR (dark unless NUMU_SSR_THEME=1); null → unchanged.
+    const ssrHtml = await resolveThemeSsrHtml({
+      themeSettings: effectiveTheme,
+      store,
+      page: pageCtx,
+    });
     return (
       <>
         {ldScripts}
@@ -139,20 +161,8 @@ export default async function CollectionPage({ params }: PageProps) {
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={effectiveTheme}
           storeData={store}
-          page={{
-            type: "collection",
-            title: collection?.name,
-            handle: slug,
-            // `products` feeds useProducts() (what the grid actually reads
-            // today). `collection` carries name/description + its products
-            // for useCollectionOptional() once the SDK wires the singular
-            // CollectionProvider — harmless until then.
-            data: {
-              products,
-              collections,
-              collection: collection ? { ...collection, products } : undefined,
-            },
-          }}
+          page={pageCtx}
+          ssrHtml={ssrHtml}
           routeFallback={builtInCollection}
           // ADR-7 — semantic collection body (title, description, the grid as
           // real product links with prices) in the initial HTML. Dropped on

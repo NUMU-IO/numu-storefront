@@ -19,18 +19,36 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
 
-  // Allow the merchant hub's V3 customizer iframe (default :8080) to load
-  // Next dev assets and HMR. Without this, Next 16 blocks /_next/static/*
-  // requests from the iframe with "Blocked cross-origin request" warnings.
-  // Production builds don't need this — it's a dev-only escape hatch.
+  // Allow the merchant hub's V3 customizer iframe (default :8080), the theme
+  // dist server (:5173) and plain `127.0.0.1` browsing to reach Next dev
+  // resources. Production builds don't need this — it's a dev-only escape
+  // hatch.
+  //
+  // ⚠️ These MUST be bare hostnames. Next matches them against the request's
+  // hostname only (`isCsrfOriginAllowed` → `matchWildcardDomain`), so a
+  // port-qualified entry like "127.0.0.1:8080" can never match anything and is
+  // silently inert. The list used to be entirely port-qualified, which meant
+  // it did nothing at all.
+  //
+  // This is not cosmetic. Next only hardcodes `localhost` and `*.localhost`,
+  // so browsing `http://127.0.0.1:3100` was blocked — and a blocked
+  // `/_next/webpack-hmr` upgrade is FATAL in Next 16, not merely "no HMR":
+  // `experimental.reactDebugChannel` defaults to true, the RSC Flight client's
+  // debug channel is fed exclusively by that socket, and `hydrate()` awaits it.
+  // Kill the socket and hydration parks forever with no error — React loads,
+  // the skeleton renders, no effect ever runs, so no theme bundle and no
+  // interactivity. Measured: `localhost:3100` → 498 React fibers and the theme
+  // mounted; `127.0.0.1:3100` → 1 fiber and a permanent skeleton.
+  // (Escape hatch if a socket ever dies for another reason — a proxy, a port
+  // clash: set `experimental.reactDebugChannel: false`, which decouples
+  // hydration from HMR so the failure degrades to "no hot reload".)
   ...(isProd
     ? {}
     : {
         allowedDevOrigins: [
-          "localhost:8080",
-          "127.0.0.1:8080",
-          "localhost:5173",
-          "127.0.0.1:5173",
+          "127.0.0.1",
+          "localhost",
+          "*.localhost",
         ],
       }),
 

@@ -9,6 +9,7 @@ import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { resolveThemeSsrHtml } from "@/lib/ssr-theme-request";
 import BuiltInProductDetail from "@/components/storefront/BuiltInProductDetail";
 import {
   buildBreadcrumbLd,
@@ -227,6 +228,22 @@ export default async function ProductPage({ params }: PageProps) {
     const hl = await headers();
     const ssrLocale =
       hl.get("x-numu-locale") || store?.default_language || "en";
+    // ONE page descriptor shared by the server render and the client mount —
+    // parity is what keeps hydration from tearing the DOM down.
+    const pageCtx = {
+      type: "product" as const,
+      title: product?.name,
+      handle: slug,
+      data: product
+        ? { product, products: catalogue, collections }
+        : undefined,
+    };
+    // Isolated theme SSR (dark unless NUMU_SSR_THEME=1); null → unchanged.
+    const ssrHtml = await resolveThemeSsrHtml({
+      themeSettings: effectiveTheme,
+      store,
+      page: pageCtx,
+    });
     return (
       <>
         {headExtras}
@@ -236,14 +253,8 @@ export default async function ProductPage({ params }: PageProps) {
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={effectiveTheme}
           storeData={store}
-          page={{
-            type: "product",
-            title: product?.name,
-            handle: slug,
-            data: product
-              ? { product, products: catalogue, collections }
-              : undefined,
-          }}
+          page={pageCtx}
+          ssrHtml={ssrHtml}
           // ENG-2 defense-in-depth: every registered theme ships a `product`
           // template, but if a bundle renders blank fall back to the functional
           // built-in PDP (product is non-null here — the !product BYOT case
