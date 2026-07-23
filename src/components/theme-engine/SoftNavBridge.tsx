@@ -78,9 +78,43 @@ export function SoftNavBridge() {
       router.push(inPathMode ? `/${domain}${href}` : href);
     };
 
+    // Prefetch on hover / touchstart. The SDK's <Link> renders a plain
+    // <a> (not next/link), so nothing prefetches the RSC payload — every
+    // soft nav paid the full server round-trip AFTER the click, which on
+    // a cold PDP measured multiple seconds (page + ViewContent/PageView
+    // events all delayed by it; fast bouncers produced no PDP events at
+    // all). Warming the payload at intent time closes most of that gap.
+    // Delegated + deduped; prefetch is a hint, so failures are ignored.
+    const prefetched = new Set<string>();
+    const onIntent = (e: Event) => {
+      const target = e.target as Element | null;
+      const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a) return;
+      if (a.target && a.target !== "_self") return;
+      if (a.hasAttribute("download")) return;
+      const href = a.getAttribute("href");
+      if (!href || !href.startsWith("/") || href.startsWith("//")) return;
+      if (href.startsWith("/#")) return;
+      const path = window.location.pathname;
+      const inPathMode =
+        path === `/${domain}` || path.startsWith(`/${domain}/`);
+      const full = inPathMode ? `/${domain}${href}` : href;
+      if (prefetched.has(full)) return;
+      prefetched.add(full);
+      try {
+        router.prefetch(full);
+      } catch {
+        /* prefetch is best-effort */
+      }
+    };
+
     window.addEventListener(NAVIGATE_EVENT, onNavigate);
+    document.addEventListener("pointerover", onIntent, { passive: true });
+    document.addEventListener("touchstart", onIntent, { passive: true });
     return () => {
       window.removeEventListener(NAVIGATE_EVENT, onNavigate);
+      document.removeEventListener("pointerover", onIntent);
+      document.removeEventListener("touchstart", onIntent);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, [router, domain]);

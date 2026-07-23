@@ -24,6 +24,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import {
   fbqTrack,
+  pageViewEventId,
   FUNNEL_STEP_TO_META,
   EVENT_NAME_TO_FUNNEL_STEP,
 } from "@/lib/meta-pixel";
@@ -39,13 +40,15 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
   const firstRun = useRef(true);
 
   // PageView on client-side route changes. Skip the very first run — the base
-  // snippet below already fired the initial PageView synchronously.
+  // snippet below already fired the initial PageView synchronously. The shared
+  // per-navigation event_id lets the backend's CAPI PageView (enqueued by
+  // <PageViewTracker>'s /track POST) dedupe against this browser fire.
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
       return;
     }
-    fbqTrack("PageView", {});
+    fbqTrack("PageView", {}, pageViewEventId(pathname));
   }, [pathname]);
 
   // Bridge theme/SDK events → browser Pixel. The SDK already POSTs the CAPI
@@ -77,7 +80,12 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
     `n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;` +
     `t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}` +
     `(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');` +
-    `${inits}fbq('track','PageView');` +
+    // Mint the initial PageView's event_id and seed window.__numu_pv so
+    // <PageViewTracker>'s first-party /track POST reuses the SAME id
+    // (pageViewEventId) — that's what lets CAPI dedupe the initial PageView.
+    `${inits}var pvid=(self.crypto&&crypto.randomUUID)?crypto.randomUUID():Date.now()+'-'+Math.round(Math.random()*1e9);` +
+    `window.__numu_pv={path:location.pathname,id:pvid};` +
+    `fbq('track','PageView',{},{eventID:pvid});` +
     `window.__numuPixelIds=${JSON.stringify(pixelIds)};`;
 
   return (
