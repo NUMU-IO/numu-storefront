@@ -145,6 +145,23 @@ export interface BlockProps {
   settings: Record<string, any>;
 }
 
+/**
+ * The page descriptor handed to a theme bundle's mount ctx — which template
+ * to render and the data for it.
+ *
+ * Lives here (not in `ByotThemeBoundary`) because BOTH render paths need it:
+ * the client boundary and the server-side SSR request builder
+ * (`lib/ssr-theme-request.ts`). The two must pass the SAME descriptor or
+ * hydration mismatches, so they share one type.
+ */
+export interface PageContextData {
+  /** "home" | "product" | "collection" | "cart" | "page" | "404" | … */
+  type: string;
+  title?: string;
+  handle?: string;
+  data?: Record<string, unknown>;
+}
+
 // API response wrapper
 export interface ThemeResolutionResponse {
   store: StoreData;

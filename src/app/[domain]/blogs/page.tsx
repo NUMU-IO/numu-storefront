@@ -17,7 +17,12 @@ import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
-import { fetchBlogsList, type BlogSummary } from "@/lib/blogs";
+import {
+  fetchBlogsList,
+  pickText,
+  resolveVisitorLang,
+  type BlogSummary,
+} from "@/lib/blogs";
 import Link from "next/link";
 import type { Metadata } from "next";
 
@@ -31,7 +36,9 @@ export async function generateMetadata({
   const { domain } = await params;
   try {
     const store = await fetchStoreByDomain(domain);
-    return { title: `Blog | ${store?.name || "Store"}` };
+    const lang = await resolveVisitorLang(store);
+    const heading = lang === "ar" ? "المدونة" : "Blog";
+    return { title: `${heading} | ${store?.name || "Store"}` };
   } catch {
     return { title: "Blog" };
   }
@@ -53,20 +60,32 @@ export default async function BlogsIndexPage({ params }: PageProps) {
 
   const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
   const blogs = await fetchBlogsList(store.id).catch(() => [] as BlogSummary[]);
+  const lang = await resolveVisitorLang(store);
+  const isAr = lang === "ar";
 
   // BYOT fork: hand the blog list off to the theme bundle. Themes
-  // read page.data.blogs and render their own design; built-in
-  // themes get the minimal fallback below.
+  // read page.data.blogs (bilingual dicts, localized via useLocale) and
+  // render their own design; built-in themes get the fallback below.
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
 
   // Built-in listing + ENG-2 no-blank backstop: no theme currently ships a
   // `blogs` template, so without this the route would render blank wherever a
   // nav menu links to it.
   const builtInBlogs = (
-    <main className="max-w-3xl mx-auto px-4 py-12" id="main">
-      <h1 className="text-3xl font-semibold mb-6">Blog</h1>
+    <main
+      className="max-w-3xl mx-auto px-4 py-12"
+      id="main"
+      dir={isAr ? "rtl" : "ltr"}
+    >
+      <h1 className="text-3xl font-semibold mb-6">
+        {isAr ? "المدونة" : "Blog"}
+      </h1>
       {blogs.length === 0 ? (
-        <p className="text-gray-600">No posts yet — check back soon.</p>
+        <p className="text-gray-600">
+          {isAr
+            ? "لا توجد مقالات بعد — تابعنا قريبًا."
+            : "No posts yet — check back soon."}
+        </p>
       ) : (
         <ul className="space-y-4">
           {blogs.map((b) => (
@@ -75,10 +94,12 @@ export default async function BlogsIndexPage({ params }: PageProps) {
                 href={`/${domain}/blogs/${b.handle}`}
                 className="text-xl font-medium underline text-blue-700"
               >
-                {b.title}
+                {pickText(b.title, lang) || b.handle}
               </Link>
-              {b.description && (
-                <p className="text-gray-600 text-sm mt-1">{b.description}</p>
+              {pickText(b.description ?? undefined, lang) && (
+                <p className="text-gray-600 text-sm mt-1">
+                  {pickText(b.description ?? undefined, lang)}
+                </p>
               )}
             </li>
           ))}
@@ -98,7 +119,12 @@ export default async function BlogsIndexPage({ params }: PageProps) {
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={themeSettings}
         storeData={store}
-        page={{ type: "blogs", title: "Blog", data: { blogs } }}
+        locale={lang}
+        page={{
+          type: "blogs",
+          title: isAr ? "المدونة" : "Blog",
+          data: { blogs },
+        }}
         routeFallback={builtInBlogs}
       />
     );

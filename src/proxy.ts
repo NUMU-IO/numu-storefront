@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PLATFORM_DOMAIN = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
+// Port-stripped, because every comparison below is against a port-stripped
+// hostname. The documented dev value is `localhost:3100`, so leaving the port
+// on made `hostname.endsWith(".localhost:3100")` permanently false and silently
+// disabled the host-rewrite branches in dev. `api-client.ts` strips both sides
+// for exactly this reason; this file didn't. Harmless in prod (`numueg.app`
+// carries no port) — which is why it went unnoticed.
+const PLATFORM_DOMAIN = (process.env.NUMU_PLATFORM_DOMAIN || "numueg.app").split(
+  ":",
+)[0];
 
 // Subdomain segments that come AFTER the [domain] in path routing.
 // When the proxy sees one of these as the first path segment, it
@@ -31,8 +39,15 @@ const STATIC_FILE_EXT_RE =
   /\.(?:js|mjs|cjs|css|map|json|txt|xml|ico|png|jpe?g|gif|svg|webp|avif|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|pdf|wasm)$/i;
 
 // Dotted paths that MUST route through the subdomain→path rewrite so the
-// `[domain]/{robots,sitemap}.ts` metadata handlers are reachable per store.
-const TENANT_METADATA_PATHS = new Set(["/robots.txt", "/sitemap.xml"]);
+// `[domain]/sitemap.ts` metadata handler is reachable per store.
+//
+// `/robots.txt` is deliberately NOT here. Next registers `robots` only from
+// `app/robots.ts` (unlike `sitemap`, which is segment-aware), so the handler
+// lives at the root and must be reached at the root — rewriting it under the
+// store segment routes it to a file that doesn't exist. It still renders
+// per-store output: it resolves the store from the Host header, same as the
+// sitemap does when Next calls it without params.
+const TENANT_METADATA_PATHS = new Set(["/sitemap.xml"]);
 
 // Phase 6 — locale URL prefixes. We accept any 2-character ISO 639-1
 // code in the first path segment; the SSR layer validates against the
@@ -110,9 +125,10 @@ export function proxy(request: NextRequest) {
   }
 
   // Skip Next internals + genuine static assets. Unlike the old naive
-  // `pathname.includes(".")`, this lets the dotted tenant metadata routes
-  // (/robots.txt, /sitemap.xml) fall through to the subdomain→path rewrite
-  // below while real assets (.js/.css/images/fonts/.map/…) still bypass.
+  // `pathname.includes(".")`, this lets `/sitemap.xml` fall through to the
+  // subdomain→path rewrite below while real assets (.js/.css/images/fonts/
+  // .map/…) still bypass. `/robots.txt` bypasses here on purpose — it is
+  // served by the ROOT `app/robots.ts` (see TENANT_METADATA_PATHS above).
   if (
     !TENANT_METADATA_PATHS.has(pathname) &&
     (pathname.startsWith("/_next/") || STATIC_FILE_EXT_RE.test(pathname))
@@ -150,8 +166,11 @@ export function proxy(request: NextRequest) {
     //
     // Production never hits this branch — subdomain hostnames route
     // via the hostname check above.
+    // `/robots.txt` + `/sitemap.xml` rebase too: they only exist under
+    // `[domain]`, so a bare apex hit would 404 in dev (prod rewrites at
+    // the edge before this ever runs). Same two signals resolve the store.
     const firstSeg = pathname.split("/")[1] || "";
-    if (POST_DOMAIN_SEGMENTS.has(firstSeg)) {
+    if (POST_DOMAIN_SEGMENTS.has(firstSeg) || TENANT_METADATA_PATHS.has(pathname)) {
       const subdomain =
         subdomainFromReferer(request) || subdomainFromCookie(request);
       if (subdomain) {
@@ -294,6 +313,19 @@ export function proxy(request: NextRequest) {
   // segment (the dev path-segment routing case).
   const passthrough = NextResponse.next();
   passthrough.headers.set("x-numu-pathname", pathname);
+  // …and the locale, for the same reason. Resolution used to live only inside
+  // the rewrite branch, so on the path-segment entry point `?locale=ar` was a
+  // no-op: the copy switched to Arabic (the cookie reaches the client) while
+  // `<html dir>` stayed `ltr`, i.e. Arabic text in an LTR layout. Production
+  // stores are all on subdomains so this never shipped, but it made every
+  // local RTL check quietly untrustworthy.
+  const apexLocale =
+    request.nextUrl.searchParams.get("locale") ||
+    request.cookies.get("numu_locale")?.value ||
+    "";
+  if (apexLocale) {
+    passthrough.headers.set("x-numu-locale", apexLocale);
+  }
   return passthrough;
 }
 

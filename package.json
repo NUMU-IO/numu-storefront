@@ -19,7 +19,7 @@
     "@googlemaps/js-api-loader": "^2.0.2",
     "@numueg/theme-sdk": "^0.10.1",
     "@types/qrcode": "^1.5.6",
-    "next": "^16.2.9",
+    "next": "^16.2.11",
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

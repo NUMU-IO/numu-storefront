@@ -25,9 +25,19 @@ async function resolveDomain(
 /**
  * Per-store robots.txt.
  *
+ * ⚠️ This file MUST live at the app root, not under `[domain]/` like its
+ * sibling `sitemap.ts`. Next treats `sitemap` as a segment-aware metadata
+ * convention (that's what `generateSitemaps()` is for) but registers `robots`
+ * only from `app/robots.ts`. Nested, it was never routed at all: every
+ * `/robots.txt` — on the subdomain host AND the path-routing host — fell
+ * through to the catch-all and returned a Next *error document*, which
+ * crawlers read as "this site has no robots.txt and something is broken".
+ * The store is resolved from the request host anyway (see below), so the root
+ * position costs nothing.
+ *
  * Blocks crawlers from internal + transactional paths (cart, account,
  * checkout, search) and points them at the store's sitemap.xml. The
- * actual sitemap entry list lives in sitemap.ts.
+ * actual sitemap entry list lives in `[domain]/sitemap.ts`.
  *
  * One nuance: in development we run on path-segment routing
  * (`localhost:3000/<sub>/sitemap.xml`), but in production the edge

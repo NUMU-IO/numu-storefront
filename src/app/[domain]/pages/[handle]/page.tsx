@@ -137,6 +137,10 @@ export default async function CmsPage({ params }: PageProps) {
               title_i18n: page?.title ?? null,
               body_i18n: page?.body ?? null,
               seo: page?.seo ?? null,
+              // Public merchant-defined fields — read by the SDK's
+              // useMetafield("page", ns, key). The backend only ever
+              // sends public ones, so passing through is safe.
+              metafields: page?.metafields ?? [],
             },
           },
         }}

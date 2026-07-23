@@ -46,6 +46,58 @@ function pick(
   return ((locale === "ar" ? f.ar ?? f.en : f.en ?? f.ar) ?? "").toString();
 }
 
+/**
+ * The hub's promotion form stores `icon` as free text. Merchants (and older
+ * seeds) sometimes type an icon NAME ("sparkle", "tag", …) expecting a glyph —
+ * rendering it raw printed literal text like "sparkle" before the message on
+ * every theme. Map the known vocabulary to emoji; hide unknown word-like
+ * values (better no icon than a stray English word); pass real glyphs
+ * (emoji, %, !) through untouched.
+ */
+const ICON_GLYPHS: Record<string, string> = {
+  sparkle: "✨",
+  sparkles: "✨",
+  tag: "🏷️",
+  gift: "🎁",
+  truck: "🚚",
+  shipping: "🚚",
+  fire: "🔥",
+  flame: "🔥",
+  star: "⭐",
+  heart: "❤️",
+  bell: "🔔",
+  megaphone: "📢",
+  announcement: "📢",
+  party: "🎉",
+  celebration: "🎉",
+  bolt: "⚡",
+  zap: "⚡",
+  clock: "⏰",
+  timer: "⏰",
+  crown: "👑",
+  gem: "💎",
+  diamond: "💎",
+  check: "✅",
+  money: "💰",
+  cart: "🛒",
+  package: "📦",
+  box: "📦",
+  rocket: "🚀",
+  snowflake: "❄️",
+  sun: "☀️",
+  moon: "🌙",
+};
+
+function iconGlyph(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+  // Word-like ASCII → treat as an icon name: map it or drop it entirely.
+  if (/^[a-z0-9 _-]+$/i.test(value)) {
+    return ICON_GLYPHS[value.toLowerCase().replace(/[\s_-]+/g, "")] ?? "";
+  }
+  return value; // emoji / symbol — the merchant meant it literally
+}
+
 function post(promotionId: string, action: string, body: unknown): void {
   void fetch(`/api/storefront/promotions/${promotionId}/${action}`, {
     method: "POST",
@@ -146,13 +198,14 @@ export function AnnouncementBar({
       metadata: { surface: "announcement_bar" },
     });
 
+  const glyph = content.icon ? iconGlyph(content.icon) : "";
   const row = (
     <div
       className={`flex items-center gap-2 ${sizeClass} font-medium ${
         isMarquee ? "" : alignClass
       } ${isPulse ? "animate-pulse" : ""} ${isMarquee ? "whitespace-nowrap" : ""}`}
     >
-      {content.icon && <span aria-hidden="true">{content.icon}</span>}
+      {glyph && <span aria-hidden="true">{glyph}</span>}
       {headline && <span>{headline}</span>}
       {body && <span className="opacity-90 hidden sm:inline">— {body}</span>}
     </div>

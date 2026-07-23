@@ -30,6 +30,57 @@ html {
 }
 
 /* ───────────────────────────────────────────────────────────────────────
+   Sticky footer.
+
+   Nothing in the chain from <body> down to the theme's <main> carried a
+   height, so a page whose content is shorter than the viewport left the
+   store's footer floating mid-screen with a band of blank page underneath
+   it. It looks like the page failed to finish loading, and it hits every
+   short page on every theme: /blogs, an empty cart, a search with no
+   results, a 404, a one-paragraph CMS page.
+
+   The chain is <body> › #main › mount container › theme root › <main>.
+   Each link grows, and the theme's own <main> takes up the slack, so the
+   footer is pushed to the bottom of the viewport on short pages and stays
+   in normal flow on tall ones. `flex: 1 0 auto` (never shrink) so a tall
+   page is untouched.
+
+   `100svh`, not `100vh`: on mobile the dynamic browser chrome makes 100vh
+   taller than what you can actually see, which would reintroduce the gap
+   as a scroll.
+   ─────────────────────────────────────────────────────────────────────── */
+body:has(> #main) {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+#main {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The BYOT mount container and the theme's own root are bare <div>s with no
+   height of their own; both have to pass the growth down. `min-width: 0`
+   keeps a flex item from refusing to shrink below its content's intrinsic
+   width — without it a wide table or a long unbroken string in a section
+   would force horizontal page scroll. */
+#main > div,
+#main > div > [data-theme] {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Whichever <main> the page ended up with — the theme's, or the host's own
+   built-in template when the theme ships none for this route. */
+#main main {
+  flex: 1 0 auto;
+}
+
+/* ───────────────────────────────────────────────────────────────────────
    NUMU house brand tokens — mirror numo-merchant-hub's identity (navy +
    saffron + warm paper, IBM Plex Sans Arabic / Reem Kufi, 16px radius).
    These power the host's DEFAULT / fallback pages (404, "no content yet",
