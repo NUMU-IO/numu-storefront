@@ -9,8 +9,10 @@
 import { useEffect, useRef } from "react";
 import { trackFunnel } from "@/lib/meta-pixel";
 
-/** Mark a dedupe key as fired; returns false if it was already fired. */
-function claim(dedupeKey?: string): boolean {
+/** Mark a dedupe key as fired; returns false if it was already fired.
+ *  Exported so imperative call sites (e.g. AddPaymentInfo on checkout
+ *  submit) share the same sessionStorage-marker dedupe as the trackers. */
+export function claim(dedupeKey?: string): boolean {
   if (!dedupeKey) return true;
   try {
     const k = `numu_evt_${dedupeKey}`;
@@ -87,6 +89,7 @@ export function CartFunnelTracker({
               variant_id?: string;
               id?: string;
               quantity?: number;
+              price?: number; // unit price snapshot in CENTS (adapt-cart)
             }>;
           };
           const items = Array.isArray(cart?.items) ? cart.items : [];
@@ -102,9 +105,14 @@ export function CartFunnelTracker({
           if (ids.length) {
             data.content_ids = ids;
             data.content_type = "product";
+            // item_price in MAJOR units — without it TikTok's contents
+            // mapper (toTikTokProps) falls back to price: 0 per line.
             data.contents = items.map((li) => ({
               id: li.product_id || li.variant_id || li.id,
               quantity: Number(li.quantity) || 1,
+              ...(typeof li.price === "number" && li.price > 0
+                ? { item_price: li.price / 100 }
+                : {}),
             }));
           }
         }

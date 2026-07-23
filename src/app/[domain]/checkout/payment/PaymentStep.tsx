@@ -17,7 +17,8 @@ import {
   patchCheckoutState,
   readCheckoutState,
 } from "@/lib/checkout-state";
-import { trackFunnel } from "@/lib/meta-pixel";
+import { getSessionFingerprint, trackFunnel } from "@/lib/meta-pixel";
+import { claim } from "@/components/tracking/FunnelTracker";
 
 /**
  * Step 3 — payment method picker.
@@ -287,7 +288,11 @@ export function PaymentStep() {
           (c.gateway === "paymob" && method === "paymob_card")),
     );
     // Meta AddPaymentInfo — fired when the buyer confirms a payment method.
-    trackFunnel("add_payment_info", { payment_method: method });
+    // Deduped per session + method: back/forward re-submits don't double-fire,
+    // while a genuine method change still emits a fresh event.
+    if (claim(`api_${getSessionFingerprint()}_${method}`)) {
+      trackFunnel("add_payment_info", { payment_method: method });
+    }
     patchCheckoutState({
       payment_method: method,
       cod_requested: codSelected,

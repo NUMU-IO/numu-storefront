@@ -22,6 +22,37 @@ interface AddPayload {
   _event_id?: string;
 }
 
+interface AdaptedCartLine {
+  product_id?: string;
+  variant_id?: string;
+  price?: number; // unit price snapshot in CENTS (adapt-cart passthrough)
+  quantity?: number;
+}
+
+/**
+ * Pull value (MAJOR units — Meta/TikTok convention) + currency for the added
+ * line out of the adapted-cart response body. Best-effort: any shape surprise
+ * returns {} and the event still fires without value.
+ */
+function extractLineValue(
+  cart: unknown,
+  payload: AddPayload | null,
+): { value?: number; currency?: string } {
+  if (!cart || typeof cart !== "object" || !payload) return {};
+  const c = cart as { items?: AdaptedCartLine[]; currency?: unknown };
+  if (!Array.isArray(c.items)) return {};
+  const line =
+    (payload.variant_id &&
+      c.items.find((it) => it.variant_id === payload.variant_id)) ||
+    c.items.find((it) => it.product_id === payload.product_id);
+  if (!line || typeof line.price !== "number" || line.price <= 0) return {};
+  const qty = Number(payload.quantity) || 1;
+  return {
+    value: Math.round(line.price * qty) / 100, // cents → major units
+    ...(typeof c.currency === "string" ? { currency: c.currency } : {}),
+  };
+}
+
 export async function POST(req: NextRequest) {
   // Read the payload from a clone so the proxy can still consume req.body.
   let payload: AddPayload | null = null;
@@ -35,6 +66,15 @@ export async function POST(req: NextRequest) {
 
   const contentId = payload?.product_id || payload?.variant_id;
   if (res.ok && contentId) {
+    // Value/currency come from the cart response's snapshotted line price
+    // (variant-aware) — without them Meta/TikTok can't use AddToCart for
+    // value-based optimization or dynamic-ads cart signals.
+    let lineValue: { value?: number; currency?: string } = {};
+    try {
+      lineValue = extractLineValue(await res.clone().json(), payload);
+    } catch {
+      /* non-JSON success body — fire without value */
+    }
     // Post-response so add-to-cart latency is unaffected.
     after(() =>
       fireServerCapi(
@@ -44,6 +84,7 @@ export async function POST(req: NextRequest) {
           content_ids: [contentId],
           content_type: "product",
           num_items: Number(payload?.quantity) || 1,
+          ...lineValue,
         },
         { eventId: payload?._event_id },
       ),

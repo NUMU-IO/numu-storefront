@@ -147,6 +147,7 @@ interface FbqWindow {
   __numu_attribution?: { get(): AttributionEnvelope | null };
   __numu_customer?: { getId(): string | null };
   __numu_session_fp?: string;
+  __numu_pv?: { path: string; id: string };
 }
 
 function w(): FbqWindow | null {
@@ -188,6 +189,26 @@ export function getEventId(): string {
   return typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+}
+
+/**
+ * ONE PageView event_id per navigation, shared between the browser fbq
+ * PageView (<MetaPixel>: inline snippet + route-change effect) and the
+ * first-party /track POST (<PageViewTracker>). Without a shared id the
+ * backend's CAPI PageView can't dedupe against the browser PageView, so
+ * enabling CAPI would double-count every page view in Events Manager.
+ *
+ * The inline snippet seeds `window.__numu_pv` when it fires the initial
+ * PageView; on soft navigations whichever effect runs first mints the id
+ * for that pathname and the other reuses it.
+ */
+export function pageViewEventId(path: string): string {
+  const win = w();
+  if (!win) return getEventId();
+  if (win.__numu_pv?.path === path) return win.__numu_pv.id;
+  const id = getEventId();
+  win.__numu_pv = { path, id };
+  return id;
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -284,14 +305,18 @@ export function trackFunnel(
  * steps that power NUMU's own sessions / bounce / conversion analytics.
  * The browser Meta PageView is <MetaPixel>'s job (initial snippet + its
  * route-change effect) — firing it here too would double every PageView.
- * Known polish item: the backend still enqueues a CAPI PageView for this
- * POST whose event_id doesn't match the un-ID'd browser PageView; sharing
- * one event_id between <MetaPixel> and this call is a follow-up.
+ * The event_id is the shared per-navigation PageView id so the CAPI
+ * PageView the backend enqueues for this POST dedupes against the
+ * browser PageView <MetaPixel> fired for the same navigation.
  */
 export function trackFirstPartyNavigation(
   step: string,
   data: Record<string, unknown> = {},
 ): void {
   if (typeof window === "undefined") return;
-  postTrack({ event_id: getEventId(), step, step_data: cleanData(data) });
+  postTrack({
+    event_id: pageViewEventId(window.location.pathname),
+    step,
+    step_data: cleanData(data),
+  });
 }
