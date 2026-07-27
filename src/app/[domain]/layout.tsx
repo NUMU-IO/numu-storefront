@@ -86,6 +86,12 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
     // path comes from the pathname the proxy stamps on every response.
     // No extra dynamism: this layout already awaits headers()/cookies() below,
     // which is what makes the whole `[domain]` subtree render dynamically.
+    //
+    // The visitor path KEEPS its locale prefix (`/ar/cart`, not `/cart`), so
+    // every Arabic URL in this subtree is self-canonical. It has to be: Google
+    // only honours hreflang on self-canonical pages, and the Arabic entries this
+    // same call advertises were being thrown away because each `/ar/...` URL
+    // declared its English twin canonical.
     const headerList = await headers();
     const visitorPath = visitorPathFromHeaders(headerList, domain);
     const canonical = canonicalFor(store, domain, visitorPath);

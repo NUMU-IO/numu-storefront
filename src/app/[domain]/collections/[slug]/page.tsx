@@ -16,10 +16,13 @@ import {
   canonicalOriginFor,
   buildOpenGraph,
   buildTwitter,
+  localizedPathFor,
+  localizedSeoText,
   storeSocialImage,
   type StoreForSeo,
 } from "@/lib/seo";
 import { headers } from "next/headers";
+import { permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
 
 /**
@@ -45,9 +48,28 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     const storeForSeo = store as unknown as StoreForSeo;
     // Origin via canonicalOriginFor (the ONE implementation) — the local copy
     // this replaces ignored the store's custom domain entirely.
-    const path = `/collections/${slug}`;
-    const title = collection?.name || "Collection";
-    const description = collection?.description || "";
+    const hl = await headers();
+    // The route's own path plus the visitor URL's locale prefix, so
+    // `/ar/collections/x` is its own canonical rather than a declared duplicate
+    // of the English URL (which voided the page's hreflang cluster).
+    //
+    // The slug is the collection's CURRENT one, never the requested one: a
+    // renamed collection still resolves through its slug history, and
+    // canonicalising the retired URL to itself would declare it the real page
+    // and keep the ranking split across both. The page body 301s; this keeps
+    // the head honest for anything reading metadata off the pre-redirect
+    // response.
+    const canonicalSlug = collection?.slug || slug;
+    const path = localizedPathFor(hl, domain, `/collections/${canonicalSlug}`);
+    // Content locale — also honours ?locale= / the numu_locale cookie, matching
+    // what the theme and the SSR content layer render.
+    const locale =
+      hl.get("x-numu-locale") ||
+      (store as { default_language?: string })?.default_language ||
+      "en";
+    const seoText = localizedSeoText(collection, locale);
+    const title = seoText.title || "Collection";
+    const description = seoText.description;
     // The collection's own image, falling back to the store's social image so
     // the card is never blank.
     const image = collection?.image_url || storeSocialImage(storeForSeo);
@@ -80,6 +102,39 @@ export default async function CollectionPage({ params }: PageProps) {
 
   const store = await fetchStoreByDomain(domain);
   const collection = await fetchCollectionBySlug(store.id, slug);
+
+  // ADR-7 — the visitor's locale (see the PDP route). Feeds both the
+  // crawler-facing content layer and the structured data below; read up here
+  // because the canonical redirect just below needs the same header bag.
+  const hl = await headers();
+
+  // Renamed collection: the resolver matched a retired slug (previous_slugs)
+  // and returned the CURRENT collection — send crawlers and shoppers to the
+  // canonical URL. A 301 hands the old URL's ranking to the new one; a 404
+  // throws it away. Redirect BEFORE the product fetch below so a rotted link
+  // doesn't pay for a 500-product query it will never render.
+  //
+  // Store segment and locale segment are both rebuilt by hand, exactly as on
+  // the PDP: `x-numu-host` is stamped only by the host→path rewrite, so its
+  // ABSENCE identifies the local path-routing entry point where dropping the
+  // store segment lands on "Store not found"; and `localizedPathFor` puts back
+  // the `/ar` prefix proxy.ts strips, so an Arabic inbound link isn't 301'd
+  // onto its English twin.
+  //
+  // `encodeURIComponent` because the backend slugifies category names with
+  // `allow_unicode=True`, so a collection slug is legitimately Arabic — and a
+  // raw non-ASCII path in a `Location` header is not a valid redirect. The
+  // comparison above stays on the DECODED forms, which is what `params` holds.
+  if (collection?.slug && collection.slug !== slug) {
+    const storePrefix = hl.get("x-numu-host") ? "" : `/${domain}`;
+    const target = localizedPathFor(
+      hl,
+      domain,
+      `/collections/${encodeURIComponent(collection.slug)}`,
+    );
+    permanentRedirect(`${storePrefix}${target}`);
+  }
+
   // Fetch the collection's products so the bundle's grid has something to
   // render. Without this the listing falls back to an empty catalog
   // (useProducts() does NOT self-fetch) and shows "No results".
@@ -100,11 +155,24 @@ export default async function CollectionPage({ params }: PageProps) {
     (collection as { template_suffix?: string | null } | null)?.template_suffix ?? null,
   );
 
+  const visitorLocale =
+    hl.get("x-numu-locale") ||
+    (store as { default_language?: string })?.default_language ||
+    "en";
+
   // JSON-LD: emit a CollectionPage block + breadcrumbs so search
   // engines surface "Collection: <name>" results with the right URL.
   const baseUrl = canonicalOriginFor(store as unknown as StoreForSeo, domain);
   const collectionLd = collection
-    ? buildCollectionLd({ collection, baseUrl })
+    ? buildCollectionLd({
+        collection,
+        baseUrl,
+        // Arabic when the visitor is on Arabic. The category payload carries no
+        // Arabic columns TODAY, so this resolves to the English name until the
+        // backend exposes `attributes.nameAr` for collections — wired now so the
+        // Arabic URL stops hard-coding English the moment it does.
+        seoText: localizedSeoText(collection, visitorLocale),
+      })
     : null;
   const breadcrumbLd = collection
     ? buildBreadcrumbLd({
@@ -141,12 +209,6 @@ export default async function CollectionPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
-    // ADR-7 — locale for the crawler-facing content layer (see the PDP route).
-    const hl = await headers();
-    const ssrLocale =
-      hl.get("x-numu-locale") ||
-      (store as { default_language?: string })?.default_language ||
-      "en";
     // ONE page descriptor shared by the server render and the client mount.
     const pageCtx = {
       type: "collection" as const,
@@ -189,7 +251,7 @@ export default async function CollectionPage({ params }: PageProps) {
               products={products}
               storeName={store?.name}
               storeCurrency={store?.currency}
-              locale={ssrLocale}
+              locale={visitorLocale}
             />
           }
         />

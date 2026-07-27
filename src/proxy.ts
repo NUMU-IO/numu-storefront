@@ -269,6 +269,21 @@ export function proxy(request: NextRequest) {
     // see [domain] params) can resolve the active store for setting
     // `<html lang>` / `<html dir>`.
     res.headers.set("x-numu-pathname", url.pathname);
+    // …and the PRE-strip, visitor-facing pathname (`/ar/products/x`, where
+    // x-numu-pathname holds `/vionne/products/x`).
+    //
+    // The locale prefix is stripped above, BEFORE the header is stamped, so
+    // from `x-numu-pathname` alone a shared layout cannot tell which locale URL
+    // the visitor asked for. Every `/ar/...` URL therefore rebuilt its canonical
+    // as the un-prefixed English twin while hreflang advertised `/ar/...` as a
+    // real alternate — and Google discards a whole hreflang cluster whose
+    // annotations don't sit on self-canonical pages, so Arabic could not rank at
+    // all despite being served in full.
+    //
+    // A SECOND header rather than a changed one: `x-numu-pathname` has other
+    // readers (the root layout's <html lang>/<html dir> store lookup, the
+    // password gate, the checkout layout) that want the REWRITTEN form.
+    res.headers.set("x-numu-visitor-path", pathname);
 
     // Locale resolution (Phase 3.6 + Phase 6). Order of precedence:
     //   1. URL prefix `/{locale}/...` — explicit, sharable. Stripped
@@ -313,6 +328,10 @@ export function proxy(request: NextRequest) {
   // segment (the dev path-segment routing case).
   const passthrough = NextResponse.next();
   passthrough.headers.set("x-numu-pathname", pathname);
+  // Nothing is stripped on this branch, so the visitor-facing pathname IS the
+  // request pathname — stamped anyway so every storefront response carries the
+  // header and no reader has to know which branch produced it.
+  passthrough.headers.set("x-numu-visitor-path", pathname);
   // …and the locale, for the same reason. Resolution used to live only inside
   // the rewrite branch, so on the path-segment entry point `?locale=ar` was a
   // no-op: the copy switched to Arabic (the cookie reaches the client) while

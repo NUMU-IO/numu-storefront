@@ -21,6 +21,8 @@ import {
   alternatesFor,
   canonicalFor,
   canonicalOriginFor,
+  localizedPathFor,
+  localizedSeoText,
   productOgProperties,
   storeRobots,
   NOINDEX_ROBOTS,
@@ -28,7 +30,7 @@ import {
 } from "@/lib/seo";
 import { SsrProductContent } from "@/components/seo/SsrContentLayer";
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -58,16 +60,37 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     // so a store on a verified custom domain canonicalised its PDPs onto the
     // platform subdomain instead.
     const storeForSeo = store as unknown as StoreForSeo;
-    const path = `/products/${slug}`;
+    const hl = await headers();
+    // The route's own path, carrying the visitor URL's locale prefix, so
+    // `/ar/products/x` canonicalises to ITSELF instead of to its English twin
+    // (which made Google discard the page's whole hreflang cluster).
+    //
+    // The slug is the product's CURRENT one, never the requested one: a
+    // renamed product still resolves through its slug history, so
+    // `/products/<old-slug>` gets a real payload — and canonicalising THAT
+    // URL to itself would declare the retired URL the real page and keep the
+    // ranking split across both instead of consolidating it on the new one.
+    // (The page body 301s; this keeps the head honest for anything reading
+    // metadata off the pre-redirect response.)
+    const canonicalSlug = product?.slug || slug;
+    const path = localizedPathFor(hl, domain, `/products/${canonicalSlug}`);
     const canonical = canonicalFor(storeForSeo, domain, path);
+    // Content locale is a SEPARATE signal from the URL prefix above: it also
+    // honours `?locale=` and the `numu_locale` cookie, matching what the theme,
+    // the SSR content layer and `<html lang>` render.
+    const locale = hl.get("x-numu-locale") || store?.default_language || "en";
     // Entity title only — the `[domain]` layout's title template appends the
-    // store name.
-    const ptitle = product?.seo_title || product?.name || "Product";
-    const pdesc = product?.seo_description || product?.description || "";
-    // OG/Twitter cards must mirror the merchant's SEO edits
-    // (seo_title/seo_description), not just name/description — these tags are
-    // what social platforms and link-preview tools actually render.
-    const ogTitle = product?.seo_title || product?.name || "Product";
+    // store name. OG/Twitter reuse the same strings so the cards mirror the
+    // merchant's SEO edits (seo_title/seo_description) rather than plain
+    // name/description — these tags are what link-preview tools render.
+    // `/ar/...` used to emit the English seo_title/seo_description here, i.e.
+    // described an indexable Arabic URL in the one language an Arabic query
+    // can't match.
+    const seoText = localizedSeoText(product, locale);
+    // "Product" is the last-resort default, for a payload with no usable copy
+    // in either language (a null product on a 404, say).
+    const ptitle = seoText.title || "Product";
+    const pdesc = seoText.description;
     const productActive =
       String(product?.status ?? "active").toLowerCase() === "active";
     return {
@@ -75,7 +98,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       description: pdesc,
       alternates: alternatesFor(storeForSeo, domain, path),
       openGraph: {
-        title: ogTitle,
+        title: ptitle,
         description: pdesc,
         // No `type` on purpose. A PDP must declare og:type=product, but Next's
         // OpenGraphType union has no "product" and its renderer THROWS on an
@@ -103,7 +126,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         // two previews identical instead of pairing a branded card on Facebook
         // with a bare product photo on X.
         card: "summary_large_image",
-        title: ogTitle,
+        title: ptitle,
         description: pdesc,
       },
       // noindex a draft/archived product or a non-indexable store.
@@ -178,6 +201,44 @@ export default async function ProductPage({ params }: PageProps) {
     notFound();
   }
 
+  // ADR-7 — the visitor's locale, from the `x-numu-locale` the proxy stamps
+  // (URL prefix › ?locale › cookie › store default). Feeds BOTH the
+  // crawler-facing content layer and the structured data below; this route
+  // already renders dynamically (the layout reads headers/cookies) so reading
+  // it here costs nothing.
+  const hl = await headers();
+
+  // Renamed product: the backend resolved a retired slug (previous_slugs) and
+  // returned the CURRENT product — send crawlers and shoppers to the canonical
+  // URL. A 301 hands the old URL's accumulated ranking to the new one; the 404
+  // this replaces threw it away.
+  //
+  // Two prefixes have to be rebuilt by hand, and dropping either turns this
+  // fix into a different kind of link rot:
+  //   - the store segment. On a real store the proxy rewrites host→path so the
+  //     browser's URL has none and a bare `/products/…` is right; under the
+  //     local path-routing entry point (127.0.0.1:3100/testlocal/…) the segment
+  //     IS in the URL and dropping it lands on a store-less path that renders
+  //     "Store not found". `x-numu-host` is stamped only by the rewrite branch,
+  //     so its ABSENCE is what identifies path routing.
+  //   - the LOCALE segment, via the same helper generateMetadata canonicalises
+  //     with. proxy.ts strips `/ar` before the rewrite, so a hand-built
+  //     `/products/<slug>` would 301 every Arabic inbound link onto its English
+  //     twin — collapsing the hreflang cluster this route works to keep intact.
+  //
+  // Encoded for the same reason the sitemap encodes: a raw non-ASCII path in a
+  // `Location` header is not a valid redirect. The comparison stays on the
+  // DECODED forms, which is what `params` holds.
+  if (product?.slug && product.slug !== slug) {
+    const storePrefix = hl.get("x-numu-host") ? "" : `/${domain}`;
+    const target = localizedPathFor(
+      hl,
+      domain,
+      `/products/${encodeURIComponent(product.slug)}`,
+    );
+    permanentRedirect(`${storePrefix}${target}`);
+  }
+
   // JSON-LD for product + breadcrumb. We render the script tag
   // alongside whatever template the store uses (BYOT or built-in)
   // so the structured data is in the rendered HTML regardless of
@@ -185,15 +246,22 @@ export default async function ProductPage({ params }: PageProps) {
   // single script — Google parses each top-level value separately.
   const storeForSeo = store as unknown as StoreForSeo;
   const baseUrl = canonicalOriginFor(storeForSeo, domain);
+  const visitorLocale = hl.get("x-numu-locale") || store?.default_language || "en";
   // ONE resolved currency for the structured data AND the OG properties —
   // product.currency falls back to "USD" at the fetch boundary, so an EGP
   // store with the field unset would otherwise publish a price in dollars.
   const ldCurrency = product?.currency || store?.currency || "EGP";
+  // `product.name`/`description` are already Arabic here (normalizeProduct
+  // substitutes at the fetch boundary), but `seo_title`/`seo_description` are
+  // English-only columns AND win over the name inside buildProductLd — so
+  // without this an Arabic PDP published an English Product name to Google.
+  const ldSeoText = localizedSeoText(product, visitorLocale);
   const productLd = product
     ? buildProductLd({
         product: { ...product, currency: ldCurrency },
         baseUrl,
         storeName: store?.name,
+        seoText: ldSeoText,
         // Only assert the return window the merchant actually claimed in the
         // hub's SEO settings.
         hasReturnPolicy30d: storeForSeo.seo?.has_return_policy_30d === true,
@@ -280,13 +348,6 @@ export default async function ProductPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
-    // ADR-7 — locale for the crawler-facing content layer. `x-numu-locale` is
-    // stamped by the proxy (URL prefix › ?locale › cookie › store default);
-    // this route already renders dynamically (the layout reads headers/cookies)
-    // so reading it here costs nothing.
-    const hl = await headers();
-    const ssrLocale =
-      hl.get("x-numu-locale") || store?.default_language || "en";
     // ONE page descriptor shared by the server render and the client mount —
     // parity is what keeps hydration from tearing the DOM down.
     const pageCtx = {
@@ -333,7 +394,7 @@ export default async function ProductPage({ params }: PageProps) {
               product={product}
               storeName={store?.name}
               storeCurrency={store?.currency}
-              locale={ssrLocale}
+              locale={visitorLocale}
             />
           }
         />
