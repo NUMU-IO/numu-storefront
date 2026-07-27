@@ -12,8 +12,16 @@
  */
 
 import { PayRecovery } from "./PayRecovery";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
+import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
+
+// One buyer's payable order, reachable by anyone holding the link — never index
+// it. robots.txt is not the guard (Cloudflare serves it for these hosts and
+// allows everything), so the meta tag is the enforceable layer. Robots only:
+// the title stays inherited from the store shell rather than hardcoded English.
+export const metadata: Metadata = { robots: NOINDEX_ROBOTS };
 
 interface PageProps {
   params: Promise<{ domain: string; orderId: string }>;

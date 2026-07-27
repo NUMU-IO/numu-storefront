@@ -6,8 +6,17 @@
  * (`{base}/track/{order_id}`) points here.
  */
 import { TrackOrder } from "./TrackOrder";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
+import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
+
+// Guest-accessible by design, which is exactly why it must not be indexed: the
+// URL carries an order id and the page shows that buyer's status. robots.txt
+// can't be relied on (Cloudflare serves it for these hosts and allows
+// everything), so the meta tag is the enforceable layer. Robots only — the
+// title stays inherited from the store shell rather than hardcoded English.
+export const metadata: Metadata = { robots: NOINDEX_ROBOTS };
 
 export default async function TrackPage({
   params,

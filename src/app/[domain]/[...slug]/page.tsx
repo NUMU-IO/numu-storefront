@@ -15,13 +15,11 @@
  *   dedicated routes; only genuinely-unmatched paths land here.
  *
  * Behavior (mirrors `pages/[handle]/page.tsx`, the established pattern):
- *   - Resolve store + theme.
- *   - For BYOT themes: hand the bundle `page.type = "page"` with the
- *     humanized handle so it renders its `page` template (header +
- *     content + footer) instead of a 404. When the CMS-pages backend
- *     ships, this route will fetch the real page record and pass it
- *     through `page.data.page`; themes already consuming that contract
- *     need no change.
+ *   - Resolve store + theme, and the published CMS record for the handle when
+ *     the merchant authored one.
+ *   - For BYOT themes: hand the bundle `page.type = "page"` with the CMS
+ *     title/body (or the humanized handle) so it renders its `page` template
+ *     (header + content + footer) instead of a 404.
  *   - For built-in themes: render the `page` template.
  *
  * Genuinely-missing RESOURCES (a bad product/collection id) still 404 via
@@ -29,13 +27,29 @@
  * catch-all only absorbs open-ended CONTENT/nav paths so they render a
  * coherent themed page rather than a dead end.
  */
-import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
+import {
+  fetchStoreByDomain,
+  fetchThemeSettings,
+  fetchStorePage,
+} from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { sanitizeHtml } from "@/lib/sanitize-html";
+import {
+  KNOWN_PAGE_HANDLES,
+  TEMPLATE_TYPE_BY_HANDLE,
+  catchAllOwnsHandle,
+} from "@/lib/content-pages";
+import {
+  alternatesFor,
+  storeRobots,
+  type StoreForSeo,
+} from "@/lib/seo";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { NumuDefaultShell } from "@/components/storefront/NumuDefaultShell";
 import { notFound } from "next/navigation";
+import type { ThemeSettingsV3 } from "@/types";
 import type { Metadata } from "next";
 
 // Open param set (can't generateStaticParams). Render on demand but CACHE
@@ -56,52 +70,90 @@ function humanize(handle: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// Standard storefront content pages that themes link to from their default
-// nav/footer. Until the CMS-pages backend (Pages model) lands, a path whose
-// first segment is one of these renders a themed placeholder PAGE (HTTP 200)
-// so expected nav links are never dead ends. ANY other unmatched path is
-// treated as genuinely missing → the theme's 404 template with a real HTTP
-// 404 status (no soft-404 at 200). When the Pages model ships, replace this
-// allowlist with a real page lookup: found → 200, missing → notFound().
-const KNOWN_PAGE_HANDLES = new Set([
-  "about", "about-us", "our-story", "story",
-  "contact", "contact-us",
-  "shipping", "shipping-policy", "delivery", "delivery-policy",
-  "returns", "returns-policy", "refund-policy", "refunds", "exchanges",
-  "faq", "faqs",
-  "track", "track-order", "order-tracking",
-  "terms", "terms-of-service", "terms-and-conditions", "terms-conditions",
-  "privacy", "privacy-policy",
-  "size-guide", "sizing", "size-chart",
-  "lookbook",
-  "stores", "locations", "store-locator", "our-stores",
-  "wholesale",
-  "careers",
-  "gift-cards", "gift-card",
-  "testimonial", "testimonials", "reviews",
-  "blogs", "blog", "news", "journal",
-  "pages",
-  // Account + post-purchase pages a theme templates (bazar ships profile +
-  // order-confirmation) and links to from chrome — without these they fall to
-  // notFound() and the customer/merchant sees the themed 404.
-  "profile", "account",
-  "order-confirmation", "order-confirmed", "thank-you", "thanks",
-]);
+/** Pick a bilingual value for a language, mirroring `pages/[handle]`. */
+function pick(map: Record<string, string> | undefined, lang: string): string {
+  if (!map) return "";
+  return map[lang] || map.en || map.ar || Object.values(map)[0] || "";
+}
+
+/** The store's own language — the one the un-prefixed URL serves. */
+function storeLang(store: unknown): string {
+  return (store as { default_language?: string } | null)?.default_language || "en";
+}
+
+/**
+ * Resolve the theme for the handle's indexing decision. Best-effort: a store
+ * with no installed theme (or a fetch blip) must not turn the whole metadata
+ * call into the catch branch and lose the page title.
+ */
+async function loadThemeSettings(
+  storeId: string,
+): Promise<ThemeSettingsV3 | null> {
+  const raw = await fetchThemeSettings(storeId).catch(() => null);
+  if (!raw) return null;
+  return resolveThemeSettings(raw?.theme_settings || raw || {});
+}
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { domain, slug } = await params;
   const handle = (slug ?? []).join("/");
-  // These synthesized pages render a placeholder until the CMS-pages backend
-  // provides real content — don't let search engines index them.
-  const robots = { index: false, follow: true };
+  const topHandle = (slug?.[0] ?? "").toLowerCase();
+  // A handle backed by neither a theme template nor a published CMS record
+  // renders the synthesized placeholder below — a body-less page that must
+  // never enter the index. `follow` stays on so its themed chrome still passes
+  // link equity through. Deliberately paired with NO canonical: a noindex page
+  // that also names another URL as its original hands Google two contradictory
+  // instructions about the same document, and it resolves them by ignoring one.
+  const placeholderRobots: Metadata["robots"] = { index: false, follow: true };
+
+  // Mirror the render guards below before claiming anything about this URL.
+  // A path this route answers 404 for (handle outside the allowlist, or a
+  // crafted over-long one) must never advertise itself as indexable — a
+  // merchant's published CMS page sitting at an UNROUTED handle would otherwise
+  // put `index, follow` plus a canonical on a page that 404s. Multi-segment
+  // paths are excluded for the same reason: `/about/team` renders the very same
+  // about template as `/about`, so indexing it mints duplicates of a page that
+  // already has its own canonical URL. Returning early also spares the three
+  // API round trips on every garbage URL a crawler walks.
+  if (
+    (slug?.length ?? 0) !== 1 ||
+    handle.length > 120 ||
+    !KNOWN_PAGE_HANDLES.has(topHandle)
+  ) {
+    return { title: humanize(handle), robots: placeholderRobots };
+  }
+
   try {
     const store = await fetchStoreByDomain(domain);
-    return {
-      title: `${humanize(handle)} | ${store?.name || "Store"}`,
-      robots,
-    };
+    const storeForSeo = store as unknown as StoreForSeo;
+    const lang = storeLang(store);
+    // Both reads are React-cache()d, so the page render below shares these
+    // round trips rather than repeating them.
+    const [themeSettings, cmsPage] = await Promise.all([
+      loadThemeSettings(store.id),
+      fetchStorePage(store.id, handle),
+    ]);
+    const title = pick(cmsPage?.title, lang) || humanize(handle);
+
+    // `/{handle}` vs `/pages/{handle}`: the same content at two indexable URLs.
+    // THIS one is the original — it renders the theme's designed template and
+    // is what the theme's own nav links to, while `/pages/{handle}` is the
+    // plainer CMS fallback that canonicalises here (both read the same
+    // predicate, so they can never both claim to be the original). Once real
+    // content backs the handle the page indexes and self-canonicalises; the
+    // store-level gate still wins for a suspended or opted-out store via
+    // storeRobots.
+    const hasCmsBody = pick(cmsPage?.body, lang).trim().length > 0;
+    if (catchAllOwnsHandle(topHandle, themeSettings, hasCmsBody)) {
+      return {
+        title,
+        alternates: alternatesFor(storeForSeo, domain, `/${handle}`),
+        robots: storeRobots(storeForSeo),
+      };
+    }
+    return { title, robots: placeholderRobots };
   } catch {
-    return { title: humanize(handle), robots };
+    return { title: humanize(handle), robots: placeholderRobots };
   }
 }
 
@@ -130,28 +182,11 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
     notFound();
   }
 
-  // Map well-known content handles onto a theme template TYPE so a theme that
-  // ships a dedicated About / Contact template (e.g. bazar's bz-about-section /
-  // bz-contact) renders it instead of the generic `page` body. Unmapped handles
-  // stay `page`; a theme without the mapped template still degrades to the
-  // routeFallback below, so this is additive and never blanks a page.
-  const TEMPLATE_TYPE_BY_HANDLE: Record<string, string> = {
-    about: "about",
-    "about-us": "about",
-    "our-story": "about",
-    story: "about",
-    contact: "contact",
-    "contact-us": "contact",
-    // Account → the theme's `profile` template; post-purchase → its
-    // `order-confirmation` template. Themes without these still degrade to the
-    // routeFallback, so this is additive.
-    profile: "profile",
-    account: "profile",
-    "order-confirmation": "order-confirmation",
-    "order-confirmed": "order-confirmation",
-    "thank-you": "order-confirmation",
-    thanks: "order-confirmation",
-  };
+  // Well-known content handles map onto a dedicated theme template TYPE (see
+  // content-pages.ts, shared with generateMetadata's canonical decision so the
+  // two can't drift). Unmapped handles stay `page`; a theme without the mapped
+  // template still degrades to the routeFallback below, so this is additive and
+  // never blanks a page.
   const pageType = TEMPLATE_TYPE_BY_HANDLE[topHandle] ?? "page";
 
   let store;
@@ -177,18 +212,43 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
     themeRaw?.theme_settings || themeRaw || {},
   );
 
+  // The published CMS record behind this handle, when the merchant authored one
+  // (`/about` and `/pages/about` are the SAME page — this route is just the one
+  // the theme's nav links to). generateMetadata marks the URL indexable once a
+  // record with a body backs it, so the render has to carry that body: without
+  // it the page would advertise `index, follow` while painting the body-less
+  // placeholder — an indexable soft-404. React-cache()d, so metadata and this
+  // render share one round trip.
+  const cmsPage = await fetchStorePage(store.id, handle);
+  const lang = storeLang(store);
+  const resolvedTitle = pick(cmsPage?.title, lang) || humanize(handle);
+  const resolvedBody = pick(cmsPage?.body, lang) || null;
+  // Merchant-authored HTML → sanitize before any dangerouslySetInnerHTML.
+  const safeBody = resolvedBody ? sanitizeHtml(resolvedBody) : null;
+
   const ar = ((store as { default_language?: string })?.default_language || "")
     .toLowerCase()
     .startsWith("ar");
   const emptyMessage = ar
     ? "الصفحة دي لسه مفيهاش محتوى. ارجع للرئيسية لحد ما المحتوى يتنشر."
     : "This page doesn't have any content yet. Head back home while it's being prepared.";
-  const numuPlaceholder = (
+  // Fallback for a theme that ships no template for `pageType`: the real CMS
+  // title + body when one exists (same markup as `pages/[handle]`), else the
+  // branded NUMU "nothing here yet" shell.
+  const routeFallback = safeBody ? (
+    <div className="max-w-4xl mx-auto p-8">
+      <h1 className="text-3xl font-bold">{resolvedTitle}</h1>
+      <div
+        className="prose mt-4 max-w-none"
+        dangerouslySetInnerHTML={{ __html: safeBody }}
+      />
+    </div>
+  ) : (
     <NumuDefaultShell
       ar={ar}
       fullScreen={false}
       eyebrow={(store as { name?: string })?.name || "NUMU"}
-      title={humanize(handle)}
+      title={resolvedTitle}
       message={emptyMessage}
       action={{ href: "/", label: ar ? "الرئيسية" : "Back home" }}
     />
@@ -201,25 +261,33 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
+        bundleChecksum={themeSettings.external_theme.checksum}
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={themeSettings}
         storeData={store}
         page={{
           type: pageType,
-          title: humanize(handle),
+          title: resolvedTitle,
           handle,
-          // body absent until the CMS-pages backend lands; themes render
-          // a graceful placeholder when page.data.page.body is null.
+          // The real CMS record when one is published for this handle; body
+          // stays null otherwise and themes render their graceful placeholder.
           data: {
-            page: { handle, title: humanize(handle), body: null },
+            page: {
+              handle,
+              title: resolvedTitle,
+              body: resolvedBody,
+              title_i18n: cmsPage?.title ?? null,
+              body_i18n: cmsPage?.body ?? null,
+              seo: cmsPage?.seo ?? null,
+            },
             // Surfaced for the order-confirmation/track templates' useOrder().
             ...(orderId ? { order_id: orderId } : {}),
           },
         }}
         // ENG-2: themes with no `page` template render these nav paths blank —
-        // show the branded NUMU placeholder (same as the built-in branch
-        // below) so e.g. /about is never a blank screen.
-        routeFallback={numuPlaceholder}
+        // show the CMS body or the branded NUMU placeholder (same as the
+        // built-in branch below) so e.g. /about is never a blank screen.
+        routeFallback={routeFallback}
       />
     );
   }
@@ -235,5 +303,5 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
     );
   }
 
-  return numuPlaceholder;
+  return routeFallback;
 }

@@ -3,11 +3,23 @@ import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { resolveThemeSsrHtml } from "@/lib/ssr-theme-request";
 import {
   buildBreadcrumbLd,
   buildCollectionLd,
   serializeLd,
 } from "@/lib/json-ld";
+import { SsrCollectionContent } from "@/components/seo/SsrContentLayer";
+import {
+  alternatesFor,
+  canonicalFor,
+  canonicalOriginFor,
+  buildOpenGraph,
+  buildTwitter,
+  storeSocialImage,
+  type StoreForSeo,
+} from "@/lib/seo";
+import { headers } from "next/headers";
 import type { Metadata } from "next";
 
 /**
@@ -25,31 +37,38 @@ interface PageProps {
   params: Promise<{ domain: string; slug: string }>;
 }
 
-function storeBaseUrl(domain: string): string {
-  const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
-  const isProd = process.env.NEXT_PUBLIC_NUMU_ENV === "production";
-  return isProd
-    ? `https://${domain}.${platformDomain}`
-    : `http://localhost:3000/${domain}`;
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { domain, slug } = await params;
   try {
     const store = await fetchStoreByDomain(domain);
     const collection = await fetchCollectionBySlug(store.id, slug);
+    const storeForSeo = store as unknown as StoreForSeo;
+    // Origin via canonicalOriginFor (the ONE implementation) — the local copy
+    // this replaces ignored the store's custom domain entirely.
+    const path = `/collections/${slug}`;
+    const title = collection?.name || "Collection";
+    const description = collection?.description || "";
+    // The collection's own image, falling back to the store's social image so
+    // the card is never blank.
+    const image = collection?.image_url || storeSocialImage(storeForSeo);
     return {
-      title: `${collection?.name || "Collection"} | ${store?.name || "Store"}`,
-      description: collection?.description || "",
-      alternates: {
-        canonical: `${storeBaseUrl(domain)}/collections/${slug}`,
-      },
-      openGraph: {
-        title: collection?.name,
-        description: collection?.description,
-        type: "website",
-        images: collection?.image_url ? [collection.image_url] : undefined,
-      },
+      // Entity title only — the layout's template appends the store name.
+      title,
+      description,
+      alternates: alternatesFor(storeForSeo, domain, path),
+      // og:url was missing entirely, so scrapers fell back to the requested
+      // URL or (worse) the layout's origin-wide value. Built with the shared
+      // helper so siteName + og:locale come along too.
+      openGraph: buildOpenGraph(storeForSeo, {
+        title,
+        description,
+        url: canonicalFor(storeForSeo, domain, path),
+        image,
+      }),
+      // Declaring openGraph REPLACES the layout's, but twitter was still
+      // inherited — so the card showed the STORE's title and image next to
+      // this collection's og:title. Give the route its own.
+      twitter: buildTwitter({ title, description, image }),
     };
   } catch {
     return { title: "Collection" };
@@ -83,7 +102,7 @@ export default async function CollectionPage({ params }: PageProps) {
 
   // JSON-LD: emit a CollectionPage block + breadcrumbs so search
   // engines surface "Collection: <name>" results with the right URL.
-  const baseUrl = storeBaseUrl(domain);
+  const baseUrl = canonicalOriginFor(store as unknown as StoreForSeo, domain);
   const collectionLd = collection
     ? buildCollectionLd({ collection, baseUrl })
     : null;
@@ -122,29 +141,57 @@ export default async function CollectionPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
+    // ADR-7 — locale for the crawler-facing content layer (see the PDP route).
+    const hl = await headers();
+    const ssrLocale =
+      hl.get("x-numu-locale") ||
+      (store as { default_language?: string })?.default_language ||
+      "en";
+    // ONE page descriptor shared by the server render and the client mount.
+    const pageCtx = {
+      type: "collection" as const,
+      title: collection?.name,
+      handle: slug,
+      // `products` feeds useProducts() (what the grid actually reads
+      // today). `collection` carries name/description + its products
+      // for useCollectionOptional() once the SDK wires the singular
+      // CollectionProvider — harmless until then.
+      data: {
+        products,
+        collections,
+        collection: collection ? { ...collection, products } : undefined,
+      },
+    };
+    // Isolated theme SSR (dark unless NUMU_SSR_THEME=1); null → unchanged.
+    const ssrHtml = await resolveThemeSsrHtml({
+      themeSettings: effectiveTheme,
+      store,
+      page: pageCtx,
+    });
     return (
       <>
         {ldScripts}
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
+          bundleChecksum={themeSettings.external_theme.checksum}
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={effectiveTheme}
           storeData={store}
-          page={{
-            type: "collection",
-            title: collection?.name,
-            handle: slug,
-            // `products` feeds useProducts() (what the grid actually reads
-            // today). `collection` carries name/description + its products
-            // for useCollectionOptional() once the SDK wires the singular
-            // CollectionProvider — harmless until then.
-            data: {
-              products,
-              collections,
-              collection: collection ? { ...collection, products } : undefined,
-            },
-          }}
+          page={pageCtx}
+          ssrHtml={ssrHtml}
           routeFallback={builtInCollection}
+          // ADR-7 — semantic collection body (title, description, the grid as
+          // real product links with prices) in the initial HTML. Dropped on
+          // hydration; present even when the theme's template renders.
+          seoContent={
+            <SsrCollectionContent
+              collection={collection}
+              products={products}
+              storeName={store?.name}
+              storeCurrency={store?.currency}
+              locale={ssrLocale}
+            />
+          }
         />
       </>
     );

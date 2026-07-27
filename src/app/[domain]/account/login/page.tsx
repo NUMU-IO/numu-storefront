@@ -10,20 +10,18 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { LoginForm } from "@/components/account/AuthForms";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { domain } = await params;
-  try {
-    const store = await fetchStoreByDomain(domain);
-    return { title: `Sign in | ${store?.name || "Store"}` };
-  } catch {
-    return { title: "Sign in" };
-  }
-}
+// Entity title only — the `[domain]` layout's title template appends the store
+// name, so this no longer needs to resolve the store.
+export const metadata: Metadata = {
+  title: "Sign in",
+  robots: NOINDEX_ROBOTS,
+};
 
 export default async function LoginPage({ params }: PageProps) {
   const { domain } = await params;
@@ -70,6 +68,7 @@ export default async function LoginPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme!.bundle_url!}
+        bundleChecksum={themeSettings.external_theme!.checksum}
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}

@@ -40,6 +40,7 @@ import {
 } from "@/lib/checkout-state";
 import { EG_GOVERNORATES, governorateLabel } from "@/lib/eg-governorates";
 import { getSessionFingerprint, trackFunnel } from "@/lib/meta-pixel";
+import { claim } from "@/components/tracking/FunnelTracker";
 import { trackCartState } from "@/lib/abandoned-cart";
 import {
   fetchCheckoutFieldsConfig,
@@ -769,7 +770,11 @@ export function CheckoutPage() {
         body: JSON.stringify({ phone: submitPhone }),
       }).catch(() => {});
     }
-    trackFunnel("add_payment_info", { payment_method: method });
+    // Deduped per session + method: a failed submit retried (or back/forward)
+    // doesn't double-fire; a genuine method change still emits a fresh event.
+    if (claim(`api_${getSessionFingerprint()}_${method}`)) {
+      trackFunnel("add_payment_info", { payment_method: method });
+    }
 
     try {
       // Resolve cart line items (server cart is authoritative).

@@ -30,7 +30,10 @@ import { AnnouncementBar } from "@/components/promo/AnnouncementBar";
 import { PromoMounts } from "@/components/promo/PromoMounts";
 import { WhatsAppFloat } from "@/components/storefront/WhatsAppFloat";
 import {
+  alternatesFor,
+  canonicalFor,
   canonicalOriginFor,
+  visitorPathFromHeaders,
   storeRobots,
   storeSeoTitle,
   storeSeoDescription,
@@ -73,6 +76,19 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
 
     const origin = canonicalOriginFor(store, domain);
     const base = origin.endsWith("/") ? origin : `${origin}/`;
+    // Per-URL canonical, NOT the store origin.
+    //
+    // Next inherits a layout's `alternates` into every child that doesn't
+    // override them, so a single origin-wide canonical made /products,
+    // /collections, /blogs and every CMS/policy page declare itself a
+    // duplicate of `/` — only the PDP and collection detail overrode it, and
+    // Google drops the rest. A layout can't see the child's params, so the
+    // path comes from the pathname the proxy stamps on every response.
+    // No extra dynamism: this layout already awaits headers()/cookies() below,
+    // which is what makes the whole `[domain]` subtree render dynamically.
+    const headerList = await headers();
+    const visitorPath = visitorPathFromHeaders(headerList, domain);
+    const canonical = canonicalFor(store, domain, visitorPath);
     const title = storeSeoTitle(store);
     const description = storeSeoDescription(store);
     const image = storeSocialImage(store);
@@ -130,11 +146,26 @@ export async function generateMetadata({ params }: { params: Promise<{ domain: s
 
     return {
       metadataBase: new URL(base),
+      // The ONE place the store name is appended to a page title. Next feeds
+      // every child route's title through this template, so a route that ALSO
+      // appended `| ${store.name}` itself printed the store twice —
+      // "Collections | vionneegy · vionneegy" shipped on every non-home page.
+      // Child routes therefore return their own entity title only ("Cart", the
+      // product name, the collection name); a route that genuinely needs the
+      // whole string opts out with `title: { absolute: … }`.
       title: { default: title, template: `%s · ${store.name ?? title}` },
       description,
       applicationName: store.name ?? undefined,
-      alternates: { canonical: base },
-      openGraph: buildOpenGraph(store, { title, description, url: base, image }),
+      alternates: alternatesFor(store, domain, visitorPath),
+      openGraph: buildOpenGraph(store, {
+        title,
+        description,
+        // og:url must be THIS page, not the store root — a shared origin here
+        // told every scraper that /products and /policies/privacy-policy are
+        // the home page.
+        url: canonical,
+        image,
+      }),
       twitter: buildTwitter({ title, description, image }),
       robots: storeRobots(store),
       // Emit exactly ONE icon link to avoid browser-selection ambiguity: the

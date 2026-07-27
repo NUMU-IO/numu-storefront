@@ -17,73 +17,38 @@
  *   3. Localhost is allowed only when NEXT_PUBLIC_NUMU_ENV !== "production".
  */
 
-const PROD_HOST_SUFFIXES_BUILTIN = ["numueg.app", "numu.io"];
-const DEV_HOSTS = new Set(["localhost", "127.0.0.1"]);
-// Session G (file 08): the dev R2 canary serves theme bundles over the
-// managed r2.dev subdomain (pub-<hash>.r2.dev). DEV-ONLY allow-list —
-// production theme delivery uses cdn.numueg.app via
-// NEXT_PUBLIC_BYOT_BUNDLE_HOSTS, never r2.dev.
-const DEV_HOST_SUFFIXES = ["r2.dev"];
+// Provenance rules (allowlist + digest + code-split refusal) live in
+// `bundle-allowlist.ts` — a server-safe module — so the SSR worker path
+// (src/lib/ssr-theme.ts) enforces the IDENTICAL gates without a second
+// implementation of the trust boundary.
+import {
+  RELATIVE_IMPORT,
+  isAllowedBundleUrl,
+  sha256Hex,
+} from "./bundle-allowlist";
 
-function isProdEnv(): boolean {
-  // We treat "production" as any environment where dev-only hosts are
-  // forbidden. Explicit NEXT_PUBLIC_NUMU_ENV always wins so a built
-  // bundle can be served on a dev machine for smoke tests without
-  // rebuilding (set NEXT_PUBLIC_NUMU_ENV=development or =staging in
-  // the host's env). Otherwise fall back to NODE_ENV.
-  const explicit = process.env.NEXT_PUBLIC_NUMU_ENV;
-  if (explicit === "production") return true;
-  if (explicit === "development" || explicit === "staging") return false;
-  return process.env.NODE_ENV === "production";
-}
-
-function allowedHostSuffixes(): string[] {
-  const builtin = [...PROD_HOST_SUFFIXES_BUILTIN];
-  const extras = process.env.NEXT_PUBLIC_BYOT_BUNDLE_HOSTS ?? "";
-  for (const raw of extras.split(",")) {
-    const h = raw.trim().toLowerCase().replace(/^\*\./, "");
-    if (h) builtin.push(h);
-  }
-  return builtin;
-}
+export { isAllowedBundleUrl } from "./bundle-allowlist";
 
 /**
- * Validate a URL against the BYOT allowlist. Returns true if loading is
- * permitted, false otherwise. Does NOT throw — caller decides how to surface
- * the rejection.
+ * Is bundle-checksum verification enforced?
+ *
+ * OFF by default, deliberately. Verification fails CLOSED — a mismatch throws
+ * and the storefront renders the theme error state instead of the shop — so
+ * anything that changes the delivered bytes without updating the stored digest
+ * (a CDN that minifies or injects, a bundle re-uploaded in place) would take a
+ * live store down. House rule for theme changes is to feature-flag them, so
+ * this ships dark: the digest is plumbed end to end and can be validated
+ * against real CDN-served bytes on the test stack, then switched on.
+ *
+ * Set NEXT_PUBLIC_BYOT_CHECKSUM_ENFORCE=1 to enforce. It doubles as the kill
+ * switch — flip it back to 0 to restore service without a rollback.
+ *
+ * Note the gate is only reachable for themes activated after the digest was
+ * added to the activation payload; earlier installs carry no checksum and are
+ * unaffected either way.
  */
-export function isAllowedBundleUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  const host = parsed.hostname.toLowerCase();
-  const inDev = !isProdEnv();
-
-  if (inDev) {
-    if (DEV_HOSTS.has(host)) return true;
-    // r2.dev canary bundles (https) are allowed in dev only.
-    if (DEV_HOST_SUFFIXES.some((s) => host === s || host.endsWith("." + s)))
-      return true;
-  }
-
-  if (parsed.protocol !== "https:") return false;
-  return allowedHostSuffixes().some(
-    (suffix) => host === suffix || host.endsWith("." + suffix),
-  );
-}
-
-/**
- * Compute the SHA-256 hex digest of a buffer. Used for SRI verification
- * when the marketplace stores a checksum on the version row.
- */
-async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+function isChecksumEnforced(): boolean {
+  return process.env.NEXT_PUBLIC_BYOT_CHECKSUM_ENFORCE === "1";
 }
 
 interface LoadOptions {
@@ -351,7 +316,7 @@ async function _loadExternalThemeUncached(
   // If we have a checksum, fetch the bundle bytes first, verify, then
   // create a blob URL we can dynamically import. This keeps untrusted JS
   // from running before verification.
-  if (options.expectedChecksum) {
+  if (options.expectedChecksum && isChecksumEnforced()) {
     const res = await fetch(bundleUrl, { cache: BUNDLE_CACHE });
     if (!res.ok) {
       throw new Error(
@@ -363,6 +328,23 @@ async function _loadExternalThemeUncached(
     if (got !== options.expectedChecksum.toLowerCase()) {
       throw new Error(
         `Bundle checksum mismatch (expected ${options.expectedChecksum}, got ${got})`,
+      );
+    }
+
+    // The stored digest covers dist/theme.js and nothing else. A code-split
+    // build makes that entry a thin shim that imports sibling chunks holding
+    // the actual code — those chunks are never hashed, so a verified entry
+    // would grant false confidence in unverified JavaScript. (Real example:
+    // luxury-minimal 0.3.3 published a 94-byte entry importing ./main-*.js.)
+    // Refuse rather than pretend: integrity is the one thing this branch
+    // exists to provide.
+    const source = new TextDecoder().decode(bytes);
+    if (RELATIVE_IMPORT.test(source)) {
+      throw new Error(
+        "Bundle is code-split: the checksum covers only the entry chunk, so " +
+          "its sibling chunks cannot be integrity-verified. Rebuild the theme " +
+          "as a single file, or extend the stored checksum to cover every " +
+          "emitted asset.",
       );
     }
     const blobUrl = URL.createObjectURL(

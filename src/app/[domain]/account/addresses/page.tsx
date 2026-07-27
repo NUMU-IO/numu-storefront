@@ -18,20 +18,18 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { AddressesPage } from "@/components/account/Dashboard";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { domain } = await params;
-  try {
-    const store = await fetchStoreByDomain(domain);
-    return { title: `Addresses | ${store?.name || "Store"}` };
-  } catch {
-    return { title: "Addresses" };
-  }
-}
+// Entity title only — the `[domain]` layout's title template appends the store
+// name, so this no longer needs to resolve the store.
+export const metadata: Metadata = {
+  title: "Addresses",
+  robots: NOINDEX_ROBOTS,
+};
 
 export default async function AddressesRoute({ params }: PageProps) {
   const { domain } = await params;
@@ -55,6 +53,7 @@ export default async function AddressesRoute({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme!.bundle_url!}
+        bundleChecksum={themeSettings.external_theme!.checksum}
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}

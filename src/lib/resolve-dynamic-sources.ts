@@ -96,7 +96,38 @@ function resolveStoreField(
   }
 }
 
+/**
+ * Merchant-defined fields (ADR-2): `metafield:{namespace}.{key}` nested under
+ * an owner root (`product.metafield:specs.fabric`). The storefront payload
+ * carries only PUBLIC metafields, pre-coerced by type — so resolving here can
+ * never leak a private field, and a missing value resolves to null (the
+ * setting's default renders; contract missing-value behavior).
+ */
+function resolveMetafield(
+  metafields:
+    | { namespace: string; key: string; value: unknown }[]
+    | undefined,
+  field: string,
+): unknown {
+  const address = field.slice("metafield:".length);
+  const dot = address.indexOf(".");
+  if (dot === -1) return null;
+  const namespace = address.slice(0, dot);
+  const key = address.slice(dot + 1);
+  const hit = (metafields || []).find(
+    (m) => m.namespace === namespace && m.key === key,
+  );
+  return hit ? (hit.value ?? null) : null;
+}
+
 function resolveProductField(p: Product, field: string): unknown {
+  if (field.startsWith("metafield:")) {
+    return resolveMetafield(
+      (p as { metafields?: { namespace: string; key: string; value: unknown }[] })
+        .metafields,
+      field,
+    );
+  }
   switch (field) {
     case "title":
     case "name":
@@ -120,6 +151,13 @@ function resolveProductField(p: Product, field: string): unknown {
 }
 
 function resolveCollectionField(c: Collection, field: string): unknown {
+  if (field.startsWith("metafield:")) {
+    return resolveMetafield(
+      (c as { metafields?: { namespace: string; key: string; value: unknown }[] })
+        .metafields,
+      field,
+    );
+  }
   switch (field) {
     case "title":
     case "name":

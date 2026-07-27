@@ -9,6 +9,7 @@ import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { resolveThemeSsrHtml } from "@/lib/ssr-theme-request";
 import BuiltInProductDetail from "@/components/storefront/BuiltInProductDetail";
 import {
   buildBreadcrumbLd,
@@ -16,7 +17,17 @@ import {
   serializeLd,
 } from "@/lib/json-ld";
 import { FunnelTracker } from "@/components/tracking/FunnelTracker";
-import { storeRobots, NOINDEX_ROBOTS, type StoreForSeo } from "@/lib/seo";
+import {
+  alternatesFor,
+  canonicalFor,
+  canonicalOriginFor,
+  productOgProperties,
+  storeRobots,
+  NOINDEX_ROBOTS,
+  type StoreForSeo,
+} from "@/lib/seo";
+import { SsrProductContent } from "@/components/seo/SsrContentLayer";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
@@ -37,23 +48,22 @@ interface PageProps {
  */
 export const revalidate = 300;
 
-function storeBaseUrl(domain: string): string {
-  const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
-  const isProd = process.env.NEXT_PUBLIC_NUMU_ENV === "production";
-  return isProd
-    ? `https://${domain}.${platformDomain}`
-    : `http://localhost:3000/${domain}`;
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { domain, slug } = await params;
   try {
     const store = await fetchStoreByDomain(domain);
     const product = await fetchProductBySlug(store.id, slug);
-    const canonical = `${storeBaseUrl(domain)}/products/${slug}`;
-    const ptitle = `${product?.seo_title || product?.name || "Product"} | ${store?.name || "Store"}`;
+    // URLs from the shared helpers (the ONE origin implementation) — the local
+    // storeBaseUrl() this replaces ignored the store's custom domain entirely,
+    // so a store on a verified custom domain canonicalised its PDPs onto the
+    // platform subdomain instead.
+    const storeForSeo = store as unknown as StoreForSeo;
+    const path = `/products/${slug}`;
+    const canonical = canonicalFor(storeForSeo, domain, path);
+    // Entity title only — the `[domain]` layout's title template appends the
+    // store name.
+    const ptitle = product?.seo_title || product?.name || "Product";
     const pdesc = product?.seo_description || product?.description || "";
-    const pimg = product?.images?.[0]?.url || undefined;
     // OG/Twitter cards must mirror the merchant's SEO edits
     // (seo_title/seo_description), not just name/description — these tags are
     // what social platforms and link-preview tools actually render.
@@ -63,23 +73,41 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return {
       title: ptitle,
       description: pdesc,
-      alternates: { canonical },
+      alternates: alternatesFor(storeForSeo, domain, path),
       openGraph: {
         title: ogTitle,
         description: pdesc,
-        type: "website",
+        // No `type` on purpose. A PDP must declare og:type=product, but Next's
+        // OpenGraphType union has no "product" and its renderer THROWS on an
+        // unknown type ("Invalid OpenGraph type", E237) — so og:type and the
+        // product:* properties are emitted as <meta property> tags from the
+        // page body instead (see productOgProperties). Leaving "website" here
+        // was what told Meta's crawler this commerce page is generic content.
         url: canonical,
         siteName: store?.name,
-        images: pimg ? [pimg] : undefined,
+        // Deliberately NO `images` key: the generated card at
+        // ./opengraph-image.tsx supplies it. Next decides whether the
+        // file-convention image applies with a `hasOwnProperty("images")`
+        // test, so `images: undefined` is NOT the same as omitting the key —
+        // writing it at all suppressed the convention. The previous
+        // `images: firstPhoto ? [firstPhoto] : undefined` therefore got the
+        // worst of both: a product WITH a photo shipped that raw portrait webp
+        // as its share card (wrong aspect for 1200x630, and webp unfurls
+        // poorly), and a product WITHOUT one shipped no og:image whatsoever —
+        // the exact hole the generated card exists to close.
       },
       twitter: {
-        card: pimg ? "summary_large_image" : "summary",
+        // Always the large card now: the convention guarantees an image, so
+        // there is no "summary" case left to fall back to. Omitting
+        // `twitter.images` lets Next reuse the OpenGraph one, which keeps the
+        // two previews identical instead of pairing a branded card on Facebook
+        // with a bare product photo on X.
+        card: "summary_large_image",
         title: ogTitle,
         description: pdesc,
-        ...(pimg ? { images: [pimg] } : {}),
       },
       // noindex a draft/archived product or a non-indexable store.
-      robots: storeRobots(store as unknown as StoreForSeo, {
+      robots: storeRobots(storeForSeo, {
         forceNoindex: !productActive,
       }),
     };
@@ -155,9 +183,25 @@ export default async function ProductPage({ params }: PageProps) {
   // so the structured data is in the rendered HTML regardless of
   // which path renders the page body. Both LDs are emitted as a
   // single script — Google parses each top-level value separately.
-  const baseUrl = storeBaseUrl(domain);
+  const storeForSeo = store as unknown as StoreForSeo;
+  const baseUrl = canonicalOriginFor(storeForSeo, domain);
+  // ONE resolved currency for the structured data AND the OG properties —
+  // product.currency falls back to "USD" at the fetch boundary, so an EGP
+  // store with the field unset would otherwise publish a price in dollars.
+  const ldCurrency = product?.currency || store?.currency || "EGP";
   const productLd = product
-    ? buildProductLd({ product, baseUrl, storeName: store?.name })
+    ? buildProductLd({
+        product: { ...product, currency: ldCurrency },
+        baseUrl,
+        storeName: store?.name,
+        // Only assert the return window the merchant actually claimed in the
+        // hub's SEO settings.
+        hasReturnPolicy30d: storeForSeo.seo?.has_return_policy_30d === true,
+        // NOTE: `reviews` is intentionally unset — there is no server-side
+        // reviews fetcher in api-client yet (only the client-facing
+        // /api/storefront/products/[id]/reviews proxy), so aggregateRating
+        // stays off rather than being guessed.
+      })
     : null;
   const breadcrumbLd = product
     ? buildBreadcrumbLd({
@@ -176,6 +220,23 @@ export default async function ProductPage({ params }: PageProps) {
       dangerouslySetInnerHTML={{ __html: serializeLd(ld) }}
     />
   ));
+
+  // og:type=product + product:* properties. Rendered here rather than in
+  // generateMetadata because Next's metadata layer can express neither: its
+  // OpenGraph type union has no "product" (and throws on one), and its `other`
+  // block emits `<meta name>` where OGP needs `<meta property>`. React hoists
+  // these into <head> exactly like the rel=preload link below.
+  const ogProductMetas = product
+    ? productOgProperties({
+        price: product.price,
+        currency: ldCurrency,
+        inStock: !!product.in_stock,
+        sku: product.sku,
+        brand: store?.name,
+      }).map(([property, content]) => (
+        <meta key={`og-${property}`} property={property} content={content} />
+      ))
+    : [];
 
   // Meta ViewContent — rides along with the LD scripts so it fires in every
   // render branch (BYOT / template / built-in). Value in MAJOR units.
@@ -208,6 +269,7 @@ export default async function ProductPage({ params }: PageProps) {
   ) : null;
   const headExtras = [
     ...(imagePreload ? [imagePreload] : []),
+    ...ogProductMetas,
     ...ldScripts,
     ...(viewContent ? [viewContent] : []),
   ];
@@ -218,22 +280,40 @@ export default async function ProductPage({ params }: PageProps) {
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id)
   ) {
+    // ADR-7 — locale for the crawler-facing content layer. `x-numu-locale` is
+    // stamped by the proxy (URL prefix › ?locale › cookie › store default);
+    // this route already renders dynamically (the layout reads headers/cookies)
+    // so reading it here costs nothing.
+    const hl = await headers();
+    const ssrLocale =
+      hl.get("x-numu-locale") || store?.default_language || "en";
+    // ONE page descriptor shared by the server render and the client mount —
+    // parity is what keeps hydration from tearing the DOM down.
+    const pageCtx = {
+      type: "product" as const,
+      title: product?.name,
+      handle: slug,
+      data: product
+        ? { product, products: catalogue, collections }
+        : undefined,
+    };
+    // Isolated theme SSR (dark unless NUMU_SSR_THEME=1); null → unchanged.
+    const ssrHtml = await resolveThemeSsrHtml({
+      themeSettings: effectiveTheme,
+      store,
+      page: pageCtx,
+    });
     return (
       <>
         {headExtras}
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
+          bundleChecksum={themeSettings.external_theme.checksum}
           cssUrl={themeSettings.external_theme.css_url}
           themeSettings={effectiveTheme}
           storeData={store}
-          page={{
-            type: "product",
-            title: product?.name,
-            handle: slug,
-            data: product
-              ? { product, products: catalogue, collections }
-              : undefined,
-          }}
+          page={pageCtx}
+          ssrHtml={ssrHtml}
           // ENG-2 defense-in-depth: every registered theme ships a `product`
           // template, but if a bundle renders blank fall back to the functional
           // built-in PDP (product is non-null here — the !product BYOT case
@@ -244,6 +324,17 @@ export default async function ProductPage({ params }: PageProps) {
                 product={{ ...product, currency: product.currency || store?.currency }}
               />
             ) : undefined
+          }
+          // ADR-7 — semantic, crawler-facing PDP body in the initial HTML.
+          // Unlike routeFallback this ships even when the theme renders; the
+          // boundary drops it on hydration, before the bundle paints.
+          seoContent={
+            <SsrProductContent
+              product={product}
+              storeName={store?.name}
+              storeCurrency={store?.currency}
+              locale={ssrLocale}
+            />
           }
         />
       </>

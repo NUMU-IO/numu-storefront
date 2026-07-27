@@ -20,12 +20,16 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import GiftCardCheckClient from "@/components/account/GiftCardCheckClient";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
 }
 
-export const metadata: Metadata = { title: "Gift cards" };
+export const metadata: Metadata = {
+  title: "Gift cards",
+  robots: NOINDEX_ROBOTS,
+};
 
 export default async function GiftCardsPage({ params }: PageProps) {
   const { domain } = await params;
@@ -49,6 +53,7 @@ export default async function GiftCardsPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme!.bundle_url!}
+        bundleChecksum={themeSettings.external_theme!.checksum}
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}

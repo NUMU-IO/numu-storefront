@@ -7,6 +7,7 @@ import {
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { alternatesFor, type StoreForSeo } from "@/lib/seo";
 import type { Metadata } from "next";
 
 /**
@@ -41,8 +42,20 @@ export async function generateMetadata({
   try {
     const store = await fetchStoreByDomain(domain);
     return {
-      title: `Products | ${store?.name || "Store"}`,
+      // Entity title only — the layout's template appends the store name.
+      title: "Products",
       description: `Browse all products from ${store?.name || domain}.`,
+      // Explicit, even though the layout now derives a per-URL canonical from
+      // the proxy's pathname header: this route is the catalogue entry point
+      // Google should index, so it must not depend on that header being
+      // present. `openGraph` is deliberately NOT redeclared — it is inherited
+      // from the layout (whose og:url is this URL), and redeclaring it here
+      // would drop the store's social image and og:locale.
+      alternates: alternatesFor(
+        store as unknown as StoreForSeo,
+        domain,
+        "/products",
+      ),
     };
   } catch {
     return { title: "Products" };
@@ -74,6 +87,7 @@ export default async function ProductsListingPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
+        bundleChecksum={themeSettings.external_theme.checksum}
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={themeSettings}
         storeData={store}

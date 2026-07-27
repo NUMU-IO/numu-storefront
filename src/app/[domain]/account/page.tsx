@@ -19,20 +19,23 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { AccountHome } from "@/components/account/Dashboard";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { domain } = await params;
-  try {
-    const store = await fetchStoreByDomain(domain);
-    return { title: `Account | ${store?.name || "Store"}` };
-  } catch {
-    return { title: "Account" };
-  }
-}
+// Private customer surface. Emitting no `robots` key inherited the shell's
+// `index, follow`, so every account route answered 200 as indexable — and
+// robots.txt can't be the guard here (Cloudflare serves it for these hosts and
+// allows everything), so the meta tag is the layer we actually control.
+//
+// Entity title only: the `[domain]` layout's title template appends the store
+// name, so this no longer needs to resolve the store and is a static object.
+export const metadata: Metadata = {
+  title: "Account",
+  robots: NOINDEX_ROBOTS,
+};
 
 export default async function AccountPage({ params }: PageProps) {
   const { domain } = await params;
@@ -58,6 +61,7 @@ export default async function AccountPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme!.bundle_url!}
+        bundleChecksum={themeSettings.external_theme!.checksum}
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}

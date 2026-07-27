@@ -112,6 +112,7 @@ export async function resolveByotFork(
         <ByotThemeBoundary
           bundleUrl={themeSettings.external_theme.bundle_url}
           cssUrl={themeSettings.external_theme.css_url}
+          bundleChecksum={themeSettings.external_theme.checksum}
           themeSettings={themeSettings}
           storeData={store}
           page={page}

@@ -38,6 +38,15 @@ export interface BlockInstance {
 export interface ExternalThemeMetadata {
   bundle_url: string;
   css_url?: string | null;
+  /**
+   * SHA-256 hex digest of the published bundle, set at activation from
+   * `marketplace_theme_versions.checksum`. When present the loader verifies
+   * the fetched bytes before evaluating them, so a bundle swapped at the CDN
+   * after review fails closed. Absent for dev-mode bundles (a live Vite
+   * server's bytes change on every save) — then the host allowlist is the
+   * only gate.
+   */
+  checksum?: string | null;
   mode?: string;
   settings_schema?: Record<string, any> | null;
   section_schemas?: Record<string, any> | null;
@@ -134,6 +143,23 @@ export interface SectionProps {
 
 export interface BlockProps {
   settings: Record<string, any>;
+}
+
+/**
+ * The page descriptor handed to a theme bundle's mount ctx — which template
+ * to render and the data for it.
+ *
+ * Lives here (not in `ByotThemeBoundary`) because BOTH render paths need it:
+ * the client boundary and the server-side SSR request builder
+ * (`lib/ssr-theme-request.ts`). The two must pass the SAME descriptor or
+ * hydration mismatches, so they share one type.
+ */
+export interface PageContextData {
+  /** "home" | "product" | "collection" | "cart" | "page" | "404" | … */
+  type: string;
+  title?: string;
+  handle?: string;
+  data?: Record<string, unknown>;
 }
 
 // API response wrapper

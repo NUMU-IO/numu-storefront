@@ -2,13 +2,14 @@
 
 /**
  * Promotion popup (offers-v2 surface) — host-rendered overlay. Honors the
- * display trigger (on_load / on_delay / on_scroll_pct / on_exit_intent), an
- * optional email-capture form that reveals a discount code on submit, and
- * per-visitor dismissal. Mirrors V2's PopupModal, self-contained like
+ * display trigger (on_delay / on_scroll_pct / on_exit_intent defer the open;
+ * on_load / always / on_add_to_cart open at first paint), an optional
+ * email-capture form that reveals a discount code on submit, and per-visitor
+ * dismissal via the ✕ or Escape. Mirrors V2's PopupModal, self-contained like
  * AnnouncementBar.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ResolvedPromotion } from "@/lib/promo-server";
 import {
   postPromo,
@@ -34,6 +35,41 @@ interface Display {
   trigger_value?: { delay_ms?: number; scroll_pct?: number };
 }
 
+/**
+ * Triggers that hold the popup back until the visitor does something. Keep in
+ * lockstep with the branches in the trigger effect below — everything the
+ * effect does NOT branch on falls through to an immediate `show()`.
+ */
+const DEFERRED_TRIGGERS = new Set([
+  "on_delay",
+  "on_scroll_pct",
+  "on_exit_intent",
+]);
+
+/**
+ * Does this trigger put the popup on screen at first paint?
+ *
+ * Exported because PromoMounts has to answer the same question to decide
+ * whether to mount the popup at all on routes where a full-viewport overlay
+ * covers the only control the visitor came for. It used to answer it on its
+ * own with `trigger === "on_load"`, and that quietly matched nothing: the
+ * backend's DisplayTrigger enum also carries `always` and `on_add_to_cart`,
+ * and every promotion seeded through the merchant hub is stored as `always`.
+ * So the route suppression list was inert on every real store — the popup
+ * still landed on /search, /track and /cart — while looking correct in review.
+ *
+ * `always` and `on_add_to_cart` are grouped with `on_load` because that is
+ * literally what the effect below does with them, not because it is ideal:
+ * `on_add_to_cart` arguably ought to wait for the cart event rather than fire
+ * on load. Encoding the real behaviour in one place is what keeps the two
+ * components from drifting apart again.
+ */
+export function popupOpensAtFirstPaint(
+  trigger: string | null | undefined,
+): boolean {
+  return !DEFERRED_TRIGGERS.has(trigger || "on_load");
+}
+
 export function PopupModal({
   promotion,
   locale = "ar",
@@ -49,6 +85,7 @@ export function PopupModal({
   const [revealed, setRevealed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fired = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isPromoDismissed(promotion.promotion_id)) return;
@@ -86,6 +123,89 @@ export function PopupModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Declared above the `!open` early return so the keyboard effect below can
+  // depend on it, and memoised so that effect isn't torn down and re-run (which
+  // would bounce focus) on every unrelated re-render.
+  const close = useCallback(() => {
+    const days = content.show_after_dismiss_days ?? 30;
+    postPromo(promotion.promotion_id, "events", {
+      event_type: "dismiss",
+      metadata: { surface: "popup" },
+    });
+    postPromo(promotion.promotion_id, "dismiss", { remember_for_days: days });
+    markPromoDismissed(promotion.promotion_id, days);
+    setOpen(false);
+  }, [content.show_after_dismiss_days, promotion.promotion_id]);
+
+  /**
+   * Keyboard + focus contract for `role="dialog" aria-modal="true"`.
+   *
+   * That pair of attributes promises assistive tech the rest of the page is
+   * inert, and the markup was only keeping half of it: the ✕ was the single
+   * way out, so a keyboard or screen-reader visitor had neither a way to
+   * dismiss the popup nor a way to reach the page behind it — a keyboard trap
+   * (WCAG 2.1.2) on every route the popup fires on.
+   *
+   * Escape routes through the very same `close()` the ✕ calls rather than just
+   * flipping `open`, so it reports the dismiss event and writes the
+   * `numu_promo_dismissed_<id>` record too. Both exits have to leave identical
+   * state or the visitor who escapes out gets interrupted again on every
+   * subsequent page.
+   *
+   * Focus moves into the dialog on open, cycles inside it on Tab, and returns
+   * to whatever held it before on close. One acknowledged gap: in the
+   * custom-HTML layout the content is a sandboxed iframe, and keydowns raised
+   * inside another document never reach this listener, so Tab can walk out the
+   * far side of that one. Reaching across the sandbox boundary to fix it would
+   * defeat the point of the sandbox, so it stays a known limit rather than a
+   * pretend fix.
+   */
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    const focusables = () =>
+      Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+
+    // The dialog itself is focusable (tabIndex -1) so a popup whose only
+    // content is text still hands focus to something inside the modal.
+    (focusables()[0] ?? dialog).focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      const first = items[0] ?? dialog;
+      const last = items[items.length - 1] ?? dialog;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === dialog)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      // Skip detached nodes: on a route change the element that had focus is
+      // usually gone with the old page, and focusing it would be a no-op that
+      // silently drops the caret to <body>.
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, [open, close]);
+
   if (!open) return null;
 
   // Custom-HTML mode: the merchant pasted their own markup (e.g. AI-generated).
@@ -112,17 +232,6 @@ export function PopupModal({
   const code =
     revealed ?? content.discount_code_to_reveal ?? promotion.coupon_code ?? null;
 
-  const close = () => {
-    const days = content.show_after_dismiss_days ?? 30;
-    postPromo(promotion.promotion_id, "events", {
-      event_type: "dismiss",
-      metadata: { surface: "popup" },
-    });
-    postPromo(promotion.promotion_id, "dismiss", { remember_for_days: days });
-    markPromoDismissed(promotion.promotion_id, days);
-    setOpen(false);
-  };
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || busy) return;
@@ -136,8 +245,14 @@ export function PopupModal({
   };
 
   return (
+    // `tabIndex={-1}` makes this a programmatic focus target only — it is the
+    // fallback the focus effect uses for a popup with no focusable content, and
+    // there is no keyboard path to it, so `outline-none` suppresses what would
+    // otherwise be a focus ring drawn around the whole viewport.
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      ref={dialogRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 outline-none"
       role="dialog"
       aria-modal="true"
       dir={isAr ? "rtl" : "ltr"}

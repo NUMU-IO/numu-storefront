@@ -50,14 +50,11 @@ function readPolicy(store: any, handle: string): string | null {
   return typeof body === "string" && body.trim() ? body : null;
 }
 
+// Entity title only — the `[domain]` layout's title template appends the store
+// name, so this no longer needs to resolve the store at all.
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { domain, handle } = await params;
-  try {
-    const store = await fetchStoreByDomain(domain);
-    return { title: `${titleFor(handle)} | ${store?.name || "Store"}` };
-  } catch {
-    return { title: titleFor(handle) };
-  }
+  const { handle } = await params;
+  return { title: titleFor(handle) };
 }
 
 export default async function PolicyPage({ params }: PageProps) {
@@ -116,6 +113,7 @@ export default async function PolicyPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme!.bundle_url!}
+        bundleChecksum={themeSettings.external_theme!.checksum}
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}

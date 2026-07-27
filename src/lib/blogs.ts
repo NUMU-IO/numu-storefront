@@ -1,46 +1,85 @@
 /**
- * Storefront blog fetchers — Phase 1.8.
+ * Storefront blog fetchers.
  *
- * Each fetcher calls the backend's storefront blog endpoints and
- * returns null/[] gracefully when the endpoint isn't deployed yet.
- * This is the v1 stub: routes exist, theme menus don't 404, and the
- * day the backend adds the tables this layer wires up automatically.
- *
- * Backend contract (when shipped):
+ * Backed by the real backend endpoints (published-only):
  *   GET /storefront/store/{store_id}/blogs
- *     → SuccessResponse<list[BlogSummary]>
  *   GET /storefront/store/{store_id}/blogs/{handle}
- *     → SuccessResponse<BlogSummary>
  *   GET /storefront/store/{store_id}/blogs/{handle}/articles
- *     → SuccessResponse<list[ArticleSummary]>
  *   GET /storefront/store/{store_id}/blogs/{blog}/articles/{handle}
- *     → SuccessResponse<ArticleDetail>
+ *
+ * Text fields are bilingual dicts ({en, ar}) like the pages endpoints —
+ * pick the visitor's language with `pickText`. Fetchers still return
+ * null/[] gracefully on any failure so theme menus never 404 a store.
+ *
+ * Cache: tagged `blogs-{storeId}` — the backend busts it on every
+ * blog/article change and on scheduled publishes
+ * (revalidate_on_blog_change), with the 300s ISR window as the net.
+ *
+ * A renamed article's OLD handle still resolves: the payload's `handle`
+ * is the CURRENT one, and the article route 301s to the canonical URL.
  */
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
+/** Bilingual text map ({en, ar}) as stored by the merchant hub. */
+export type LocalizedText = Record<string, string>;
+
 export interface BlogSummary {
   handle: string;
-  title: string;
-  description?: string | null;
+  title: LocalizedText;
+  description?: LocalizedText | null;
 }
 
 export interface ArticleSummary {
   handle: string;
-  title: string;
-  excerpt?: string | null;
+  title: LocalizedText;
+  excerpt?: LocalizedText | null;
+  image_url?: string | null;
   published_at?: string | null;
   author?: string | null;
+  tags?: string[];
 }
 
 export interface ArticleDetail extends ArticleSummary {
-  body_html?: string | null;
+  body?: LocalizedText | null;
+  seo?: Record<string, unknown> | null;
+  blog?: BlogSummary | null;
 }
 
-async function safeFetch<T>(path: string): Promise<T | null> {
+/**
+ * The language THIS visitor should be served — not the store's default.
+ *
+ * `x-numu-locale` is stamped by the proxy (URL prefix › `?locale` › cookie)
+ * and is what `layout.tsx` uses to set `<html lang/dir>`. The blog routes
+ * originally read `store.default_language` directly, so an Arabic shopper got
+ * `<html dir="rtl" lang="ar">` wrapped around English article copy — and an
+ * English `<title>`/description in the metadata, since `generateMetadata`
+ * picked the language the same way. Shared here so all three blog routes
+ * resolve it identically.
+ */
+export async function resolveVisitorLang(store: unknown): Promise<string> {
+  const { headers } = await import("next/headers");
+  const hl = await headers();
+  return (
+    hl.get("x-numu-locale") ||
+    (store as { default_language?: string } | null)?.default_language ||
+    "en"
+  );
+}
+
+/** Resolve a bilingual map to the visitor's language (en↔ar fallback). */
+export function pickText(
+  map: LocalizedText | null | undefined,
+  lang: string,
+): string {
+  if (!map) return "";
+  return (lang === "ar" ? map.ar || map.en : map.en || map.ar) || "";
+}
+
+async function safeFetch<T>(path: string, storeId: string): Promise<T | null> {
   try {
     const res = await fetch(`${API_URL}${path}`, {
-      next: { tags: ["blogs"], revalidate: 300 },
+      next: { tags: ["blogs", `blogs-${storeId}`], revalidate: 300 },
     });
     if (!res.ok) return null;
     const body = await res.json();
@@ -53,6 +92,7 @@ async function safeFetch<T>(path: string): Promise<T | null> {
 export async function fetchBlogsList(storeId: string): Promise<BlogSummary[]> {
   const data = await safeFetch<BlogSummary[]>(
     `/storefront/store/${storeId}/blogs`,
+    storeId,
   );
   return data || [];
 }
@@ -63,6 +103,7 @@ export async function fetchBlogByHandle(
 ): Promise<BlogSummary | null> {
   return safeFetch<BlogSummary>(
     `/storefront/store/${storeId}/blogs/${encodeURIComponent(handle)}`,
+    storeId,
   );
 }
 
@@ -72,6 +113,7 @@ export async function fetchArticlesList(
 ): Promise<ArticleSummary[]> {
   const data = await safeFetch<ArticleSummary[]>(
     `/storefront/store/${storeId}/blogs/${encodeURIComponent(blogHandle)}/articles`,
+    storeId,
   );
   return data || [];
 }
@@ -83,5 +125,6 @@ export async function fetchArticleByHandle(
 ): Promise<ArticleDetail | null> {
   return safeFetch<ArticleDetail>(
     `/storefront/store/${storeId}/blogs/${encodeURIComponent(blogHandle)}/articles/${encodeURIComponent(articleHandle)}`,
+    storeId,
   );
 }

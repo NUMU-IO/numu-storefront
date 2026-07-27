@@ -30,6 +30,110 @@ html {
 }
 
 /* ───────────────────────────────────────────────────────────────────────
+   Sticky footer.
+
+   Nothing in the chain from <body> down to the theme's <main> carried a
+   height, so a page whose content is shorter than the viewport left the
+   store's footer floating mid-screen with a band of blank page underneath
+   it. It looks like the page failed to finish loading, and it hits every
+   short page on every theme: /blogs, an empty cart, a search with no
+   results, a 404, a one-paragraph CMS page.
+
+   The chain is <body> › #main › mount container › theme root › <main>.
+   Each link grows, and the theme's own <main> takes up the slack, so the
+   footer is pushed to the bottom of the viewport on short pages and stays
+   in normal flow on tall ones. `flex: 1 0 auto` (never shrink) so a tall
+   page is untouched.
+
+   `100svh`, not `100vh`: on mobile the dynamic browser chrome makes 100vh
+   taller than what you can actually see, which would reintroduce the gap
+   as a scroll.
+   ─────────────────────────────────────────────────────────────────────── */
+body:has(> #main) {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+#main {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The BYOT mount container and the theme's own root are bare <div>s with no
+   height of their own; both have to pass the growth down. `min-width: 0`
+   keeps a flex item from refusing to shrink below its content's intrinsic
+   width — without it a wide table or a long unbroken string in a section
+   would force horizontal page scroll. */
+#main > div,
+#main > div > [data-theme] {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Whichever <main> the page ended up with — the theme's, or the host's own
+   built-in template when the theme ships none for this route. */
+#main main {
+  flex: 1 0 auto;
+}
+
+/* Fallback for a theme that ships NO <main> landmark.
+
+   The chain above hands the leftover height to `#main main`. That is a
+   contract with third-party bundle DOM, and it is not guaranteed: a bundle
+   mounts whatever element it likes, and published bundles exist with no
+   <main> at all (vionne's live 0.6.3 is one — its root renders
+   header/body/footer as sibling <section>s). When that last link is missing
+   the growth still happens on the theme root, but nothing inside it absorbs
+   the slack, so the space lands AFTER the theme's own footer — the exact
+   blank band the sticky-footer fix was written to remove.
+
+   So absorb it structurally instead of by landmark: a theme root with no
+   <main> to delegate to becomes a column itself and pushes its LAST in-flow
+   child — the footer, on every theme in the fleet — to the bottom.
+   `margin-top: auto` resolves to 0 when there is no free space, so tall pages
+   are untouched, and `:not(:has(main))` keeps this dormant for every theme
+   that does ship the landmark. Matching `*` rather than `[data-theme]` means
+   it also holds for a root that carries no theme attribute. */
+#main > div > *:not(:has(main)) {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#main > div > *:not(:has(main)) > *:last-child {
+  margin-top: auto;
+}
+
+/* Restore full-width stretch for the children of every element the rules above
+   turned into a flex column.
+
+   A flex item whose cross-axis margins are `auto` does NOT stretch: the spec
+   distributes free space to those margins first, and that suppresses
+   `align-items: stretch`, so the item shrink-wraps to its content instead. The
+   `max-width` + `margin-inline: auto` centred-text-column idiom is exactly that
+   shape, and it is everywhere — theme sections and the host's own built-in
+   templates alike. Creating the column therefore silently collapsed them:
+   measured on production, vionne's `.vn-cms-page` went 760px -> 144px and the
+   built-in policy template's text column 736px -> 241px, with the heading
+   visibly jumping from left-aligned to centred.
+
+   A definite `width: 100%` gives the item back the cross size that block layout
+   used to give it for free; `max-width` still clamps it and the auto margins
+   still centre it within that width. This is the companion rule the flex
+   conversion always needed — without it, the sticky footer is bought at the
+   price of every centred column on short pages. */
+#main > *,
+#main > div > *,
+#main > div > * > * {
+  width: 100%;
+}
+
+/* ───────────────────────────────────────────────────────────────────────
    NUMU house brand tokens — mirror numo-merchant-hub's identity (navy +
    saffron + warm paper, IBM Plex Sans Arabic / Reem Kufi, 16px radius).
    These power the host's DEFAULT / fallback pages (404, "no content yet",

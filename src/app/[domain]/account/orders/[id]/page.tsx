@@ -17,6 +17,7 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { OrderDetail } from "@/components/account/Dashboard";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string; id: string }>;
@@ -24,7 +25,7 @@ interface PageProps {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
-  return { title: `Order #${id.slice(0, 8)}` };
+  return { title: `Order #${id.slice(0, 8)}`, robots: NOINDEX_ROBOTS };
 }
 
 export default async function OrderDetailPage({ params }: PageProps) {
@@ -50,6 +51,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme!.bundle_url!}
+        bundleChecksum={themeSettings.external_theme!.checksum}
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}

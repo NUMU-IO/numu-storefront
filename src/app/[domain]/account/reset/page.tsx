@@ -7,21 +7,19 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { ResetForm } from "@/components/account/AuthForms";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
   searchParams: Promise<{ token?: string }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { domain } = await params;
-  try {
-    const store = await fetchStoreByDomain(domain);
-    return { title: `Set new password | ${store?.name || "Store"}` };
-  } catch {
-    return { title: "Set new password" };
-  }
-}
+// Entity title only — the `[domain]` layout's title template appends the store
+// name, so this no longer needs to resolve the store.
+export const metadata: Metadata = {
+  title: "Set new password",
+  robots: NOINDEX_ROBOTS,
+};
 
 export default async function ResetPage({ params, searchParams }: PageProps) {
   const { domain } = await params;
@@ -70,6 +68,7 @@ export default async function ResetPage({ params, searchParams }: PageProps) {
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme!.bundle_url!}
+        bundleChecksum={themeSettings.external_theme!.checksum}
         cssUrl={themeSettings.external_theme!.css_url}
         themeSettings={themeSettings}
         storeData={store}
