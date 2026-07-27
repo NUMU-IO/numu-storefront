@@ -38,7 +38,8 @@ export async function generateMetadata({
     const store = await fetchStoreByDomain(domain);
     const lang = await resolveVisitorLang(store);
     const heading = lang === "ar" ? "المدونة" : "Blog";
-    return { title: `${heading} | ${store?.name || "Store"}` };
+    // Entity title only — the layout's template appends the store name.
+    return { title: heading };
   } catch {
     return { title: "Blog" };
   }

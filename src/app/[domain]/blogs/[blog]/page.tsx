@@ -34,7 +34,8 @@ export async function generateMetadata({
     const lang = await resolveVisitorLang(store);
     const title = blog ? pickText(blog.title, lang) : "";
     return {
-      title: title ? `${title} | ${store.name}` : `Blog | ${store.name}`,
+      // Entity title only — the layout's template appends the store name.
+      title: title || "Blog",
       description:
         (blog && pickText(blog.description ?? undefined, lang)) || undefined,
     };

@@ -29,15 +29,12 @@ interface PageProps {
   params: Promise<{ domain: string }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { domain } = await params;
-  try {
-    const store = await fetchStoreByDomain(domain);
-    return { title: `Cart | ${store?.name || "Store"}`, robots: NOINDEX_ROBOTS };
-  } catch {
-    return { title: "Cart", robots: NOINDEX_ROBOTS };
-  }
-}
+// Entity title only — the `[domain]` layout's title template appends the store
+// name, so this no longer needs to resolve the store.
+export const metadata: Metadata = {
+  title: "Cart",
+  robots: NOINDEX_ROBOTS,
+};
 
 export default async function CartPage({ params }: PageProps) {
   const { domain } = await params;

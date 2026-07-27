@@ -18,8 +18,16 @@ import { fetchCustomerOrder } from "@/lib/api-client";
 import { notFound } from "next/navigation";
 import { ThankYou } from "./ThankYou";
 import { FunnelTracker } from "@/components/tracking/FunnelTracker";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
+import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
+
+// checkout/layout.tsx already noindexes the whole segment; declared here too
+// because this is the confirmation URL buyers actually share and paste (it
+// carries a real order id), so it should not depend on an ancestor layout it
+// could one day be moved out of.
+export const metadata: Metadata = { robots: NOINDEX_ROBOTS };
 
 interface PageProps {
   params: Promise<{ domain: string; order_id: string }>;

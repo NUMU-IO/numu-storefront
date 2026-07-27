@@ -10,6 +10,15 @@ import {
   serializeLd,
 } from "@/lib/json-ld";
 import { SsrCollectionContent } from "@/components/seo/SsrContentLayer";
+import {
+  alternatesFor,
+  canonicalFor,
+  canonicalOriginFor,
+  buildOpenGraph,
+  buildTwitter,
+  storeSocialImage,
+  type StoreForSeo,
+} from "@/lib/seo";
 import { headers } from "next/headers";
 import type { Metadata } from "next";
 
@@ -28,31 +37,38 @@ interface PageProps {
   params: Promise<{ domain: string; slug: string }>;
 }
 
-function storeBaseUrl(domain: string): string {
-  const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
-  const isProd = process.env.NEXT_PUBLIC_NUMU_ENV === "production";
-  return isProd
-    ? `https://${domain}.${platformDomain}`
-    : `http://localhost:3000/${domain}`;
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { domain, slug } = await params;
   try {
     const store = await fetchStoreByDomain(domain);
     const collection = await fetchCollectionBySlug(store.id, slug);
+    const storeForSeo = store as unknown as StoreForSeo;
+    // Origin via canonicalOriginFor (the ONE implementation) — the local copy
+    // this replaces ignored the store's custom domain entirely.
+    const path = `/collections/${slug}`;
+    const title = collection?.name || "Collection";
+    const description = collection?.description || "";
+    // The collection's own image, falling back to the store's social image so
+    // the card is never blank.
+    const image = collection?.image_url || storeSocialImage(storeForSeo);
     return {
-      title: `${collection?.name || "Collection"} | ${store?.name || "Store"}`,
-      description: collection?.description || "",
-      alternates: {
-        canonical: `${storeBaseUrl(domain)}/collections/${slug}`,
-      },
-      openGraph: {
-        title: collection?.name,
-        description: collection?.description,
-        type: "website",
-        images: collection?.image_url ? [collection.image_url] : undefined,
-      },
+      // Entity title only — the layout's template appends the store name.
+      title,
+      description,
+      alternates: alternatesFor(storeForSeo, domain, path),
+      // og:url was missing entirely, so scrapers fell back to the requested
+      // URL or (worse) the layout's origin-wide value. Built with the shared
+      // helper so siteName + og:locale come along too.
+      openGraph: buildOpenGraph(storeForSeo, {
+        title,
+        description,
+        url: canonicalFor(storeForSeo, domain, path),
+        image,
+      }),
+      // Declaring openGraph REPLACES the layout's, but twitter was still
+      // inherited — so the card showed the STORE's title and image next to
+      // this collection's og:title. Give the route its own.
+      twitter: buildTwitter({ title, description, image }),
     };
   } catch {
     return { title: "Collection" };
@@ -86,7 +102,7 @@ export default async function CollectionPage({ params }: PageProps) {
 
   // JSON-LD: emit a CollectionPage block + breadcrumbs so search
   // engines surface "Collection: <name>" results with the right URL.
-  const baseUrl = storeBaseUrl(domain);
+  const baseUrl = canonicalOriginFor(store as unknown as StoreForSeo, domain);
   const collectionLd = collection
     ? buildCollectionLd({ collection, baseUrl })
     : null;
