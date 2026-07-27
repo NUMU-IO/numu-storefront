@@ -17,20 +17,18 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { ProfilePage } from "@/components/account/Dashboard";
 import type { Metadata } from "next";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { domain } = await params;
-  try {
-    const store = await fetchStoreByDomain(domain);
-    return { title: `Profile | ${store?.name || "Store"}` };
-  } catch {
-    return { title: "Profile" };
-  }
-}
+// Entity title only — the `[domain]` layout's title template appends the store
+// name, so this no longer needs to resolve the store.
+export const metadata: Metadata = {
+  title: "Profile",
+  robots: NOINDEX_ROBOTS,
+};
 
 export default async function ProfileRoute({ params }: PageProps) {
   const { domain } = await params;

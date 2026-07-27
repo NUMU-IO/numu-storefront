@@ -8,6 +8,7 @@ import {
   buildWebsiteLd,
   serializeLd,
 } from "@/lib/json-ld";
+import { canonicalOriginFor, type StoreForSeo } from "@/lib/seo";
 import { SsrHomeContent } from "@/components/seo/SsrContentLayer";
 import { resolveThemeSsrHtml } from "@/lib/ssr-theme-request";
 import { headers } from "next/headers";
@@ -123,11 +124,13 @@ export default async function HomePage({ params }: PageProps) {
   // Both are recommended by Google's rich-results guidelines:
   //   - Organization powers the Knowledge Graph card
   //   - WebSite + SearchAction enables the sitelinks search box
-  const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
-  const isProd = process.env.NEXT_PUBLIC_NUMU_ENV === "production";
-  const baseUrl = isProd
-    ? `https://${(store as { custom_domain?: string }).custom_domain || `${domain}.${platformDomain}`}`
-    : `http://localhost:3000/${domain}`;
+  //
+  // Origin via canonicalOriginFor, not a local copy of the same conditional:
+  // the local copy trusted `custom_domain` with no status check (so an
+  // unverified hostname leaked into the store's own entity `@id` and url) and
+  // pointed at the wrong dev port.
+  const storeForSeo = store as unknown as StoreForSeo;
+  const baseUrl = canonicalOriginFor(storeForSeo, domain);
   const organizationLd = buildOrganizationLd({
     baseUrl,
     storeName: store.name || domain,
@@ -135,6 +138,10 @@ export default async function HomePage({ params }: PageProps) {
     description: (store as { description?: string }).description ?? null,
     socialLinks:
       (store as { social_links?: Record<string, string> }).social_links ?? null,
+    // Merchant-declared Schema.org subtype ("ClothingStore", …) so the
+    // homepage says what kind of retailer this is instead of "some
+    // organization" — the classification signal crawlers actually read.
+    businessType: storeForSeo.seo?.business_type ?? null,
   });
   const websiteLd = buildWebsiteLd({
     baseUrl,

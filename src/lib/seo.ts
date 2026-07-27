@@ -33,9 +33,28 @@ export interface StoreForSeo {
     robots_indexing_enabled?: boolean | null;
     google_site_verification?: string | null;
     bing_site_verification?: string | null;
+    /** Schema.org Organization subtype the merchant picked (e.g.
+     *  "ClothingStore"). Narrows the homepage Organization JSON-LD from a
+     *  generic org to a retailer — a classification signal Meta and Google
+     *  both read. Null = plain "Organization". */
+    business_type?: string | null;
+    /** The merchant has committed to a 30-day return window. Gates the
+     *  PDP's `hasMerchantReturnPolicy` — we never assert a policy the
+     *  merchant hasn't claimed. */
+    has_return_policy_30d?: boolean | null;
   } | null;
   settings?: Record<string, unknown> | null;
   theme_settings?: Record<string, unknown> | null;
+}
+
+/** The custom-domain lifecycle block the backend persists under
+ *  `settings.custom_domain` (`_persist_domain_state` in stores.py). */
+interface CustomDomainSettings {
+  custom_domain?: {
+    hostname?: string | null;
+    /** pending_dns › verifying › active, or failed. */
+    status?: string | null;
+  } | null;
 }
 
 export const NOINDEX_ROBOTS: Metadata["robots"] = {
@@ -75,18 +94,151 @@ export function storeRobots(
   return INDEX_ROBOTS;
 }
 
-/** Canonical origin: custom domain › subdomain in prod; path-segment in dev. */
+/**
+ * The merchant's custom hostname — but ONLY once it actually serves the store.
+ *
+ * `store.custom_domain` is written the moment the merchant types a domain into
+ * the hub's Domains tab, BEFORE Cloudflare validates DNS or issues a cert, and
+ * it stays written when validation never succeeds. The lifecycle lives beside
+ * it in `settings.custom_domain.status` (pending_dns › verifying › active, or
+ * failed), so only `active` means the hostname resolves to this storefront.
+ *
+ * Canonicalising to an unverified host is how a live store de-indexes itself:
+ * every URL declares "the real me lives at <host>", Google follows, gets
+ * nothing, and drops the URLs that do work. That is exactly what happened in
+ * production (an unowned domain typed into the Domains tab) — the store row was
+ * cleaned up afterwards, but the code kept trusting the column, so the next
+ * merchant to type a domain would have repeated it.
+ */
+function verifiedCustomHost(store: StoreForSeo | null | undefined): string | null {
+  const host = (store?.custom_domain ?? "").trim();
+  if (!host) return null;
+  const status = (
+    (store?.settings as unknown as CustomDomainSettings | null | undefined)
+      ?.custom_domain?.status ?? ""
+  )
+    .toString()
+    .toLowerCase();
+  return status === "active" ? host : null;
+}
+
+/** Canonical origin: VERIFIED custom domain › subdomain in prod; path-segment
+ *  in dev. The ONE origin helper — every surface that builds an absolute
+ *  storefront URL must go through here so canonical, og:url, hreflang and
+ *  JSON-LD can never disagree about which host the store lives on. */
 export function canonicalOriginFor(
   store: StoreForSeo | null | undefined,
   domain: string,
 ): string {
   if (IS_PROD) {
-    const custom = (store?.custom_domain ?? "").trim();
+    const custom = verifiedCustomHost(store);
     if (custom) return `https://${custom}`;
     const sub = (store?.subdomain ?? "").trim() || domain;
     return `https://${sub}.${PLATFORM_DOMAIN}`;
   }
   return `http://localhost:3100/${domain}`;
+}
+
+/** Normalize a storefront path for canonical/alternate URLs: leading slash, no
+ *  trailing slash, no query/fragment — `/products`, `/products/` and
+ *  `/products?utm_source=ig` must all advertise the SAME canonical, otherwise
+ *  every campaign link splits the page's ranking signals. Root → "". */
+function canonicalPath(path: string | null | undefined): string {
+  const raw = (path ?? "").split("#")[0].split("?")[0].trim();
+  if (!raw || raw === "/") return "";
+  const withSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  return withSlash.length > 1 && withSlash.endsWith("/")
+    ? withSlash.slice(0, -1)
+    : withSlash;
+}
+
+/**
+ * Absolute canonical URL for ONE storefront route.
+ *
+ * The `[domain]` layout used to emit `alternates.canonical = <origin>` for its
+ * whole subtree, and Next inherits a parent's `alternates` into every child
+ * that doesn't override them. So /products, /collections, /blogs, /pages/*,
+ * /policies/*, /search — every route except the PDP and collection detail —
+ * declared itself a duplicate of the home page, and Google drops duplicates.
+ * Canonicals are per-URL: pass the route's own path.
+ */
+export function canonicalFor(
+  store: StoreForSeo | null | undefined,
+  domain: string,
+  path?: string | null,
+): string {
+  const origin = canonicalOriginFor(store, domain);
+  const p = canonicalPath(path);
+  // The root keeps its trailing slash: that is the form the store is linked
+  // and indexed under, and `metadataBase` is built from the same string.
+  return p ? `${origin}${p}` : `${origin}/`;
+}
+
+/** hreflang value → the locale URL prefix `proxy.ts` resolves. The proxy
+ *  strips a leading 2-letter segment and stamps `x-numu-locale`, so `/ar/...`
+ *  is the path-prefixed form the storefront actually serves (the `?locale=`
+ *  query works too, but a query-string alternate is far weaker to crawlers).
+ *  Every NUMU store is en/ar bilingual by construction (LocalizedString), so
+ *  both entries always exist. */
+const HREFLANG_PREFIXES: ReadonlyArray<readonly [string, string]> = [
+  ["en-EG", "en"],
+  ["ar-EG", "ar"],
+];
+
+/**
+ * `alternates` for a route: the per-URL canonical plus en/ar hreflang.
+ *
+ * Arabic is where Egyptian shoppers actually search, and the storefront has
+ * served full ar content (og:locale already emits ar_EG) without ever telling
+ * a crawler the Arabic URL exists.
+ *
+ * ⚠️ `x-default` and the canonical are the UN-prefixed URL, which serves the
+ * store's own `default_language`. The Arabic URL therefore consolidates into
+ * the un-prefixed one rather than self-canonicalising — `proxy.ts` strips the
+ * locale prefix before stamping `x-numu-pathname`, so a shared layout cannot
+ * reconstruct `/ar/...` for the current request. Making each locale
+ * self-canonical needs the proxy to stamp the pre-strip pathname too.
+ */
+export function alternatesFor(
+  store: StoreForSeo | null | undefined,
+  domain: string,
+  path?: string | null,
+): NonNullable<Metadata["alternates"]> {
+  const canonical = canonicalFor(store, domain, path);
+  const origin = canonicalOriginFor(store, domain);
+  const p = canonicalPath(path);
+  const languages: Record<string, string> = {};
+  for (const [hreflang, prefix] of HREFLANG_PREFIXES) {
+    languages[hreflang] = `${origin}/${prefix}${p}`;
+  }
+  languages["x-default"] = canonical;
+  return { canonical, languages };
+}
+
+/**
+ * The visitor-facing path of the current request, from the pathname the proxy
+ * stamps on every storefront response (`x-numu-pathname`, e.g.
+ * `/vionne/products/aisha-scarf`).
+ *
+ * A layout's `generateMetadata` never sees the child route's params, so this
+ * header is the only channel through which the shared `[domain]` layout can
+ * emit a per-URL canonical instead of one origin for the whole subtree.
+ * Falls back to "/" when the header is missing (a request that reached the app
+ * without passing through the proxy).
+ */
+export function visitorPathFromHeaders(
+  headerList: { get(name: string): string | null },
+  domain: string,
+): string {
+  const raw = (headerList.get("x-numu-pathname") ?? "").trim();
+  if (!raw) return "/";
+  // Strip the tenant segment only on a real segment boundary: a bare
+  // `startsWith("/" + domain)` also matches a different store whose subdomain
+  // merely starts with this one (`/vionne` vs `/vionne-outlet`).
+  const prefix = `/${domain}`;
+  if (raw === prefix) return "/";
+  if (raw.startsWith(`${prefix}/`)) return raw.slice(prefix.length);
+  return raw;
 }
 
 export function storeSeoTitle(store: StoreForSeo | null | undefined): string {
@@ -140,6 +292,51 @@ export function buildOpenGraph(
     og.images = [{ url: opts.image, alt: opts.title, width: 1200, height: 630 }];
   }
   return og;
+}
+
+/**
+ * The OG product properties for a PDP, as `[property, content]` pairs the
+ * caller renders as `<meta property=… />`.
+ *
+ * WHY these matter: Meta's crawler reads `og:type` + `product:*` to decide a
+ * page is commerce. A PDP that declares `og:type=website` and carries no
+ * product properties reads as generic content — which is how a clothing store
+ * gets bucketed into an unrelated category and loses ad eligibility.
+ *
+ * WHY they can't go through Next's `metadata` object:
+ *   - `openGraph.type: "product"` doesn't typecheck (Next's `OpenGraphType`
+ *     union has no "product") and, worse, Next's metadata renderer switches
+ *     over the known types and THROWS on anything else — "Invalid OpenGraph
+ *     type" (E237) would 500 every PDP.
+ *   - `other: {…}` renders `<meta name=…>`, but OGP properties must use
+ *     `property=`.
+ * So the route emits them itself; React hoists `<meta>` into <head> the same
+ * way it hoists the PDP's existing `rel=preload` link.
+ *
+ * The caller must therefore NOT set `openGraph.type` — otherwise the page
+ * carries two conflicting og:type tags.
+ */
+export function productOgProperties(opts: {
+  /** Major units (the storefront's price convention), not cents. */
+  price?: number | null;
+  currency: string;
+  inStock: boolean;
+  /** The merchant's real SKU — never the product UUID. */
+  sku?: string | null;
+  brand?: string | null;
+}): Array<[string, string]> {
+  const tags: Array<[string, string]> = [["og:type", "product"]];
+  if (typeof opts.price === "number" && Number.isFinite(opts.price)) {
+    tags.push(["product:price:amount", String(opts.price)]);
+    tags.push(["product:price:currency", opts.currency]);
+  }
+  // Meta's vocabulary is the spaced form, not schema.org's InStock.
+  tags.push(["product:availability", opts.inStock ? "in stock" : "out of stock"]);
+  const sku = (opts.sku ?? "").trim();
+  if (sku) tags.push(["product:retailer_item_id", sku]);
+  const brand = (opts.brand ?? "").trim();
+  if (brand) tags.push(["product:brand", brand]);
+  return tags;
 }
 
 export function buildTwitter(opts: {

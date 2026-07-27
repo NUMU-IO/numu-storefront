@@ -7,6 +7,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import BuiltInCollectionsIndex from "@/components/storefront/BuiltInCollectionsIndex";
+import { alternatesFor, type StoreForSeo } from "@/lib/seo";
 import { headers } from "next/headers";
 import type { Metadata } from "next";
 
@@ -33,8 +34,17 @@ export async function generateMetadata({
   try {
     const store = await fetchStoreByDomain(domain);
     return {
-      title: `Collections | ${store?.name || "Store"}`,
+      // Entity title only — the layout's template appends the store name.
+      title: "Collections",
       description: `Browse every collection from ${store?.name || domain}.`,
+      // Explicit for the same reason as /products: the header-derived layout
+      // canonical is the fallback, not the contract, for a route that must be
+      // indexed in its own right. `openGraph` stays inherited from the layout.
+      alternates: alternatesFor(
+        store as unknown as StoreForSeo,
+        domain,
+        "/collections",
+      ),
     };
   } catch {
     return { title: "Collections" };

@@ -47,7 +47,9 @@ export async function generateMetadata({
     const a = await fetchArticleByHandle(store.id, blog, article).catch(
       () => null,
     );
-    if (!a) return { title: `Article | ${store.name}` };
+    // Entity title only throughout — the `[domain]` layout's title template
+    // appends the store name.
+    if (!a) return { title: "Article" };
     const lang = await resolveVisitorLang(store);
     const title =
       seoText(a.seo, "title", lang) || pickText(a.title, lang) || a.handle;
@@ -56,7 +58,7 @@ export async function generateMetadata({
       pickText(a.excerpt ?? undefined, lang) ||
       undefined;
     return {
-      title: `${title} | ${store.name}`,
+      title,
       description,
       openGraph: {
         title,

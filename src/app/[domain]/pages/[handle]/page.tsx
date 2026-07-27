@@ -17,6 +17,8 @@ import {
 } from "@/lib/api-client";
 import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme";
 import { sanitizeHtml } from "@/lib/sanitize-html";
+import { catchAllOwnsHandle } from "@/lib/content-pages";
+import { alternatesFor, type StoreForSeo } from "@/lib/seo";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
@@ -56,9 +58,32 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       pick(page?.title, lang) ||
       humanize(handle);
     const description = seoStr(page?.seo, "description", lang);
+
+    // Duplicate-URL consolidation. A handle the `[...slug]` catch-all serves —
+    // because the theme templates it, or because this very CMS record backs it
+    // — is ALSO reachable at `/{handle}`, which is the designed page the theme's
+    // own nav points at. That URL is the original, so this plainer copy
+    // canonicalises into it instead of competing with it. Same predicate as the
+    // catch-all's self-canonical, so the two can't both claim to be the
+    // original; a handle with no twin (the catch-all 404s it) stays
+    // self-canonical here.
+    const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
+    const themeSettings = themeRaw
+      ? resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {})
+      : null;
+    const hasBody = pick(page?.body, lang).trim().length > 0;
+    const canonicalPath = catchAllOwnsHandle(handle, themeSettings, hasBody)
+      ? `/${handle}`
+      : `/pages/${handle}`;
+
     return {
-      title: `${title} | ${store?.name || "Store"}`,
+      title,
       ...(description ? { description } : {}),
+      alternates: alternatesFor(
+        store as unknown as StoreForSeo,
+        domain,
+        canonicalPath,
+      ),
     };
   } catch {
     return { title: humanize(handle) };

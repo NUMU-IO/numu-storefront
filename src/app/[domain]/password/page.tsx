@@ -16,6 +16,7 @@ import { fetchStoreByDomain } from "@/lib/api-client";
 import { readPasswordProtection } from "@/lib/store-lock";
 import { resolveByotFork } from "@/lib/byot-fork";
 import { PasswordForm } from "@/components/account/PasswordGateForm";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -23,13 +24,24 @@ interface PageProps {
   searchParams: Promise<{ next?: string }>;
 }
 
+// While the gate is on, the shell redirects EVERY route here, so this is the
+// only page a crawler can reach — and with no `robots` key it inherited the
+// shell's `index, follow`, i.e. "Coming soon" got indexed as the store's
+// homepage and kept ranking there after launch. Cloudflare owns robots.txt on
+// these hosts (and allows everything), so the meta tag is the enforceable layer.
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { domain } = await params;
   try {
     const store = await fetchStoreByDomain(domain);
-    return { title: `${store?.name || "Store"} — Coming soon` };
+    return {
+      // `absolute` opts out of the shell's `%s · <store>` title template: this
+      // page deliberately LEADS with the store name, and letting the template
+      // append it again printed it twice ("Vionne — Coming soon · Vionne").
+      title: { absolute: `${store?.name || "Store"} — Coming soon` },
+      robots: NOINDEX_ROBOTS,
+    };
   } catch {
-    return { title: "Coming soon" };
+    return { title: "Coming soon", robots: NOINDEX_ROBOTS };
   }
 }
 

@@ -168,8 +168,8 @@ export async function GET(req: NextRequest) {
     // normalized, validated URL) so stray whitespace/control chars can't
     // malform the redirect. CF options precede the source segment, so the
     // source's own query string can never override them.
-    const cfUrl = `${req.nextUrl.origin}/cdn-cgi/image/${opts.join(",")}/${target.href}`;
-    return NextResponse.redirect(cfUrl, 302);
+    const cfUrl = `/cdn-cgi/image/${opts.join(",")}/${target.href}`;
+    return sameOriginRedirect(cfUrl);
   }
 
   // Build the Next.js built-in optimizer URL. `_next/image` accepts:
@@ -188,7 +188,28 @@ export async function GET(req: NextRequest) {
   // 302 to the optimizer. Browsers cache the redirect target with the
   // optimizer's own headers (immutable + 1y for hashed filenames).
   const target302 = `/_next/image?${optimizerParams.toString()}`;
-  return NextResponse.redirect(new URL(target302, req.nextUrl.origin), 302);
+  return sameOriginRedirect(target302);
+}
+
+/**
+ * 302 to a path on the SAME origin, using a relative `Location`.
+ *
+ * Why not `NextResponse.redirect(new URL(path, req.nextUrl.origin))`:
+ * behind the production reverse proxy `req.nextUrl.origin` is derived from the
+ * address the Next server is *bound* to, not the public host — in prod that is
+ * `0.0.0.0:3000`. Every transform therefore redirected the browser to
+ * `https://0.0.0.0:3000/_next/image?...`, which fails with
+ * ERR_ADDRESS_INVALID / ECONNREFUSED. Symptom: hero and focal-crop images
+ * silently never painted (and the LCP `<link rel=preload as=image>` pointing at
+ * this route became a dead preload), fleet-wide on every store.
+ *
+ * A relative Location is valid per RFC 7231 §7.1.2 and the browser resolves it
+ * against the request URL, so the public host, port and scheme are whatever the
+ * visitor actually used. That is strictly more robust than reconstructing the
+ * origin from X-Forwarded-* headers, which we would then have to trust.
+ */
+function sameOriginRedirect(path: string): NextResponse {
+  return new NextResponse(null, { status: 302, headers: { Location: path } });
 }
 
 function clampInt(
