@@ -13,16 +13,38 @@
  * store has no brand colours.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ResolvedPromotion } from "@/lib/promo-server";
-import { postPromo, pickBi } from "@/lib/promo-client";
+import { postPromo } from "@/lib/promo-client";
 
 const CONSENT_KEY = "numu_cookie_consent_v1";
 
 interface CookieContent {
   accept_required?: boolean;
   policy_url?: string | null;
+}
+
+/**
+ * The merchant's copy for the ACTIVE locale ONLY — deliberately not `pickBi`.
+ *
+ * The shared helper answers `en ?? ar` (and `ar ?? en`), and that cross-language
+ * fallback is what put Arabic consent copy on `lang="en"` pages: promotions in
+ * the wild carry `headline.ar` / `body.ar` and no English at all, so every
+ * English visitor was handed the Arabic. Cross-falling back is right for a
+ * marketing headline — some copy beats none — but this is the notice a shopper
+ * is asked to consent to, and text in a language they may not read is worse
+ * than the platform's own translated default below. So an unauthored language
+ * resolves to "" and the default takes over; a merchant who wrote only Arabic
+ * still serves it to Arabic visitors, and one who wrote both keeps both.
+ */
+function authoredCopy(
+  tx: Record<string, unknown> | undefined,
+  field: string,
+  isAr: boolean,
+): string {
+  const f = tx?.[field] as { ar?: string; en?: string } | undefined;
+  return ((isAr ? f?.ar : f?.en) ?? "").toString();
 }
 
 function hasConsent(): boolean {
@@ -77,11 +99,27 @@ export function CookieBanner({
    *  store (amber/cream for bazar). Optional — falls back to neutral. */
   brandVars?: Record<string, string>;
 }) {
-  const isAr = locale === "ar";
   const content = (promotion.content ?? {}) as CookieContent;
   const [show, setShow] = useState(false);
+  const bannerRef = useRef<HTMLDivElement>(null);
+  // Seeded from the SSR prop, then corrected against the document below.
+  const [isAr, setIsAr] = useState(locale === "ar");
 
   useEffect(() => {
+    // Locale: read `<html lang>`, the same signal every checkout step uses
+    // (ContactStep, ShippingStep, PaymentStep, ReviewStep, TrackLookup …).
+    //
+    // The `locale` prop reaches this component by a DIFFERENT route than the
+    // `lang` attribute does, and the two can disagree: with no visitor locale
+    // override the root layout falls back to the store's `default_language`,
+    // while [domain]/layout.tsx collapses that same absent override to "en" for
+    // the promo surfaces — so on an Arabic-default store the page is `lang="ar"`
+    // and this banner was handed "en". The document is what the visitor is
+    // actually being served, so it wins; and because the banner stays hidden
+    // until this effect runs, the corrected copy is the only copy ever painted.
+    if (typeof document !== "undefined") {
+      setIsAr(document.documentElement.lang === "ar");
+    }
     if (!hasConsent()) {
       setShow(true);
       postPromo(promotion.promotion_id, "events", {
@@ -91,13 +129,49 @@ export function CookieBanner({
     }
   }, [promotion.promotion_id]);
 
+  /**
+   * Reserve the banner's height at the foot of the document while it is shown.
+   *
+   * The banner is `position: fixed` at the bottom of the viewport, so it takes
+   * no space in flow and silently covers whatever the page put there — measured
+   * on /track, it sat over the "Continue shopping" link, i.e. an interactive
+   * element the shopper could neither see nor click. Raising z-index or moving
+   * the card can't fix that; only giving the document somewhere to end can.
+   *
+   * Padding on <body> is the one lever that works for every page at once
+   * (theme-rendered and host-rendered alike). With the border-box sizing
+   * Tailwind's preflight applies, it also counts inside the `min-height: 100svh`
+   * that globals.css puts on <body>, so a short page shrinks to make room
+   * instead of gaining a scrollbar. Measured (the outer fixed element, so its
+   * own gutter counts) rather than hardcoded: the card reflows from one row to a
+   * stacked column below `sm`, and its copy is merchant-authored, so its height
+   * is not a constant. Restored on cleanup — same save/restore shape as
+   * LocationDialog's scroll lock.
+   */
+  useEffect(() => {
+    const banner = bannerRef.current;
+    if (!show || !banner) return;
+    const previousPadding = document.body.style.paddingBottom;
+    const reserve = () => {
+      document.body.style.paddingBottom = `${banner.offsetHeight}px`;
+    };
+    reserve();
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(reserve) : null;
+    observer?.observe(banner);
+    return () => {
+      observer?.disconnect();
+      document.body.style.paddingBottom = previousPadding;
+    };
+  }, [show]);
+
   if (!show) return null;
 
   const headline =
-    pickBi(promotion.translated_content, "headline", isAr) ||
+    authoredCopy(promotion.translated_content, "headline", isAr) ||
     (isAr ? "نحن نحترم خصوصيتك" : "We value your privacy");
   const body =
-    pickBi(promotion.translated_content, "body", isAr) ||
+    authoredCopy(promotion.translated_content, "body", isAr) ||
     (isAr
       ? "بنستخدم الكوكيز لتحسين تجربتك في التصفّح وعرض محتوى مناسب ليك وتحليل أداء المتجر."
       : "We use cookies to improve your browsing experience, show relevant content, and analyze our store's performance.");
@@ -115,6 +189,7 @@ export function CookieBanner({
 
   return (
     <div
+      ref={bannerRef}
       className="fixed inset-x-0 bottom-0 z-[200] p-3 sm:p-4"
       role="region"
       aria-label={isAr ? "موافقة ملفات تعريف الارتباط" : "Cookie consent"}

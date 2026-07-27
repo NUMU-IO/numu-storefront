@@ -2,8 +2,8 @@
 
 /**
  * Promotion popup (offers-v2 surface) — host-rendered overlay. Honors the
- * display trigger (on_delay / on_scroll_pct / on_exit_intent defer the open;
- * on_load / always / on_add_to_cart open at first paint), an optional
+ * display trigger (on_delay / on_scroll_pct / on_exit_intent / on_add_to_cart
+ * defer the open; on_load / always open at first paint), an optional
  * email-capture form that reveals a discount code on submit, and per-visitor
  * dismissal via the ✕ or Escape. Mirrors V2's PopupModal, self-contained like
  * AnnouncementBar.
@@ -44,6 +44,7 @@ const DEFERRED_TRIGGERS = new Set([
   "on_delay",
   "on_scroll_pct",
   "on_exit_intent",
+  "on_add_to_cart",
 ]);
 
 /**
@@ -58,11 +59,14 @@ const DEFERRED_TRIGGERS = new Set([
  * So the route suppression list was inert on every real store — the popup
  * still landed on /search, /track and /cart — while looking correct in review.
  *
- * `always` and `on_add_to_cart` are grouped with `on_load` because that is
- * literally what the effect below does with them, not because it is ideal:
- * `on_add_to_cart` arguably ought to wait for the cart event rather than fire
- * on load. Encoding the real behaviour in one place is what keeps the two
- * components from drifting apart again.
+ * `always` is grouped with `on_load` because that is literally what the effect
+ * below does with it. `on_add_to_cart` is NOT: it waits for the SDK's
+ * add-to-cart event, so it belongs with the deferred triggers and the route
+ * list must let it mount — a popup that opens only once the shopper has put
+ * something in the cart is an intent-driven moment (the /cart route is where
+ * it is most useful), not an interstitial thrown at a page on arrival.
+ * Encoding the real behaviour in one place is what keeps the two components
+ * from drifting apart again.
  */
 export function popupOpensAtFirstPaint(
   trigger: string | null | undefined,
@@ -118,6 +122,37 @@ export function PopupModal({
       };
       document.addEventListener("mouseout", onLeave);
       return () => document.removeEventListener("mouseout", onLeave);
+    }
+    if (trigger === "on_add_to_cart") {
+      /**
+       * The add-to-cart signal already in this codebase: the SDK's cart
+       * `addItem` dispatches `numu:analytics:event` with `event:"add_to_cart"`
+       * after a SUCCESSFUL write (a rejected add fires nothing), and the host's
+       * <MetaPixel>/<TikTokPixel> bridges listen to that exact event. Reusing
+       * it means the popup opens on the same moment the ad platforms record an
+       * AddToCart, instead of on a second signal that could drift from it.
+       *
+       * Known gap, deliberately left as a no-show rather than a wrong-moment
+       * show: the host's own built-in product page (BuiltInProductDetail, the
+       * fallback for a store with no external theme) POSTs /api/cart/add and
+       * announces only `numu:cart:updated`, which also fires on remove and on
+       * quantity edits. Opening a popup when a shopper EMPTIES their cart is
+       * the very failure this branch exists to remove, so we do not subscribe
+       * to it — on those stores the trigger simply never fires.
+       */
+      const onAnalytics = (e: Event) => {
+        const detail = (e as CustomEvent<{ event?: string }>).detail;
+        if (detail?.event === "add_to_cart") show();
+      };
+      window.addEventListener(
+        "numu:analytics:event",
+        onAnalytics as EventListener,
+      );
+      return () =>
+        window.removeEventListener(
+          "numu:analytics:event",
+          onAnalytics as EventListener,
+        );
     }
     show();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -232,6 +267,30 @@ export function PopupModal({
   const code =
     revealed ?? content.discount_code_to_reveal ?? promotion.coupon_code ?? null;
 
+  /**
+   * Accessible name for the `role="dialog"` container.
+   *
+   * `aria-modal="true"` tells assistive tech the rest of the page is inert, and
+   * the only thing it can then announce is the dialog's own name — with neither
+   * `aria-labelledby` nor `aria-label` a screen reader read out a bare, unnamed
+   * "dialog" on every store running a popup, giving the visitor nothing to
+   * decide on before they are trapped inside it.
+   *
+   * Prefer the merchant's headline (the visible name — WCAG 2.5.3), falling
+   * back to a generic label for the two layouts that have no headline element
+   * to point at: the custom-HTML variant, whose content lives inside a
+   * sandboxed iframe this document cannot reference across, and a headline-less
+   * popup (body / image / code only). Exactly one of the two attributes is ever
+   * set, so `aria-labelledby` can never point at an id that wasn't rendered.
+   */
+  const headlineId = `numu-promo-${promotion.promotion_id}-title`;
+  const labelledBy = !isCustom && headline ? headlineId : undefined;
+  const fallbackLabel = labelledBy
+    ? undefined
+    : isAr
+      ? "عرض ترويجي"
+      : "Promotion";
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || busy) return;
@@ -255,6 +314,8 @@ export function PopupModal({
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 outline-none"
       role="dialog"
       aria-modal="true"
+      aria-labelledby={labelledBy}
+      aria-label={fallbackLabel}
       dir={isAr ? "rtl" : "ltr"}
     >
       <div className="absolute inset-0 bg-black/50" onClick={close} aria-hidden />
@@ -290,7 +351,12 @@ export function PopupModal({
         )}
         <div className="p-6 text-center">
           {headline && (
-            <h2 className="mb-2 text-xl font-semibold text-gray-900">{headline}</h2>
+            <h2
+              id={headlineId}
+              className="mb-2 text-xl font-semibold text-gray-900"
+            >
+              {headline}
+            </h2>
           )}
           {body && <p className="mb-4 text-sm text-gray-600">{body}</p>}
           {code ? (
