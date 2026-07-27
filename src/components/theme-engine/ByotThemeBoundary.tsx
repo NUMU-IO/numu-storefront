@@ -12,6 +12,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { usePathname } from "next/navigation";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
 import StorefrontSkeleton from "@/components/theme-engine/StorefrontSkeleton";
 import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
@@ -68,13 +69,31 @@ interface ByotThemeBoundaryProps {
    * when the theme renders fine — that's the whole point: a crawler that runs
    * no JS, and a no-JS visitor, get real content instead of "Loading…".
    *
-   * It is rendered as the mount container's initial children and dropped by
-   * this component the instant React hydrates (see `hydrated` below) — i.e.
-   * before the theme bundle has even finished downloading. So a real visitor
-   * never sees it duplicated alongside the theme, and — because host React
-   * removes the nodes itself rather than letting the bundle's
-   * `createRoot(el)` clear them out from under it — there is no DOM-ownership
-   * conflict between the two React trees.
+   * It is rendered as a SIBLING of the mount container and dropped the instant
+   * React hydrates (see `hydrated` below).
+   *
+   * ⚠️ It used to be rendered as the container's initial *children*, on the
+   * reasoning that host React would always remove them before the bundle's
+   * `createRoot(el)` could clear them, so the two React trees never contended
+   * for the same DOM. That invariant only held while the bundle download was
+   * slow. On a **popstate/Back** navigation the theme module is already in the
+   * module cache, so `await import()` settles in a microtask and
+   * `createRoot(container).render()` empties the container BEFORE React flushes
+   * the `setHydrated(true)` re-render. React then committed a deletion for a
+   * node whose `parentNode` was already null:
+   *
+   *   NotFoundError: Failed to execute 'removeChild' on 'Node':
+   *   The node to be removed is not a child of this node.
+   *
+   * thrown from `commitDeletionEffects`. Reproduced 7/7 on Back into any route
+   * carrying this layer (`/`, `/search`, `/products/{handle}`) and 0/12 on hard
+   * loads and forward navigations. Because the boundary caught it, the shopper
+   * got the route fallback on `/search` and "Failed to load theme" on routes
+   * with none.
+   *
+   * A sibling costs a brief layout shift when the theme takes over, and removes
+   * the shared-ownership hazard entirely: no node host React manages is ever
+   * inside the element the bundle owns. That trade is not close.
    */
   seoContent?: ReactNode;
   /**
@@ -235,13 +254,34 @@ interface BoundaryState {
 }
 
 class ThemeRenderBoundary extends Component<
-  { children: ReactNode; onError: (err: Error) => void; fallback: ReactNode },
+  {
+    children: ReactNode;
+    onError: (err: Error) => void;
+    fallback: ReactNode;
+    /**
+     * Changes when the visitor moves to a different page. An error boundary has
+     * no way to recover on its own, so without this a SINGLE throw was
+     * permanent: the boundary kept rendering `fallback` for every subsequent
+     * client-side navigation until a hard reload. One bad render on one route
+     * therefore took out the theme for the rest of the session — which is how a
+     * single `removeChild` race turned into "search is flat AND Back says
+     * Failed to load theme". A route change is new work and deserves a fresh
+     * attempt; if it throws again the boundary simply catches it again.
+     */
+    resetKey?: string;
+  },
   BoundaryState
 > {
   state: BoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): BoundaryState {
     return { error };
+  }
+
+  componentDidUpdate(prev: { resetKey?: string }) {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   componentDidCatch(error: Error) {
@@ -382,6 +422,11 @@ export default function ByotThemeBoundary({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<BundleHandle | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  // Navigation identity. Both this wrapper's `error` and the class boundary's
+  // caught error are sticky by nature, so a single failed render used to
+  // persist for every later client-side navigation until a hard reload. A route
+  // change is a fresh attempt.
+  const pathname = usePathname();
   // With server-rendered theme markup already on screen there is nothing to
   // wait for — showing a skeleton over real content would be a regression.
   const hasSsrHtml = typeof ssrHtml === "string" && ssrHtml.length > 0;
@@ -456,6 +501,11 @@ export default function ByotThemeBoundary({
 
   useEffect(() => {
     let cancelled = false;
+    // Clear any error from a previous route before re-attempting. Without this
+    // the wrapper's `error` is as sticky as the class boundary's was, so one
+    // failed mount kept "Failed to load theme" on screen for every subsequent
+    // client-side navigation until a hard reload.
+    setError(null);
 
     async function load() {
       try {
@@ -764,6 +814,7 @@ export default function ByotThemeBoundary({
         })
       }
       fallback={fallbackUI}
+      resetKey={pathname ?? undefined}
     >
       {/* The page is prerendered, but a BYOT theme paints only after its
           bundle downloads + mounts on the client. This loading branch is part
@@ -818,18 +869,24 @@ export default function ByotThemeBoundary({
           containerRef={containerRef}
         />
       ) : (
-        <div
-          key="byot-bundle-container"
-          ref={containerRef}
-          style={bundleEmpty && !fallbackSlot ? { display: "none" } : undefined}
-        >
-          {/* ADR-7 content layer — crawler/no-JS baseline, removed on hydration.
-              Rendering it INSIDE the container keeps it in the same box the
-              theme will occupy (no layout shift when it goes) and means that
-              even if the removal effect never ran, the bundle's
-              `createRoot(el)` would clear it on its first commit. */}
-          {!hydrated && seoContent ? seoContent : null}
-        </div>
+        <>
+          {/* ADR-7 content layer — crawler/no-JS baseline, dropped on hydration.
+              A SIBLING of the mount container, never a child of it: the bundle
+              calls `createRoot()` on that container and empties it, so anything
+              host React owns in there is a node it may later try to delete
+              after the bundle already removed it. See the `seoContent` prop
+              doc for the NotFoundError that caused. */}
+          {!hydrated && seoContent ? (
+            <div key="byot-seo-content">{seoContent}</div>
+          ) : null}
+          <div
+            key="byot-bundle-container"
+            ref={containerRef}
+            style={
+              bundleEmpty && !fallbackSlot ? { display: "none" } : undefined
+            }
+          />
+        </>
       )}
       {bundleEmpty && !error && !fallbackSlot && (
         <Fragment key="byot-route-fallback">{routeFallback}</Fragment>

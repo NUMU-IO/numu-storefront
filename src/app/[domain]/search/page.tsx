@@ -83,7 +83,12 @@ function SsrSearchContent({
   const q = query.trim();
   // Never throw — a failed catalog fetch degrades to "form only", not a 500.
   const list = Array.isArray(products) ? products : [];
-  const results = q ? list.filter((p) => matchesQuery(p, q)) : list;
+  // No query means no results — NOT the whole catalogue. Falling back to `list`
+  // made a bare /search render "250 results" and 60 product cards, which reads
+  // as a listing page, duplicates /products for a crawler, and buries the one
+  // control the visitor actually came for. An empty search shows the form and
+  // the prompt only; `t.empty` already carries the right copy for this case.
+  const results = q ? list.filter((p) => matchesQuery(p, q)) : [];
   const shown = results.slice(0, 60);
   const t = {
     title: ar ? "نتائج البحث" : "Search",
@@ -135,7 +140,10 @@ function SsrSearchContent({
         </button>
       </form>
 
-      <p className="mt-4 text-sm text-[var(--numu-ink-soft)]">{t.count}</p>
+      {/* Only meaningful once something was searched for. On a bare /search the
+          count would read "0 results", which implies a failed search rather
+          than one not yet made. */}
+      {q && <p className="mt-4 text-sm text-[var(--numu-ink-soft)]">{t.count}</p>}
 
       {shown.length === 0 ? (
         <p className="mt-6">
