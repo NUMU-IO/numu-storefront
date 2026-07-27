@@ -168,7 +168,11 @@ export function canonicalFor(
   path?: string | null,
 ): string {
   const origin = canonicalOriginFor(store, domain);
-  const p = canonicalPath(path);
+  // An ADVERTISED locale prefix is kept, so `/ar/products/x` is its own
+  // canonical; anything else the proxy accepted as a locale is dropped (see
+  // ADVERTISED_LOCALE_PREFIXES).
+  const { prefix, rest } = splitLocalePrefix(canonicalPath(path));
+  const p = prefix ? `/${prefix}${rest}` : rest;
   // The root keeps its trailing slash: that is the form the store is linked
   // and indexed under, and `metadataBase` is built from the same string.
   return p ? `${origin}${p}` : `${origin}/`;
@@ -186,18 +190,56 @@ const HREFLANG_PREFIXES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
+ * The locale prefixes we advertise — and therefore the only ones allowed to own
+ * a canonical of their own.
+ *
+ * `proxy.ts` treats ANY 2-letter first segment as a locale and falls back to the
+ * store's default language for codes it doesn't know, so `/zz/products/x`,
+ * `/qq/products/x`, … all render the same page as `/products/x`. Those must keep
+ * consolidating into the un-prefixed URL: self-canonicalising every 2-letter
+ * prefix would mint 676 crawlable near-duplicates of the entire catalogue.
+ */
+const ADVERTISED_LOCALE_PREFIXES: ReadonlySet<string> = new Set(
+  HREFLANG_PREFIXES.map(([, prefix]) => prefix),
+);
+
+/**
+ * Split an already-normalized path into its ADVERTISED locale prefix and the
+ * locale-free remainder:
+ *   `/ar/products/x` → `{ prefix: "ar", rest: "/products/x" }`
+ *   `/products/x`    → `{ prefix: null, rest: "/products/x" }`
+ *   `/zz/products/x` → `{ prefix: null, rest: "/products/x" }`  (prefix dropped)
+ *   `/ar`            → `{ prefix: "ar", rest: "" }`
+ */
+function splitLocalePrefix(p: string): { prefix: string | null; rest: string } {
+  const seg = p.split("/")[1] ?? "";
+  if (!/^[a-z]{2}$/i.test(seg)) return { prefix: null, rest: p };
+  const lower = seg.toLowerCase();
+  return {
+    prefix: ADVERTISED_LOCALE_PREFIXES.has(lower) ? lower : null,
+    rest: p.slice(seg.length + 1),
+  };
+}
+
+/**
  * `alternates` for a route: the per-URL canonical plus en/ar hreflang.
  *
  * Arabic is where Egyptian shoppers actually search, and the storefront has
  * served full ar content (og:locale already emits ar_EG) without ever telling
  * a crawler the Arabic URL exists.
  *
- * ⚠️ `x-default` and the canonical are the UN-prefixed URL, which serves the
- * store's own `default_language`. The Arabic URL therefore consolidates into
- * the un-prefixed one rather than self-canonicalising — `proxy.ts` strips the
- * locale prefix before stamping `x-numu-pathname`, so a shared layout cannot
- * reconstruct `/ar/...` for the current request. Making each locale
- * self-canonical needs the proxy to stamp the pre-strip pathname too.
+ * Each locale is SELF-canonical: `/ar/products/x` canonicalises to itself, not
+ * to `/products/x`. Google only honours hreflang annotations that sit on
+ * self-canonical pages, so while every Arabic URL declared its English twin
+ * canonical the entire cluster was discarded and Arabic could not rank — the
+ * annotations were there, pointing at pages that disowned them. The locale
+ * prefix reaches us because `proxy.ts` stamps the pre-strip pathname on
+ * `x-numu-visitor-path`.
+ *
+ * `x-default` stays the UN-prefixed URL: that is the one serving the store's own
+ * `default_language`, and the form the store is linked and indexed under. The
+ * hreflang set is always built from the locale-free path, so the same map is
+ * emitted no matter which locale URL is being rendered.
  */
 export function alternatesFor(
   store: StoreForSeo | null | undefined,
@@ -206,39 +248,76 @@ export function alternatesFor(
 ): NonNullable<Metadata["alternates"]> {
   const canonical = canonicalFor(store, domain, path);
   const origin = canonicalOriginFor(store, domain);
-  const p = canonicalPath(path);
+  const { rest } = splitLocalePrefix(canonicalPath(path));
   const languages: Record<string, string> = {};
   for (const [hreflang, prefix] of HREFLANG_PREFIXES) {
-    languages[hreflang] = `${origin}/${prefix}${p}`;
+    languages[hreflang] = `${origin}/${prefix}${rest}`;
   }
-  languages["x-default"] = canonical;
+  languages["x-default"] = canonicalFor(store, domain, rest);
   return { canonical, languages };
 }
 
 /**
- * The visitor-facing path of the current request, from the pathname the proxy
- * stamps on every storefront response (`x-numu-pathname`, e.g.
- * `/vionne/products/aisha-scarf`).
+ * The visitor-facing path of the current request.
  *
- * A layout's `generateMetadata` never sees the child route's params, so this
- * header is the only channel through which the shared `[domain]` layout can
+ * Prefers `x-numu-visitor-path` — the PRE-strip pathname, so a locale-prefixed
+ * URL survives as `/ar/products/aisha-scarf`. Falls back to `x-numu-pathname`
+ * (the rewritten `/vionne/products/aisha-scarf`) for a request that reached the
+ * app without the newer header, and to "/" when neither is present (a request
+ * that bypassed the proxy entirely). The fallback loses only the locale prefix,
+ * i.e. it degrades to exactly the behaviour that shipped before.
+ *
+ * A layout's `generateMetadata` never sees the child route's params, so these
+ * headers are the only channel through which the shared `[domain]` layout can
  * emit a per-URL canonical instead of one origin for the whole subtree.
- * Falls back to "/" when the header is missing (a request that reached the app
- * without passing through the proxy).
  */
 export function visitorPathFromHeaders(
   headerList: { get(name: string): string | null },
   domain: string,
 ): string {
-  const raw = (headerList.get("x-numu-pathname") ?? "").trim();
+  const raw = (
+    headerList.get("x-numu-visitor-path") ??
+    headerList.get("x-numu-pathname") ??
+    ""
+  ).trim();
   if (!raw) return "/";
   // Strip the tenant segment only on a real segment boundary: a bare
   // `startsWith("/" + domain)` also matches a different store whose subdomain
-  // merely starts with this one (`/vionne` vs `/vionne-outlet`).
+  // merely starts with this one (`/vionne` vs `/vionne-outlet`). The visitor
+  // path carries no tenant segment under host-based routing, but it does under
+  // dev path-segment routing — and the fallback header always does.
   const prefix = `/${domain}`;
   if (raw === prefix) return "/";
   if (raw.startsWith(`${prefix}/`)) return raw.slice(prefix.length);
   return raw;
+}
+
+/**
+ * A route's OWN path, carrying the visitor URL's locale prefix.
+ *
+ * The PDP and collection routes know their path exactly (`/products/<slug>`) and
+ * must keep using it — deriving the whole path from a header would send the
+ * canonical of a proxy-less request to the store root. What they cannot know is
+ * whether the visitor asked for `/ar/products/<slug>`, which is what makes the
+ * Arabic URL self-canonical.
+ *
+ * The prefix comes from the visitor PATH, deliberately NOT from
+ * `x-numu-locale`: that header also resolves `?locale=` and the `numu_locale`
+ * cookie, so an ar-cookied visitor on the un-prefixed URL would have
+ * `/products/x` canonicalise onto `/ar/products/x` while its own `x-default`
+ * pointed back at `/products/x` — annotations contradicting each other. Only the
+ * URL prefix is a statement about WHICH URL this is.
+ */
+export function localizedPathFor(
+  headerList: { get(name: string): string | null },
+  domain: string,
+  path: string,
+): string {
+  const { prefix } = splitLocalePrefix(
+    canonicalPath(visitorPathFromHeaders(headerList, domain)),
+  );
+  const p = canonicalPath(path);
+  return prefix ? `/${prefix}${p}` : p;
 }
 
 export function storeSeoTitle(store: StoreForSeo | null | undefined): string {
@@ -255,6 +334,72 @@ export function storeSeoDescription(store: StoreForSeo | null | undefined): stri
   return ar
     ? `تسوّق من ${name} — تشكيلة مختارة وتوصيل لكل محافظات مصر، والدفع عند الاستلام متاح.`
     : `Shop ${name} — a curated selection with shipping across Egypt. Cash on delivery available.`;
+}
+
+/** True when the request's resolved locale is Arabic (`ar`, `ar-EG`, `ar_EG`). */
+export function isArabicLocale(locale: string | null | undefined): boolean {
+  return (locale ?? "").trim().toLowerCase().startsWith("ar");
+}
+
+/** The trimmed string, or null for anything that isn't usable copy. */
+function nonEmptyText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+/** A loose catalogue entity — product or collection — plus the Arabic copy the
+ *  platform stores under `attributes` (`nameAr`, `descriptionAr`, `seoTitleAr`,
+ *  `seoDescriptionAr`). The Product model has no i18n columns, so `attributes`
+ *  is the only place per-product Arabic text can live. */
+export interface SeoTextEntity {
+  name?: string | null;
+  description?: string | null;
+  seo_title?: string | null;
+  seo_description?: string | null;
+  attributes?: Record<string, unknown> | null;
+}
+
+/**
+ * The `<title>` / `meta description` — and the JSON-LD name/description — for
+ * one catalogue entity in the request's locale.
+ *
+ * `/ar/products/x` emitted the ENGLISH `seo_title`/`seo_description` regardless
+ * of locale: the Arabic URL was fully indexable and described itself in English,
+ * i.e. in the one language an Arabic search query cannot match. Order for
+ * Arabic:
+ *   1. `attributes.seoTitleAr` / `seoDescriptionAr` — purpose-written SEO copy.
+ *   2. `attributes.nameAr` / `descriptionAr` — the Arabic product copy.
+ *   3. the English fields, so an entity with no Arabic still has metadata.
+ * English is unchanged: `seo_title || name`, `seo_description || description`.
+ *
+ * Step 2 is usually redundant for products — `normalizeProduct` (api-client.ts)
+ * has already swapped `name`/`description` to Arabic by the time one reaches
+ * here — but it is what keeps the helper correct for entities that never pass
+ * through that boundary, and it is what makes `seo_title` (which is NOT
+ * substituted, and which wins over the name) stop overriding Arabic copy.
+ */
+export function localizedSeoText(
+  entity: SeoTextEntity | null | undefined,
+  locale: string | null | undefined,
+): { title: string; description: string } {
+  const en = {
+    title: nonEmptyText(entity?.seo_title) ?? nonEmptyText(entity?.name) ?? "",
+    description:
+      nonEmptyText(entity?.seo_description) ??
+      nonEmptyText(entity?.description) ??
+      "",
+  };
+  if (!isArabicLocale(locale)) return en;
+  const attrs = entity?.attributes ?? null;
+  return {
+    title:
+      nonEmptyText(attrs?.seoTitleAr) ?? nonEmptyText(attrs?.nameAr) ?? en.title,
+    description:
+      nonEmptyText(attrs?.seoDescriptionAr) ??
+      nonEmptyText(attrs?.descriptionAr) ??
+      en.description,
+  };
 }
 
 export function storeSocialImage(store: StoreForSeo | null | undefined): string | null {

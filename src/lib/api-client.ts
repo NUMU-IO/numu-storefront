@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { headers } from "next/headers";
+import { isArabicLocale } from "@/lib/seo";
 import type { StoreData } from "@/types";
 
 /**
@@ -490,6 +491,37 @@ export async function fetchCustomerAddresses(
 // ── Products ──────────────────────────────────────────────────────────────────
 
 /**
+ * The visitor's locale for THIS request, from the `x-numu-locale` header the
+ * proxy stamps (URL prefix › `?locale=` › `numu_locale` cookie). Empty string
+ * when there is no signal, or when we're outside a request scope.
+ *
+ * Read by the FETCHERS and passed into `normalizeProduct` as an argument — see
+ * the Arabic-copy block there for why it must never be read inside the
+ * normalizer itself.
+ */
+async function readRequestLocale(): Promise<string> {
+  try {
+    const h = await headers();
+    return (h.get("x-numu-locale") || "").trim().toLowerCase();
+  } catch {
+    // headers() throws outside a request scope (tests, build-time evaluation).
+    // No locale signal → the payload stays exactly as the API sent it.
+    return "";
+  }
+}
+
+/** The Arabic value under `attributes`, or null when it isn't usable copy. */
+function arabicAttribute(
+  attributes: unknown,
+  key: "nameAr" | "descriptionAr",
+): string | null {
+  if (!attributes || typeof attributes !== "object") return null;
+  const value = (attributes as Record<string, unknown>)[key];
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value;
+}
+
+/**
  * Normalize a backend product row into the SDK's Product type.
  *
  * The API returns Decimal-as-string prices (`"120.00"`), `price_currency`
@@ -497,8 +529,17 @@ export async function fetchCustomerAddresses(
  * theme SDK and theme bundles consume the cleaner SDK shape, so we
  * adapt at this single boundary instead of forcing every theme to
  * remember the API's quirks.
+ *
+ * `locale` also makes this the ONE seam where Arabic product copy is applied —
+ * see the substitution at the bottom of the function.
+ *
+ * MUST stay a pure sync function of (raw, locale): the callers cache its input,
+ * not its output.
  */
-function normalizeProduct(raw: Record<string, any> | null | undefined): any {
+function normalizeProduct(
+  raw: Record<string, any> | null | undefined,
+  locale?: string,
+): any {
   if (!raw) return raw;
   const price = Number(raw.price ?? 0);
   const basePrice = Number.isFinite(price) ? price : 0;
@@ -527,6 +568,35 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
         return out;
       })
     : raw.variants;
+  // Arabic product copy.
+  //
+  // `attributes.nameAr` / `attributes.descriptionAr` are the only place the
+  // platform can hold per-product Arabic text (the Product model has no i18n
+  // columns, `Product.name` is a plain string) — and NOTHING read them, so an
+  // Arabic shopper on an otherwise fully-Arabic page still saw English product
+  // names, and so did Google on `/ar/...`. Substituting HERE means all 16 themes,
+  // the crawler-facing SSR content layer and the JSON-LD get Arabic with no theme
+  // rebuild: every product the storefront renders passes through this function.
+  //
+  // ⚠️ `locale` is an ARGUMENT, never read from headers() inside this function.
+  // `apiFetch` writes into Next's DATA cache, which is SHARED ACROSS REQUESTS, so
+  // a locale-dependent cached payload would keep serving Arabic names to English
+  // visitors (and vice versa) for the rest of the ISR window. The raw fetch stays
+  // locale-agnostic; the substitution happens only in this per-request transform.
+  // (The `cache()` wrapper around each fetcher is per-request and would be safe
+  // either way — the data cache underneath it is not, and that is the distinction
+  // the next reader will otherwise assume away.)
+  //
+  // Only a non-empty Arabic string substitutes. In production today `attributes`
+  // carries no `nameAr` at all on most rows, and where the importer did write one
+  // it wrote the ENGLISH name — so this is currently a no-op either way, which is
+  // exactly why it can ship before the content pack is corrected and imported.
+  const wantsArabic = isArabicLocale(locale);
+  const nameAr = wantsArabic ? arabicAttribute(raw.attributes, "nameAr") : null;
+  const descriptionAr = wantsArabic
+    ? arabicAttribute(raw.attributes, "descriptionAr")
+    : null;
+
   return {
     ...raw,
     price: Number.isFinite(price) ? price : 0,
@@ -537,6 +607,8 @@ function normalizeProduct(raw: Record<string, any> | null | undefined): any {
     currency: raw.currency ?? raw.price_currency ?? "USD",
     in_stock: raw.in_stock ?? raw.is_in_stock ?? false,
     ...(variants !== undefined ? { variants } : {}),
+    ...(nameAr ? { name: nameAr } : {}),
+    ...(descriptionAr ? { description: descriptionAr } : {}),
   };
 }
 
@@ -553,6 +625,10 @@ export const fetchProducts = cache(async (storeId: string, limit = 20, categoryI
   const categoryQs = categoryId
     ? `&category_id=${encodeURIComponent(categoryId)}`
     : "";
+  // Resolved ONCE per fetch and handed to the per-request transform below; the
+  // `apiFetch` calls themselves stay locale-agnostic so nothing locale-specific
+  // ever lands in the cross-request data cache.
+  const locale = await readRequestLocale();
   // The backend validates `limit` as 1..100 (anything above 422s, which the
   // callers' catch-alls would turn into an EMPTY storefront). Page through in
   // chunks of 100 until we have `limit` items or the catalog runs out.
@@ -582,11 +658,13 @@ export const fetchProducts = cache(async (storeId: string, limit = 20, categoryI
     );
     for (const w of rest) if (w) items = items.concat(unwrap(w));
   }
-  return items.slice(0, want).map(normalizeProduct);
+  return items.slice(0, want).map((item) => normalizeProduct(item, locale));
 });
 
 export const fetchProductBySlug = cache(
   async (storeId: string, slug: string) => {
+    // Per-request locale for the Arabic-copy transform; see fetchProducts.
+    const locale = await readRequestLocale();
     // Hit the single-product endpoint (not the list endpoint with
     // ?slug=) — the list endpoint omits `variants[]` and `options[]`,
     // which the PDP needs for the variant picker after Phase 8.1.
@@ -613,7 +691,7 @@ export const fetchProductBySlug = cache(
     } else {
       raw = wrapped ?? null;
     }
-    return normalizeProduct(raw);
+    return normalizeProduct(raw, locale);
   },
 );
 
@@ -653,7 +731,20 @@ export const fetchCollectionBySlug = cache(
       : wrapped && Array.isArray(wrapped.items)
         ? wrapped.items
         : [];
-    return list.find((c) => c?.slug === slug) ?? null;
+    const current = list.find((c) => c?.slug === slug);
+    if (current) return current;
+    // Renamed collection: match the requested slug against each category's
+    // rename history (`previous_slugs`) so an indexed URL still resolves. The
+    // returned object carries the CURRENT slug, which is what makes the route
+    // 301 to the canonical URL instead of 404ing the accumulated ranking away.
+    // Current slugs are matched FIRST above: a slug that some other collection
+    // has since been renamed away from must resolve to whoever owns it now.
+    return (
+      list.find(
+        (c) =>
+          Array.isArray(c?.previous_slugs) && c.previous_slugs.includes(slug),
+      ) ?? null
+    );
   },
 );
 

@@ -1,11 +1,11 @@
 import type { MetadataRoute } from "next";
 import { headers } from "next/headers";
-import {
-  fetchStoreByDomain,
-  fetchProducts,
-  fetchCollections,
-} from "@/lib/api-client";
+import { fetchStoreByDomain } from "@/lib/api-client";
 import { fetchBlogsList, fetchArticlesList } from "@/lib/blogs";
+import {
+  fetchSitemapCollections,
+  fetchSitemapProducts,
+} from "@/lib/sitemap-feed";
 import {
   canonicalFor,
   resolveStoreDomainFromHeaders,
@@ -47,11 +47,20 @@ import {
  * purpose, because it also changes the emitted URL shape (`/sitemap/0.xml`)
  * and therefore the pointer `robots.ts` publishes.
  *
- * Cache: Next.js will pre-render this on first request and revalidate
- * with the same tag-based scheme used by `fetchProducts` /
- * `fetchCollections` / the pages + blogs fetchers, so a publish from the
- * merchant hub triggers a cheap regeneration via the existing
- * revalidation path.
+ * Catalogue discovery goes through `lib/sitemap-feed`, i.e. the backend's
+ * purpose-built `/sitemap-feed` endpoint: TWO requests total, one per route
+ * class. The previous path called `fetchProducts(storeId, PRODUCT_LIMIT)`,
+ * which is capped at the public list endpoint's `limit<=100` and therefore
+ * paged up to ten times, normalising every full product payload — variants,
+ * images, currency coercion — so this file could read `slug` and `updated_at`
+ * off it. That cost scaled with the catalogue while the output did not.
+ *
+ * Cache: Next.js will pre-render this on first request and revalidate with the
+ * same tag-based scheme used by the feed / pages / blogs fetchers, so a publish
+ * from the merchant hub triggers a cheap regeneration via the existing
+ * revalidation path. The feed fetchers keep the store-wide `products:{id}` /
+ * `categories:{id}` tags the old fetchers carried, so nothing that busted this
+ * document before stops doing so.
  *
  * Failures are non-fatal — if the API is unreachable we still emit
  * the home URL so search engines don't see a 500.
@@ -59,8 +68,9 @@ import {
 
 /**
  * Catalogue ceiling for one sitemap document. Well inside Google's 50,000-URL
- * limit (see the note above) and inside what `fetchProducts` will page
- * through in 100-item chunks.
+ * limit (see the note above), and passed straight through as the feed's
+ * `page_size` (whose own ceiling is 10,000), so the whole catalogue arrives in
+ * a single request for every store we have.
  */
 const PRODUCT_LIMIT = 1000;
 
@@ -160,8 +170,8 @@ export default async function sitemap(
   const entries: MetadataRoute.Sitemap = [homeEntry()];
 
   const [products, collections, pages] = await Promise.all([
-    fetchProducts(storeId, PRODUCT_LIMIT).catch(() => []),
-    fetchCollections(storeId).catch(() => []),
+    fetchSitemapProducts(storeId, PRODUCT_LIMIT).catch(() => []),
+    fetchSitemapCollections(storeId).catch(() => []),
     fetchPublishedPages(storeId),
   ]);
 
@@ -184,10 +194,7 @@ export default async function sitemap(
     });
   }
 
-  for (const p of products as Array<{
-    slug?: string | null;
-    updated_at?: string | null;
-  }>) {
+  for (const p of products) {
     // A missing OR whitespace-only slug emits `/products/`, i.e. a guaranteed
     // 404 inside the one document whose entire job is to promise these URLs
     // resolve. `!p?.slug` alone let `" "` through.
@@ -200,10 +207,12 @@ export default async function sitemap(
       lastModified: parseDate(p.updated_at),
     });
   }
-  for (const c of collections as Array<{
-    slug?: string | null;
-    updated_at?: string | null;
-  }>) {
+  // `lastModified` on a collection is newly POPULATED, not newly read: this
+  // loop always asked for `c.updated_at`, but `/categories` — the payload it
+  // used to iterate — carries no timestamp at all, so every collection entry
+  // shipped without a `<lastmod>`. The sitemap feed serialises the real
+  // `updated_at`, so the field the code always intended now has a value.
+  for (const c of collections) {
     const slug = (c?.slug ?? "").trim();
     if (!slug) continue;
     entries.push({

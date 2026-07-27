@@ -41,6 +41,13 @@ interface BuildProductLdProps {
    *  never assert a return window the merchant hasn't claimed, because Google
    *  can disprove it with a test order and demote the whole listing. */
   hasReturnPolicy30d?: boolean;
+  /** Locale-resolved title/description for the request's language, from
+   *  `localizedSeoText` (lib/seo.ts). REQUIRED for Arabic correctness: the
+   *  fallback chain below starts at `seo_title`, which the platform stores in
+   *  English only, so an Arabic PDP published an English Product name to Google
+   *  even once `name`/`description` themselves were Arabic. Omitted → the
+   *  English chain, which is what a non-localized caller wants. */
+  seoText?: { title?: string | null; description?: string | null } | null;
 }
 
 /** Days of price validity we advertise. Google treats a merchant listing whose
@@ -55,6 +62,7 @@ export function buildProductLd({
   storeName,
   reviews,
   hasReturnPolicy30d,
+  seoText,
 }: BuildProductLdProps): Record<string, unknown> {
   const url = product.slug ? `${baseUrl}/products/${product.slug}` : baseUrl;
   const images = (product.images ?? [])
@@ -98,8 +106,9 @@ export function buildProductLd({
   const ld: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "Product",
-    name: product.seo_title || product.name || "Product",
-    description: product.seo_description || product.description || "",
+    name: seoText?.title || product.seo_title || product.name || "Product",
+    description:
+      seoText?.description || product.seo_description || product.description || "",
     image: images.length > 0 ? images : undefined,
     // The merchant's SKU, NOT product.id. Emitting the internal UUID here
     // published a "SKU" no shopper or feed could match (live PDPs showed
@@ -176,11 +185,14 @@ interface BuildCollectionLdProps {
     products?: { name?: string; slug?: string }[];
   };
   baseUrl: string;
+  /** Locale-resolved title/description, same contract as `buildProductLd`. */
+  seoText?: { title?: string | null; description?: string | null } | null;
 }
 
 export function buildCollectionLd({
   collection,
   baseUrl,
+  seoText,
 }: BuildCollectionLdProps): Record<string, unknown> {
   const url = collection.slug
     ? `${baseUrl}/collections/${collection.slug}`
@@ -188,8 +200,8 @@ export function buildCollectionLd({
   return {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
-    name: collection.name || "Collection",
-    description: collection.description || "",
+    name: seoText?.title || collection.name || "Collection",
+    description: seoText?.description || collection.description || "",
     url,
     hasPart: (collection.products ?? []).slice(0, 10).map((p) => ({
       "@type": "Product",
