@@ -48,6 +48,9 @@ interface CartLine {
   // renders the real name + amount rather than a fallback id + 0.00.
   name?: string;
   price?: number;
+  // Needed to preview category-scoped promotions accurately — see the
+  // /api/cart/discounts payload below.
+  category_id?: string | null;
 }
 
 /** The line's display name across both cart payload shapes. */
@@ -565,6 +568,10 @@ export function OrderSummary() {
             product_id: l.product_id,
             quantity: qty,
             unit_price_cents: unit,
+            // Category-scoped rules (e.g. "any 3 from these collections for
+            // EGP 650") match on this. Omitting it made the preview under-
+            // report the discount the order would actually be charged.
+            ...(l.category_id ? { category_id: l.category_id } : {}),
           };
         })
         .filter((it) => it.product_id && it.quantity > 0);
