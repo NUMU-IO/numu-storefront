@@ -550,13 +550,15 @@ export function OrderSummary() {
       const c = (body?.data || body) as Cart;
       setFailed(false);
 
-      // Preview the automatic-offer discount (BOGO / %, etc.) so the Total
-      // matches what the order will be charged — the cart response itself
-      // doesn't carry computed offers, only the per-line subtotal. We hit the
-      // same engine the order-create path runs (/api/cart/discounts →
-      // DiscountCalculator) and fold the result in as an offers line the
-      // Breakdown already knows how to render. Best-effort: any miss leaves
-      // the cart untouched (subtotal + shipping only) — never throws.
+      // Preview the automatic-offer discount (BOGO / multibuy / %, etc.) so
+      // the Total matches what the order will be charged. The cart response
+      // now carries computed offers too, but we still price here because this
+      // call also resolves the COUPON code the shopper typed at checkout
+      // (`code_discount_cents` + the legacy-coupon parity shim), which the
+      // cart read has no knowledge of. Same engine as the order-create path
+      // (/api/cart/discounts → DiscountCalculator), folded in as an offers
+      // line the Breakdown already knows how to render. Best-effort: any miss
+      // leaves the cart untouched (subtotal + shipping only) — never throws.
       const items = (c.items || [])
         .map((l) => {
           const qty = l.quantity || 0;
