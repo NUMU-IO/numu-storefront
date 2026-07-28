@@ -100,6 +100,27 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // The runtime manifest is the ONE file here that must never be cached
+        // hard. It is an unversioned, mutable pointer naming the SDK version
+        // the host currently serves, and `external-loader` gates every theme
+        // bundle on it: if a browser holds a stale copy, a correctly deployed
+        // host still renders "Theme built against SDK 0.12 but host runtime
+        // serves 0.10.0" and the storefront is blank. It shipped under the
+        // blanket rule below AND picked up an `immutable, max-age=31536000`
+        // header appended upstream (nginx), which pinned it for a year.
+        //
+        // Listed BEFORE the wildcard so this more specific source wins. The
+        // client also fetches it with `cache: "no-cache"`, because an upstream
+        // header we do not control here can still contradict this.
+        source: "/__numu-runtime/manifest.json",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=0, must-revalidate",
+          },
+        ],
+      },
+      {
         // BYOT federation runtime (react/react-dom/sdk/chunks, ~300KB).
         // Next serves public/ with `max-age=0`, so every navigation (themes
         // do full-page <a> loads) re-fetched/re-validated the whole runtime —

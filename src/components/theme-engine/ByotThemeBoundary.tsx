@@ -12,6 +12,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { usePathname } from "next/navigation";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
 import StorefrontSkeleton from "@/components/theme-engine/StorefrontSkeleton";
 import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
@@ -68,13 +69,31 @@ interface ByotThemeBoundaryProps {
    * when the theme renders fine — that's the whole point: a crawler that runs
    * no JS, and a no-JS visitor, get real content instead of "Loading…".
    *
-   * It is rendered as the mount container's initial children and dropped by
-   * this component the instant React hydrates (see `hydrated` below) — i.e.
-   * before the theme bundle has even finished downloading. So a real visitor
-   * never sees it duplicated alongside the theme, and — because host React
-   * removes the nodes itself rather than letting the bundle's
-   * `createRoot(el)` clear them out from under it — there is no DOM-ownership
-   * conflict between the two React trees.
+   * It is rendered as a SIBLING of the mount container and dropped the instant
+   * React hydrates (see `hydrated` below).
+   *
+   * ⚠️ It used to be rendered as the container's initial *children*, on the
+   * reasoning that host React would always remove them before the bundle's
+   * `createRoot(el)` could clear them, so the two React trees never contended
+   * for the same DOM. That invariant only held while the bundle download was
+   * slow. On a **popstate/Back** navigation the theme module is already in the
+   * module cache, so `await import()` settles in a microtask and
+   * `createRoot(container).render()` empties the container BEFORE React flushes
+   * the `setHydrated(true)` re-render. React then committed a deletion for a
+   * node whose `parentNode` was already null:
+   *
+   *   NotFoundError: Failed to execute 'removeChild' on 'Node':
+   *   The node to be removed is not a child of this node.
+   *
+   * thrown from `commitDeletionEffects`. Reproduced 7/7 on Back into any route
+   * carrying this layer (`/`, `/search`, `/products/{handle}`) and 0/12 on hard
+   * loads and forward navigations. Because the boundary caught it, the shopper
+   * got the route fallback on `/search` and "Failed to load theme" on routes
+   * with none.
+   *
+   * A sibling costs a brief layout shift when the theme takes over, and removes
+   * the shared-ownership hazard entirely: no node host React manages is ever
+   * inside the element the bundle owns. That trade is not close.
    */
   seoContent?: ReactNode;
   /**
@@ -235,13 +254,34 @@ interface BoundaryState {
 }
 
 class ThemeRenderBoundary extends Component<
-  { children: ReactNode; onError: (err: Error) => void; fallback: ReactNode },
+  {
+    children: ReactNode;
+    onError: (err: Error) => void;
+    fallback: ReactNode;
+    /**
+     * Changes when the visitor moves to a different page. An error boundary has
+     * no way to recover on its own, so without this a SINGLE throw was
+     * permanent: the boundary kept rendering `fallback` for every subsequent
+     * client-side navigation until a hard reload. One bad render on one route
+     * therefore took out the theme for the rest of the session — which is how a
+     * single `removeChild` race turned into "search is flat AND Back says
+     * Failed to load theme". A route change is new work and deserves a fresh
+     * attempt; if it throws again the boundary simply catches it again.
+     */
+    resetKey?: string;
+  },
   BoundaryState
 > {
   state: BoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): BoundaryState {
     return { error };
+  }
+
+  componentDidUpdate(prev: { resetKey?: string }) {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   componentDidCatch(error: Error) {
@@ -264,12 +304,50 @@ class ThemeRenderBoundary extends Component<
  * page. Unlike the editor postMessage below, this fires on real top-level
  * shopper pages too, which is exactly where we're blind today.
  */
+/**
+ * Pull the theme slug and version out of a bundle URL.
+ *
+ * Published bundles live at `<cdn>/<slug>/<version>/theme.js`, e.g.
+ * `https://cdn.numueg.app/vionne-v3/0.6.4/theme.js`, so the URL is the one
+ * place both facts are always available at the moment a bundle fails — which
+ * is precisely when the beacon fires. The resolved theme model does not carry
+ * a version at all, which is why `theme_version` was empty on every row of
+ * `theme_error_events`: the ingest supports the column, nothing ever populated
+ * it, and a crash could not be attributed to a release.
+ *
+ * Returns nulls rather than throwing for a dev/local URL that doesn't match
+ * the shape — telemetry must never be the thing that breaks.
+ */
+function themeIdentityFromBundleUrl(bundleUrl?: string | null): {
+  slug: string | null;
+  version: string | null;
+} {
+  if (!bundleUrl) return { slug: null, version: null };
+  try {
+    const segments = new URL(bundleUrl, "https://placeholder/").pathname
+      .split("/")
+      .filter(Boolean);
+    // …/<slug>/<version>/theme.js — take the two segments before the filename.
+    if (segments.length < 3) return { slug: null, version: null };
+    const version = segments[segments.length - 2] ?? null;
+    const slug = segments[segments.length - 3] ?? null;
+    // Only accept a version-shaped segment; a local dev URL like
+    // `:5173/theme.js` must not report "5173" as a release.
+    return /^\d+\.\d+\.\d+/.test(version ?? "")
+      ? { slug, version }
+      : { slug: null, version: null };
+  } catch {
+    return { slug: null, version: null };
+  }
+}
+
 function beaconThemeError(payload: {
   store?: string | null;
   bundleUrl?: string | null;
   message: string;
   stack?: string | null;
   themeSlug?: string | null;
+  themeVersion?: string | null;
 }): void {
   if (
     typeof navigator === "undefined" ||
@@ -278,14 +356,19 @@ function beaconThemeError(payload: {
     return;
   }
   try {
+    // Theme identity for the backend ingest. Prefer whatever the caller knew;
+    // fall back to the bundle URL, which encodes both and is always present on
+    // a bundle failure. Callers were passing `theme_id` (a UUID) as the slug,
+    // so `theme_slug` held things like "583aecc8-4842-…" — unreadable in the
+    // hub and useless for grouping crashes by theme.
+    const fromUrl = themeIdentityFromBundleUrl(payload.bundleUrl);
     const body = JSON.stringify({
       store: payload.store ?? null,
       bundleUrl: payload.bundleUrl ?? null,
       message: payload.message,
       stack: payload.stack ?? null,
-      // Theme identity for the backend ingest (theme_slug). No theme_version is
-      // surfaced in the resolved theme model, so it's intentionally omitted.
-      themeSlug: payload.themeSlug ?? null,
+      themeSlug: payload.themeSlug ?? fromUrl.slug ?? null,
+      themeVersion: payload.themeVersion ?? fromUrl.version ?? null,
       url: typeof window !== "undefined" ? window.location.href : null,
     });
     navigator.sendBeacon(
@@ -303,6 +386,7 @@ function postBundleError(
     store?: string | null;
     bundleUrl?: string | null;
     themeSlug?: string | null;
+    themeVersion?: string | null;
   },
 ) {
   if (typeof window === "undefined") return;
@@ -314,6 +398,7 @@ function postBundleError(
     message: error.message,
     stack: error.stack ?? null,
     themeSlug: ctx?.themeSlug ?? null,
+    themeVersion: ctx?.themeVersion ?? null,
   });
   // Editor integration: only meaningful inside the customizer iframe.
   if (window.parent === window) return;
@@ -382,6 +467,11 @@ export default function ByotThemeBoundary({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<BundleHandle | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  // Navigation identity. Both this wrapper's `error` and the class boundary's
+  // caught error are sticky by nature, so a single failed render used to
+  // persist for every later client-side navigation until a hard reload. A route
+  // change is a fresh attempt.
+  const pathname = usePathname();
   // With server-rendered theme markup already on screen there is nothing to
   // wait for — showing a skeleton over real content would be a regression.
   const hasSsrHtml = typeof ssrHtml === "string" && ssrHtml.length > 0;
@@ -456,6 +546,11 @@ export default function ByotThemeBoundary({
 
   useEffect(() => {
     let cancelled = false;
+    // Clear any error from a previous route before re-attempting. Without this
+    // the wrapper's `error` is as sticky as the class boundary's was, so one
+    // failed mount kept "Failed to load theme" on screen for every subsequent
+    // client-side navigation until a hard reload.
+    setError(null);
 
     async function load() {
       try {
@@ -536,10 +631,10 @@ export default function ByotThemeBoundary({
           store:
             storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
           bundleUrl,
-          themeSlug:
-            themeSettings.external_theme?.theme_id ??
-            themeSettings.theme_id ??
-            null,
+          // Deliberately NOT `theme_id`: that is a UUID and it is what used
+          // to land in `theme_slug`. Leave it null and let beaconThemeError
+          // derive the real slug + version from the bundle URL.
+          themeSlug: null,
         });
       }
     }
@@ -757,13 +852,14 @@ export default function ByotThemeBoundary({
           store:
             storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
           bundleUrl,
-          themeSlug:
-            themeSettings.external_theme?.theme_id ??
-            themeSettings.theme_id ??
-            null,
+          // Deliberately NOT `theme_id`: that is a UUID and it is what used
+          // to land in `theme_slug`. Leave it null and let beaconThemeError
+          // derive the real slug + version from the bundle URL.
+          themeSlug: null,
         })
       }
       fallback={fallbackUI}
+      resetKey={pathname ?? undefined}
     >
       {/* The page is prerendered, but a BYOT theme paints only after its
           bundle downloads + mounts on the client. This loading branch is part
@@ -818,18 +914,24 @@ export default function ByotThemeBoundary({
           containerRef={containerRef}
         />
       ) : (
-        <div
-          key="byot-bundle-container"
-          ref={containerRef}
-          style={bundleEmpty && !fallbackSlot ? { display: "none" } : undefined}
-        >
-          {/* ADR-7 content layer — crawler/no-JS baseline, removed on hydration.
-              Rendering it INSIDE the container keeps it in the same box the
-              theme will occupy (no layout shift when it goes) and means that
-              even if the removal effect never ran, the bundle's
-              `createRoot(el)` would clear it on its first commit. */}
-          {!hydrated && seoContent ? seoContent : null}
-        </div>
+        <>
+          {/* ADR-7 content layer — crawler/no-JS baseline, dropped on hydration.
+              A SIBLING of the mount container, never a child of it: the bundle
+              calls `createRoot()` on that container and empties it, so anything
+              host React owns in there is a node it may later try to delete
+              after the bundle already removed it. See the `seoContent` prop
+              doc for the NotFoundError that caused. */}
+          {!hydrated && seoContent ? (
+            <div key="byot-seo-content">{seoContent}</div>
+          ) : null}
+          <div
+            key="byot-bundle-container"
+            ref={containerRef}
+            style={
+              bundleEmpty && !fallbackSlot ? { display: "none" } : undefined
+            }
+          />
+        </>
       )}
       {bundleEmpty && !error && !fallbackSlot && (
         <Fragment key="byot-route-fallback">{routeFallback}</Fragment>

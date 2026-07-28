@@ -174,7 +174,16 @@ export function TrackLookup({
   const describedBy = error ? errorId : undefined;
 
   return (
-    <div className="min-h-screen bg-gray-50" dir={dir}>
+    // No `min-h-screen`: this div is `#main > div`, and globals.css already
+    // hands it the viewport's LEFTOVER height (`body:has(> #main)` is a
+    // `min-height: 100svh` flex column; `#main` and `#main > div` each carry
+    // `flex: 1 0 auto`). Forcing 100vh on top of that stacked a full viewport
+    // under the 37px announcement bar, so every visitor got a 37px scrollbar on
+    // a page that fits. The flex chain measures whatever chrome actually
+    // precedes the page — the bar's height is a merchant-styled variable, not a
+    // constant worth encoding here — and still stretches the background to the
+    // bottom edge.
+    <div className="bg-gray-50" dir={dir}>
       <div className="mx-auto max-w-md px-4 py-8 sm:py-12">
         <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <h1 className="text-xl font-semibold text-gray-900">

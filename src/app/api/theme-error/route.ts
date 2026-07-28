@@ -28,6 +28,35 @@ const MAX_FIELD_LEN = 2_000;
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
+/**
+ * `<cdn>/<slug>/<version>/theme.js` → `{ slug, version }`.
+ *
+ * Mirrors `themeIdentityFromBundleUrl` in ByotThemeBoundary; kept here too so a
+ * beacon that omits them (older cached client) still persists usable identity.
+ * `theme_version` was empty on every historical row, which made it impossible
+ * to attribute a crash to a release. Never throws — telemetry must not be the
+ * thing that fails.
+ */
+function identityFromBundleUrl(bundleUrl?: string): {
+  slug?: string;
+  version?: string;
+} {
+  if (!bundleUrl) return {};
+  try {
+    const segments = new URL(bundleUrl, "https://placeholder/").pathname
+      .split("/")
+      .filter(Boolean);
+    if (segments.length < 3) return {};
+    const version = segments[segments.length - 2];
+    const slug = segments[segments.length - 3];
+    // Only a version-shaped segment counts, so a dev URL like `:5173/theme.js`
+    // never reports "5173" as a release.
+    return /^\d+\.\d+\.\d+/.test(version ?? "") ? { slug, version } : {};
+  } catch {
+    return {};
+  }
+}
+
 function clip(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0
     ? value.slice(0, MAX_FIELD_LEN)
@@ -77,8 +106,19 @@ async function forwardThemeError(
   const payload: Record<string, string> = { message };
   const bundleUrl = clip(parsed.bundleUrl) ?? clip(parsed.bundle_url);
   const url = clip(parsed.url);
-  const themeSlug = clip(parsed.themeSlug) ?? clip(parsed.theme_slug);
-  const themeVersion = clip(parsed.themeVersion) ?? clip(parsed.theme_version);
+  // Server-side backstop for theme identity. A beacon may arrive without a
+  // slug/version — from a cached older client, or a bundle that failed before
+  // the boundary resolved them — but it always carries the bundleUrl, which
+  // encodes both as `<cdn>/<slug>/<version>/theme.js`. Deriving here means old
+  // clients start reporting usable identity the moment this ships, with no
+  // dependency on their bundle being refreshed.
+  const derived = identityFromBundleUrl(
+    clip(parsed.bundleUrl) ?? clip(parsed.bundle_url),
+  );
+  const themeSlug =
+    clip(parsed.themeSlug) ?? clip(parsed.theme_slug) ?? derived.slug;
+  const themeVersion =
+    clip(parsed.themeVersion) ?? clip(parsed.theme_version) ?? derived.version;
   if (bundleUrl) payload.bundle_url = bundleUrl;
   if (url) payload.url = url;
   if (themeSlug) payload.theme_slug = themeSlug;

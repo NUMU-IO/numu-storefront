@@ -130,7 +130,21 @@ async function loadAndVerifyImportMap(
   let hostManifest: HostRuntimeManifest;
   try {
     const res = await fetch("/__numu-runtime/manifest.json", {
-      cache: BUNDLE_CACHE,
+      // NEVER `force-cache` this one. `BUNDLE_CACHE` is correct for the theme's
+      // own files, whose URLs carry a version (`/vionne-v3/0.6.4/…`) and really
+      // are immutable. This manifest is the opposite: an UNVERSIONED, MUTABLE
+      // pointer whose only job is to answer "which SDK does the host serve
+      // right now" — and it is served with `Cache-Control: …immutable` (a
+      // second header appended in front of Next's own `max-age=300`).
+      //
+      // force-cache + immutable = never revalidated. A shopper who loaded the
+      // site while the host served 0.10.x kept that manifest for a YEAR, so
+      // every later visit compared the current 0.12 theme against a stale 0.10
+      // manifest and hard-failed the compat gate with "Theme built against SDK
+      // 0.12 but host runtime serves 0.10.0" — a fully deployed, healthy server
+      // and a blank storefront. `no-cache` still uses the cached body on a 304,
+      // so the cost is one conditional request for ~540 bytes.
+      cache: "no-cache",
       signal: AbortSignal.timeout(THEME_META_TIMEOUT_MS),
     });
     if (!res.ok) {
@@ -263,7 +277,13 @@ function ensureRuntimeImportMap(): Promise<void> {
       /* unresolvable → the map never registered on this document */
     }
     try {
-      const res = await fetch("/__numu-runtime/manifest.json", { cache: "force-cache" });
+      // Same reasoning as the compat-gate fetch above: this manifest is a
+      // mutable pointer served as `immutable`, so `force-cache` pins a stale
+      // copy indefinitely — here it would build the fallback import map out of
+      // last release's file hashes and 404 every runtime chunk.
+      const res = await fetch("/__numu-runtime/manifest.json", {
+        cache: "no-cache",
+      });
       if (!res.ok) return;
       const manifest = (await res.json()) as { files?: Record<string, string> };
       const files = manifest.files ?? {};
