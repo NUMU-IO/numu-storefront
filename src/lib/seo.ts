@@ -42,7 +42,12 @@ export interface StoreForSeo {
      *  PDP's `hasMerchantReturnPolicy` — we never assert a policy the
      *  merchant hasn't claimed. */
     has_return_policy_30d?: boolean | null;
+    /** The catalogue actually carries Arabic copy. Gates the `ar` hreflang —
+     *  see alternatesFor. Default false: chrome being bilingual is not the
+     *  same as the products being translated. */
+    arabic_content_ready?: boolean | null;
   } | null;
+  country?: string | null;
   settings?: Record<string, unknown> | null;
   theme_settings?: Record<string, unknown> | null;
 }
@@ -174,16 +179,38 @@ export function canonicalFor(
   return p ? `${origin}${p}` : `${origin}/`;
 }
 
-/** hreflang value → the locale URL prefix `proxy.ts` resolves. The proxy
- *  strips a leading 2-letter segment and stamps `x-numu-locale`, so `/ar/...`
- *  is the path-prefixed form the storefront actually serves (the `?locale=`
- *  query works too, but a query-string alternate is far weaker to crawlers).
- *  Every NUMU store is en/ar bilingual by construction (LocalizedString), so
- *  both entries always exist. */
-const HREFLANG_PREFIXES: ReadonlyArray<readonly [string, string]> = [
-  ["en-EG", "en"],
-  ["ar-EG", "ar"],
-];
+/** Locale URL prefixes `proxy.ts` resolves: it strips a leading 2-letter
+ *  segment and stamps `x-numu-locale`, so `/ar/...` is the path-prefixed form
+ *  the storefront actually serves (the `?locale=` query works too, but a
+ *  query-string alternate is far weaker to crawlers). */
+const LOCALE_PREFIXES = ["en", "ar"] as const;
+
+/** Markets the platform onboards (OnboardingWizard). The region half of an
+ *  hreflang has to match the store's own market — `ar-EG` on a Saudi store
+ *  tells Google the page targets Egyptian shoppers. */
+const SUPPORTED_REGIONS = new Set(["EG", "SA", "AE", "JO", "KW"]);
+
+function hreflangRegion(store: StoreForSeo | null | undefined): string {
+  const country = (store?.country ?? "").trim().toUpperCase();
+  return SUPPORTED_REGIONS.has(country) ? country : "EG";
+}
+
+/**
+ * Does this store have Arabic worth advertising to a crawler?
+ *
+ * Bilingual CHROME is not a bilingual CATALOGUE. The nav, buttons and the SSR
+ * layer are Arabic on every store, but product names and descriptions come
+ * from the merchant — and until `attributes.nameAr` is actually written, the
+ * `/ar` pages carry English product copy under an Arabic shell. Advertising
+ * `ar-EG` for that is the "translated boilerplate over single-language body"
+ * pattern Google's multi-regional guidance calls out, at catalogue scale.
+ *
+ * So it is opt-in, defaulting to false: a store says so explicitly once its
+ * products are translated.
+ */
+function hasArabicCatalogue(store: StoreForSeo | null | undefined): boolean {
+  return store?.seo?.arabic_content_ready === true;
+}
 
 /**
  * `alternates` for a route: the per-URL canonical plus en/ar hreflang.
@@ -207,11 +234,16 @@ export function alternatesFor(
   const canonical = canonicalFor(store, domain, path);
   const origin = canonicalOriginFor(store, domain);
   const p = canonicalPath(path);
+  const region = hreflangRegion(store);
+  const arabicReady = hasArabicCatalogue(store);
   const languages: Record<string, string> = {};
-  for (const [hreflang, prefix] of HREFLANG_PREFIXES) {
-    languages[hreflang] = `${origin}/${prefix}${p}`;
+  for (const prefix of LOCALE_PREFIXES) {
+    if (prefix === "ar" && !arabicReady) continue;
+    languages[`${prefix}-${region}`] = `${origin}/${prefix}${p}`;
   }
-  languages["x-default"] = canonical;
+  // With no Arabic alternate there is only one version of the page, so an
+  // x-default (which exists to pick between alternates) would be noise.
+  if (arabicReady) languages["x-default"] = canonical;
   return { canonical, languages };
 }
 
@@ -245,6 +277,35 @@ export function storeSeoTitle(store: StoreForSeo | null | undefined): string {
   return (store?.seo?.seo_title || store?.name || "NUMU Store").trim();
 }
 
+/**
+ * Shipping phrasing per market for the generated description.
+ *
+ * The old sentence hardcoded "shipping across Egypt. Cash on delivery
+ * available." for EVERY store, including the SA/AE/JO/KW markets onboarding
+ * offers — so a Saudi store published a factually false shipping AND payment
+ * claim in its meta description. COD is asserted only where the platform
+ * actually runs it (Egypt); everywhere else the sentence stays true by
+ * claiming less.
+ */
+const SHIPPING_BLURB: Record<string, { en: string; ar: string }> = {
+  EG: {
+    en: "with shipping across Egypt. Cash on delivery available.",
+    ar: "وتوصيل لكل محافظات مصر، والدفع عند الاستلام متاح.",
+  },
+  SA: {
+    en: "with shipping across Saudi Arabia.",
+    ar: "وتوصيل لجميع مناطق المملكة العربية السعودية.",
+  },
+  AE: {
+    en: "with shipping across the UAE.",
+    ar: "وتوصيل لجميع إمارات الدولة.",
+  },
+  JO: { en: "with shipping across Jordan.", ar: "وتوصيل لكل محافظات الأردن." },
+  KW: { en: "with shipping across Kuwait.", ar: "وتوصيل لجميع مناطق الكويت." },
+};
+
+const SHIPPING_BLURB_DEFAULT = { en: "— a curated selection.", ar: "— تشكيلة مختارة." };
+
 export function storeSeoDescription(store: StoreForSeo | null | undefined): string {
   const explicit = (store?.seo?.seo_description ?? "").trim();
   if (explicit) return explicit;
@@ -252,9 +313,16 @@ export function storeSeoDescription(store: StoreForSeo | null | undefined): stri
   if (desc) return desc;
   const name = (store?.name ?? "").trim() || "NUMU";
   const ar = (store?.default_language ?? "").toLowerCase() === "ar";
+  const country = (store?.country ?? "").trim().toUpperCase();
+  const blurb = SHIPPING_BLURB[country];
+  if (!blurb) {
+    return ar
+      ? `تسوّق من ${name} ${SHIPPING_BLURB_DEFAULT.ar}`
+      : `Shop ${name} ${SHIPPING_BLURB_DEFAULT.en}`;
+  }
   return ar
-    ? `تسوّق من ${name} — تشكيلة مختارة وتوصيل لكل محافظات مصر، والدفع عند الاستلام متاح.`
-    : `Shop ${name} — a curated selection with shipping across Egypt. Cash on delivery available.`;
+    ? `تسوّق من ${name} — تشكيلة مختارة ${blurb.ar}`
+    : `Shop ${name} — a curated selection ${blurb.en}`;
 }
 
 export function storeSocialImage(store: StoreForSeo | null | undefined): string | null {
