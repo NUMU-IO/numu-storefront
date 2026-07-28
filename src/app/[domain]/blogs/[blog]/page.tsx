@@ -9,6 +9,7 @@ import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { SsrBlogIndexContent } from "@/components/seo/SsrContentLayer";
 import {
   fetchBlogByHandle,
   fetchArticlesList,
@@ -141,6 +142,24 @@ export default async function BlogPage({ params }: PageProps) {
           data: { blog, articles },
         }}
         routeFallback={builtInBlog}
+        // ADR-7 — article links in the initial HTML, so a crawler can reach
+        // the articles without running the theme bundle.
+        seoContent={
+          articles.length > 0 ? (
+            <SsrBlogIndexContent
+              title={blogTitle}
+              storeName={store?.name}
+              locale={lang}
+              trail={[{ name: isAr ? "المدونة" : "Blog", href: "/blogs" }]}
+              articles={articles.map((a) => ({
+                handle: a.handle,
+                title: pickText(a.title, lang) || a.handle,
+                excerpt: pickText(a.excerpt ?? undefined, lang),
+                href: `/blogs/${blog.handle}/${a.handle}`,
+              }))}
+            />
+          ) : undefined
+        }
       />
     );
   }

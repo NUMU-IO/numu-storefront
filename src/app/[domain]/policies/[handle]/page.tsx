@@ -21,6 +21,7 @@ import {
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { SsrArticleContent } from "@/components/seo/SsrContentLayer";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -51,10 +52,22 @@ function readPolicy(store: any, handle: string): string | null {
 }
 
 // Entity title only — the `[domain]` layout's title template appends the store
-// name, so this no longer needs to resolve the store at all.
+// name.
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { handle } = await params;
-  return { title: titleFor(handle) };
+  const { domain, handle } = await params;
+  const title = titleFor(handle);
+  // An unpublished policy renders a heading over "This policy hasn't been
+  // published yet." — a soft 404. The sitemap already excludes those; the page
+  // itself was still saying index,follow.
+  try {
+    const store = await fetchStoreByDomain(domain);
+    if (!readPolicy(store, handle)) {
+      return { title, robots: { index: false, follow: true } };
+    }
+  } catch {
+    // Lookup failure must not flip a real policy to noindex.
+  }
+  return { title };
 }
 
 export default async function PolicyPage({ params }: PageProps) {
@@ -124,6 +137,21 @@ export default async function PolicyPage({ params }: PageProps) {
           data: { policy: { handle, title, body } },
         }}
         routeFallback={builtInPolicy}
+        // ADR-7 — routeFallback is client-only. Only with a real body: an
+        // unpublished policy stays thin rather than becoming a soft 404.
+        seoContent={
+          body ? (
+            <SsrArticleContent
+              title={title}
+              body={body}
+              storeName={store?.name}
+              locale={
+                (store as { default_language?: string })?.default_language ||
+                "en"
+              }
+            />
+          ) : undefined
+        }
       />
     );
   }

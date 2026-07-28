@@ -99,28 +99,6 @@ export const NEVER_INDEXED_HANDLES: ReadonlySet<string> = new Set([
   "thanks",
 ]);
 
-/** True when the theme can render `type` as a page template. */
-function themeShipsTemplate(
-  themeSettings: ThemeSettingsV3,
-  type: string,
-): boolean {
-  if (themeSettings.templates?.[type]) return true;
-  // Fall back to the theme's DECLARED presets. `sanitizeAgainstSchemas` only
-  // substitutes a preset template for a key the saved customization already
-  // carries, so a template the theme ships but the merchant never opened in the
-  // editor is missing from `templates` while the bundle renders it just fine.
-  // Reading presets keeps the canonical decision keyed on what the theme can
-  // actually paint, not on which panels the merchant happened to visit.
-  const presetTemplates = (
-    themeSettings.external_theme?.presets as
-      | { templates?: Record<string, unknown> | null }
-      | null
-      | undefined
-  )?.templates;
-  if (!presetTemplates || typeof presetTemplates !== "object") return false;
-  return Boolean(presetTemplates[type]);
-}
-
 /**
  * True when `/{handle}` — the catch-all — is the URL that owns this content:
  * it renders something real AND is the form the theme's nav links to, so it
@@ -131,11 +109,13 @@ function themeShipsTemplate(
  * `/pages/{handle}` keeps its normal self-canonical.
  *
  * @param handle single-segment content handle, e.g. `about`
+ * @param _themeSettings retained for callers; a template alone no longer grants
+ *   ownership (see below)
  * @param hasCmsBody a PUBLISHED CMS page with a non-empty body backs the handle
  */
 export function catchAllOwnsHandle(
   handle: string,
-  themeSettings: ThemeSettingsV3 | null | undefined,
+  _themeSettings: ThemeSettingsV3 | null | undefined,
   hasCmsBody: boolean,
 ): boolean {
   const key = handle.toLowerCase();
@@ -146,6 +126,12 @@ export function catchAllOwnsHandle(
   // `/{handle}` 404s outside the allowlist, so it can't own anything.
   if (!KNOWN_PAGE_HANDLES.has(key)) return false;
   if (hasCmsBody) return true;
-  const type = TEMPLATE_TYPE_BY_HANDLE[key];
-  return Boolean(type && themeSettings && themeShipsTemplate(themeSettings, type));
+  // A dedicated theme template is NOT enough on its own. BYOT themes paint
+  // client-side, so with no CMS body the initial HTML a crawler reads has no
+  // h1 and no copy — `/about` and `/contact` were emitting `index, follow` for
+  // exactly that (measured live: h1=0, 2 anchors, 0 JSON-LD). Without a body
+  // they now behave like `/shipping` and `/faq`: noindex+follow here, and
+  // `/pages/{handle}` keeps its own self-canonical. Publishing a CMS body
+  // flips the handle back to indexable.
+  return false;
 }
