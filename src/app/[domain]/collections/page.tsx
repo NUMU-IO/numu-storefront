@@ -8,6 +8,7 @@ import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import BuiltInCollectionsIndex from "@/components/storefront/BuiltInCollectionsIndex";
 import { alternatesFor, type StoreForSeo } from "@/lib/seo";
+import { SsrCollectionIndexContent } from "@/components/seo/SsrContentLayer";
 import { headers } from "next/headers";
 import type { Metadata } from "next";
 
@@ -95,6 +96,17 @@ export default async function CollectionsIndexPage({ params }: PageProps) {
             storeName={store?.name}
             locale={locale}
           />
+        }
+        // ADR-7. routeFallback is client-only (flipped by an effect), so it is
+        // never in the initial response — a crawler saw no h1 and 2 anchors.
+        seoContent={
+          collections.length > 0 ? (
+            <SsrCollectionIndexContent
+              collections={collections}
+              storeName={store?.name}
+              locale={locale}
+            />
+          ) : undefined
         }
       />
     );

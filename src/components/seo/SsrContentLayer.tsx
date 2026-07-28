@@ -449,3 +449,226 @@ export function SsrHomeContent({
     </div>
   );
 }
+
+// ── Catalogue indexes ───────────────────────────────────────────────────────
+// /products and /collections are sitemapped and index,follow but shipped no h1
+// and 2 anchors — Google was being invited to index an empty page. Callers must
+// pass non-empty data; on empty they should keep the route's noindex path
+// rather than render a thinner soft 404.
+
+export function SsrProductIndexContent({
+  products,
+  storeName,
+  storeCurrency,
+  locale,
+  limit = 100,
+}: {
+  products: SsrProductLike[] | null | undefined;
+  storeName?: string | null;
+  storeCurrency?: string | null;
+  locale?: string;
+  limit?: number;
+}) {
+  const t = copy(locale);
+  const list = (Array.isArray(products) ? products : []).slice(0, limit);
+
+  return (
+    <div dir={t.dir} className={wrapClass}>
+      <Breadcrumbs
+        label={t.breadcrumb}
+        trail={[{ name: storeName || t.home, href: "/" }, { name: t.products }]}
+      />
+      <h1 className="text-2xl font-bold [font-family:var(--numu-display)]">
+        {t.products}
+      </h1>
+      <p className={`mt-1 ${mutedClass}`}>{t.count(list.length)}</p>
+
+      <ul className="mt-6 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
+        {list.map((p, i) => {
+          const name = nameOf(p) || (t.ar ? "منتج" : "Product");
+          const img = productImages(p)[0];
+          const price = priceText(p, storeCurrency || undefined);
+          return (
+            <li key={p.id || p.slug || `${name}-${i}`}>
+              <a href={productHref(p)} className="block">
+                {img?.url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={img.url}
+                    alt={img.alt || name}
+                    loading="lazy"
+                    className="mb-2 aspect-square w-full rounded-[var(--numu-radius)] object-cover"
+                  />
+                )}
+                <h2 className="text-sm font-medium">{name}</h2>
+                {price && <p className={mutedClass}>{price}</p>}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+export function SsrCollectionIndexContent({
+  collections,
+  storeName,
+  locale,
+}: {
+  collections: SsrCollectionLike[] | null | undefined;
+  storeName?: string | null;
+  locale?: string;
+}) {
+  const t = copy(locale);
+  const list = Array.isArray(collections) ? collections : [];
+
+  return (
+    <div dir={t.dir} className={wrapClass}>
+      <Breadcrumbs
+        label={t.breadcrumb}
+        trail={[
+          { name: storeName || t.home, href: "/" },
+          { name: t.collections },
+        ]}
+      />
+      <h1 className="text-2xl font-bold [font-family:var(--numu-display)]">
+        {t.collections}
+      </h1>
+
+      <ul className="mt-6 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
+        {list.map((c, i) => {
+          const name = nameOf(c);
+          if (!name) return null;
+          const description = toPlainText(c.description, 160);
+          const count =
+            typeof c.product_count === "number" ? c.product_count : null;
+          return (
+            <li key={c.id || c.slug || `${name}-${i}`}>
+              <a href={collectionHref(c)} className="block">
+                {c.image_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={c.image_url}
+                    alt={name}
+                    loading="lazy"
+                    className="mb-2 aspect-square w-full rounded-[var(--numu-radius)] object-cover"
+                  />
+                )}
+                <h2 className="text-sm font-medium">{name}</h2>
+                {count !== null && <p className={mutedClass}>{t.count(count)}</p>}
+                {description && <p className={mutedClass}>{description}</p>}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ── Article-shaped routes (CMS pages, policies, blog articles) ───────────────
+
+export function SsrArticleContent({
+  title,
+  body,
+  storeName,
+  locale,
+  trail,
+}: {
+  title?: string | null;
+  body?: string | null;
+  storeName?: string | null;
+  locale?: string;
+  /** Extra crumbs between the store and this page, e.g. Blogs → Blog name. */
+  trail?: Array<{ name: string; href?: string }>;
+}) {
+  const t = copy(locale);
+  const heading = (title || "").trim() || storeName || t.home;
+  // Long-form: pages and policies run to thousands of characters and this is
+  // the crawler's only copy of them.
+  const text = toPlainText(body, 8000);
+
+  return (
+    <div dir={t.dir} className={wrapClass}>
+      <Breadcrumbs
+        label={t.breadcrumb}
+        trail={[
+          { name: storeName || t.home, href: "/" },
+          ...(trail || []),
+          { name: heading },
+        ]}
+      />
+      <article>
+        <h1 className="text-2xl font-bold [font-family:var(--numu-display)]">
+          {heading}
+        </h1>
+        {text && (
+          <div className="mt-4 max-w-2xl space-y-3">
+            {text
+              .split(/\n{2,}/)
+              .filter(Boolean)
+              .map((para, i) => (
+                <p key={i}>{para}</p>
+              ))}
+          </div>
+        )}
+      </article>
+    </div>
+  );
+}
+
+export function SsrBlogIndexContent({
+  title,
+  articles,
+  storeName,
+  locale,
+  trail,
+}: {
+  title?: string | null;
+  articles: Array<{
+    id?: string;
+    handle?: string | null;
+    title?: string | null;
+    excerpt?: string | null;
+    href?: string;
+  }> | null | undefined;
+  storeName?: string | null;
+  locale?: string;
+  trail?: Array<{ name: string; href?: string }>;
+}) {
+  const t = copy(locale);
+  const heading = (title || "").trim() || (t.ar ? "المدونة" : "Blog");
+  const list = Array.isArray(articles) ? articles : [];
+
+  return (
+    <div dir={t.dir} className={wrapClass}>
+      <Breadcrumbs
+        label={t.breadcrumb}
+        trail={[
+          { name: storeName || t.home, href: "/" },
+          ...(trail || []),
+          { name: heading },
+        ]}
+      />
+      <h1 className="text-2xl font-bold [font-family:var(--numu-display)]">
+        {heading}
+      </h1>
+      <ul className="mt-6 space-y-4">
+        {list.map((a, i) => {
+          const name = (a.title || "").trim();
+          if (!name || !a.href) return null;
+          const excerpt = toPlainText(a.excerpt, 200);
+          return (
+            <li key={a.id || a.handle || `${name}-${i}`}>
+              <a href={a.href} className="underline underline-offset-2">
+                <h2 className="inline text-base font-medium">{name}</h2>
+              </a>
+              {excerpt && <p className={`mt-1 ${mutedClass}`}>{excerpt}</p>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

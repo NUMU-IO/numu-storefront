@@ -304,12 +304,50 @@ class ThemeRenderBoundary extends Component<
  * page. Unlike the editor postMessage below, this fires on real top-level
  * shopper pages too, which is exactly where we're blind today.
  */
+/**
+ * Pull the theme slug and version out of a bundle URL.
+ *
+ * Published bundles live at `<cdn>/<slug>/<version>/theme.js`, e.g.
+ * `https://cdn.numueg.app/vionne-v3/0.6.4/theme.js`, so the URL is the one
+ * place both facts are always available at the moment a bundle fails — which
+ * is precisely when the beacon fires. The resolved theme model does not carry
+ * a version at all, which is why `theme_version` was empty on every row of
+ * `theme_error_events`: the ingest supports the column, nothing ever populated
+ * it, and a crash could not be attributed to a release.
+ *
+ * Returns nulls rather than throwing for a dev/local URL that doesn't match
+ * the shape — telemetry must never be the thing that breaks.
+ */
+function themeIdentityFromBundleUrl(bundleUrl?: string | null): {
+  slug: string | null;
+  version: string | null;
+} {
+  if (!bundleUrl) return { slug: null, version: null };
+  try {
+    const segments = new URL(bundleUrl, "https://placeholder/").pathname
+      .split("/")
+      .filter(Boolean);
+    // …/<slug>/<version>/theme.js — take the two segments before the filename.
+    if (segments.length < 3) return { slug: null, version: null };
+    const version = segments[segments.length - 2] ?? null;
+    const slug = segments[segments.length - 3] ?? null;
+    // Only accept a version-shaped segment; a local dev URL like
+    // `:5173/theme.js` must not report "5173" as a release.
+    return /^\d+\.\d+\.\d+/.test(version ?? "")
+      ? { slug, version }
+      : { slug: null, version: null };
+  } catch {
+    return { slug: null, version: null };
+  }
+}
+
 function beaconThemeError(payload: {
   store?: string | null;
   bundleUrl?: string | null;
   message: string;
   stack?: string | null;
   themeSlug?: string | null;
+  themeVersion?: string | null;
 }): void {
   if (
     typeof navigator === "undefined" ||
@@ -318,14 +356,19 @@ function beaconThemeError(payload: {
     return;
   }
   try {
+    // Theme identity for the backend ingest. Prefer whatever the caller knew;
+    // fall back to the bundle URL, which encodes both and is always present on
+    // a bundle failure. Callers were passing `theme_id` (a UUID) as the slug,
+    // so `theme_slug` held things like "583aecc8-4842-…" — unreadable in the
+    // hub and useless for grouping crashes by theme.
+    const fromUrl = themeIdentityFromBundleUrl(payload.bundleUrl);
     const body = JSON.stringify({
       store: payload.store ?? null,
       bundleUrl: payload.bundleUrl ?? null,
       message: payload.message,
       stack: payload.stack ?? null,
-      // Theme identity for the backend ingest (theme_slug). No theme_version is
-      // surfaced in the resolved theme model, so it's intentionally omitted.
-      themeSlug: payload.themeSlug ?? null,
+      themeSlug: payload.themeSlug ?? fromUrl.slug ?? null,
+      themeVersion: payload.themeVersion ?? fromUrl.version ?? null,
       url: typeof window !== "undefined" ? window.location.href : null,
     });
     navigator.sendBeacon(
@@ -343,6 +386,7 @@ function postBundleError(
     store?: string | null;
     bundleUrl?: string | null;
     themeSlug?: string | null;
+    themeVersion?: string | null;
   },
 ) {
   if (typeof window === "undefined") return;
@@ -354,6 +398,7 @@ function postBundleError(
     message: error.message,
     stack: error.stack ?? null,
     themeSlug: ctx?.themeSlug ?? null,
+    themeVersion: ctx?.themeVersion ?? null,
   });
   // Editor integration: only meaningful inside the customizer iframe.
   if (window.parent === window) return;
@@ -586,10 +631,10 @@ export default function ByotThemeBoundary({
           store:
             storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
           bundleUrl,
-          themeSlug:
-            themeSettings.external_theme?.theme_id ??
-            themeSettings.theme_id ??
-            null,
+          // Deliberately NOT `theme_id`: that is a UUID and it is what used
+          // to land in `theme_slug`. Leave it null and let beaconThemeError
+          // derive the real slug + version from the bundle URL.
+          themeSlug: null,
         });
       }
     }
@@ -807,10 +852,10 @@ export default function ByotThemeBoundary({
           store:
             storeData?.subdomain ?? storeData?.slug ?? storeData?.id ?? null,
           bundleUrl,
-          themeSlug:
-            themeSettings.external_theme?.theme_id ??
-            themeSettings.theme_id ??
-            null,
+          // Deliberately NOT `theme_id`: that is a UUID and it is what used
+          // to land in `theme_slug`. Leave it null and let beaconThemeError
+          // derive the real slug + version from the bundle URL.
+          themeSlug: null,
         })
       }
       fallback={fallbackUI}

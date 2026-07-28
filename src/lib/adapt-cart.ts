@@ -31,6 +31,11 @@ export function adaptCart(raw: unknown): unknown {
     price: it.unit_price ?? it.price ?? 0,
     quantity: it.quantity ?? 0,
     variant_name: it.variant_name ?? undefined,
+    // Carried so the checkout summary can echo it back to
+    // /api/cart/discounts — category-scoped promotions match on it, and a
+    // preview that omits it under-reports the discount the order will get.
+    // This whitelist is exhaustive: anything not listed is dropped.
+    ...(it.category_id != null ? { category_id: it.category_id } : {}),
   }));
 
   return {
@@ -41,5 +46,16 @@ export function adaptCart(raw: unknown): unknown {
     currency: c.currency ?? "EGP",
     ...(c.discount_code != null ? { discount_code: c.discount_code } : {}),
     ...(c.discount_amount != null ? { discount_amount: c.discount_amount } : {}),
+    // Offers-v2 automatic promotions. This whitelist is exhaustive — a field
+    // that isn't listed here is silently dropped, which is exactly why the
+    // cart used to show full price while checkout charged the discounted
+    // total. Amounts stay in CENTS; the SDK converts them (see
+    // `normalizeCartFromServer`).
+    ...(c.automatic_discount_cents != null
+      ? { automatic_discount_cents: c.automatic_discount_cents }
+      : {}),
+    ...(Array.isArray(c.applied_promotions)
+      ? { applied_promotions: c.applied_promotions }
+      : {}),
   };
 }

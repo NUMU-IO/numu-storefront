@@ -17,6 +17,7 @@ import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { SsrBlogIndexContent } from "@/components/seo/SsrContentLayer";
 import {
   fetchBlogsList,
   pickText,
@@ -38,8 +39,14 @@ export async function generateMetadata({
     const store = await fetchStoreByDomain(domain);
     const lang = await resolveVisitorLang(store);
     const heading = lang === "ar" ? "المدونة" : "Blog";
+    // A store with no blogs renders an empty index — nothing to rank, and
+    // indexing it just spends crawl budget on a soft 404.
+    const blogs = await fetchBlogsList(store.id).catch(() => []);
     // Entity title only — the layout's template appends the store name.
-    return { title: heading };
+    return {
+      title: heading,
+      ...(blogs.length === 0 ? { robots: { index: false, follow: true } } : {}),
+    };
   } catch {
     return { title: "Blog" };
   }
@@ -127,6 +134,23 @@ export default async function BlogsIndexPage({ params }: PageProps) {
           data: { blogs },
         }}
         routeFallback={builtInBlogs}
+        // ADR-7 — blog links in the initial HTML (SsrBlogIndexContent's item
+        // shape fits blogs as well as articles).
+        seoContent={
+          blogs.length > 0 ? (
+            <SsrBlogIndexContent
+              title={isAr ? "المدونة" : "Blog"}
+              storeName={store?.name}
+              locale={lang}
+              articles={blogs.map((b) => ({
+                handle: b.handle,
+                title: pickText(b.title, lang) || b.handle,
+                excerpt: pickText(b.description ?? undefined, lang),
+                href: `/blogs/${b.handle}`,
+              }))}
+            />
+          ) : undefined
+        }
       />
     );
   }

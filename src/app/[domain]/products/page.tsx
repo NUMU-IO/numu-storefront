@@ -8,6 +8,8 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { alternatesFor, type StoreForSeo } from "@/lib/seo";
+import { SsrProductIndexContent } from "@/components/seo/SsrContentLayer";
+import { headers } from "next/headers";
 import type { Metadata } from "next";
 
 /**
@@ -84,6 +86,11 @@ export default async function ProductsListingPage({ params }: PageProps) {
       fetchProducts(store.id, 500).catch(() => []),
       fetchCollections(store.id).catch(() => []),
     ]);
+    const hl = await headers();
+    const locale =
+      hl.get("x-numu-locale") ||
+      (store as { default_language?: string })?.default_language ||
+      "en";
     return (
       <ByotThemeBoundary
         bundleUrl={themeSettings.external_theme.bundle_url}
@@ -91,11 +98,26 @@ export default async function ProductsListingPage({ params }: PageProps) {
         cssUrl={themeSettings.external_theme.css_url}
         themeSettings={themeSettings}
         storeData={store}
+        locale={locale}
         page={{
           type: "products",
           title: "All products",
           data: { products, collections },
         }}
+        // ADR-7. This route had NEITHER backstop: it shipped 45 characters of
+        // visible text and no h1 while being sitemapped and index,follow.
+        // Omitted on an empty catalogue so we don't publish a thinner page
+        // than the theme would.
+        seoContent={
+          products.length > 0 ? (
+            <SsrProductIndexContent
+              products={products}
+              storeName={store?.name}
+              storeCurrency={(store as { currency?: string })?.currency}
+              locale={locale}
+            />
+          ) : undefined
+        }
       />
     );
   }
