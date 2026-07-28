@@ -22,6 +22,7 @@ import { alternatesFor, type StoreForSeo } from "@/lib/seo";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { SsrArticleContent } from "@/components/seo/SsrContentLayer";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -79,6 +80,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return {
       title,
       ...(description ? { description } : {}),
+      // No published body → the route renders a heading over "No content yet."
+      // The sitemap already excludes these; the page was still index,follow.
+      ...(hasBody ? {} : { robots: { index: false, follow: true } }),
       alternates: alternatesFor(
         store as unknown as StoreForSeo,
         domain,
@@ -184,6 +188,19 @@ export default async function CmsPage({ params }: PageProps) {
               <p className="text-gray-600 mt-4">No content yet.</p>
             )}
           </div>
+        }
+        // ADR-7 — routeFallback above is client-only, so the crawler saw an
+        // empty page. Emitted only with a real body: a heading over "No content
+        // yet." is the soft 404 the sitemap already excludes.
+        seoContent={
+          resolvedBody ? (
+            <SsrArticleContent
+              title={resolvedTitle}
+              body={resolvedBody}
+              storeName={store?.name}
+              locale={lang}
+            />
+          ) : undefined
         }
       />
     );

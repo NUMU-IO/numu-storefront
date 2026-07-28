@@ -14,6 +14,7 @@ import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { sanitizeHtml } from "@/lib/sanitize-html";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
+import { SsrArticleContent } from "@/components/seo/SsrContentLayer";
 import {
   fetchArticleByHandle,
   pickText,
@@ -198,6 +199,21 @@ export default async function ArticlePage({ params }: PageProps) {
             data: { article: a, blog_handle: blog },
           }}
           routeFallback={builtInArticle}
+          // ADR-7 — routeFallback is client-only; the article body is exactly
+          // what an article URL is indexed for.
+          seoContent={
+            bodyHtml ? (
+              <SsrArticleContent
+                title={title}
+                body={bodyHtml}
+                storeName={store?.name}
+                locale={lang}
+                trail={[
+                  { name: isAr ? "المدونة" : "Blog", href: `/blogs/${blog}` },
+                ]}
+              />
+            ) : undefined
+          }
         />
       </>
     );
