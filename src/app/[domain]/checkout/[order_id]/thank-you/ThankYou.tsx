@@ -171,6 +171,12 @@ export function ThankYou({
   const offers = Array.isArray(order?.applied_promotions)
     ? order!.applied_promotions!
     : [];
+  // `order.discount_amount` is the GRAND TOTAL discount — it already includes
+  // every promotion itemised in `applied_promotions`. Rendering both as
+  // separate rows double-counted the offer: an order charged EGP 700 printed
+  // rows that summed to 600. Show only the part not already broken out.
+  const offersTotal = offers.reduce((s, p) => s + (p.amount || 0), 0);
+  const otherDiscount = Math.max(0, (order?.discount_amount ?? 0) - offersTotal);
 
   const fullName =
     addr?.full_name ||
@@ -277,7 +283,7 @@ export function ThankYou({
                 value={fmt(order.subtotal, currency)}
               />
             )}
-            {Boolean(order.discount_amount) && (
+            {otherDiscount > 0 && (
               <Row
                 label={
                   <span className="flex items-center gap-1.5">
@@ -292,7 +298,7 @@ export function ThankYou({
                     )}
                   </span>
                 }
-                value={`−${fmt(order.discount_amount, currency)}`}
+                value={`−${fmt(otherDiscount, currency)}`}
                 positive
               />
             )}
