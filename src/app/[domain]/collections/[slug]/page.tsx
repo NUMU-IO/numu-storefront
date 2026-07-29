@@ -12,6 +12,8 @@ import {
 import { SsrCollectionContent } from "@/components/seo/SsrContentLayer";
 import {
   alternatesFor,
+  alternatesForEntity,
+  entityRobots,
   canonicalFor,
   canonicalOriginFor,
   buildOpenGraph,
@@ -77,7 +79,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       // Entity title only — the layout's template appends the store name.
       title,
       description,
-      alternates: alternatesFor(storeForSeo, domain, path),
+      alternates: alternatesForEntity(storeForSeo, domain, path, collection),
+      // The store gate plus the merchant's per-collection noindex switch.
+      robots: entityRobots(storeForSeo, collection),
       // og:url was missing entirely, so scrapers fell back to the requested
       // URL or (worse) the layout's origin-wide value. Built with the shared
       // helper so siteName + og:locale come along too.

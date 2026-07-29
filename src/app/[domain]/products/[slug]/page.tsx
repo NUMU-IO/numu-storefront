@@ -19,6 +19,8 @@ import {
 import { FunnelTracker } from "@/components/tracking/FunnelTracker";
 import {
   alternatesFor,
+  alternatesForEntity,
+  entityRobots,
   canonicalFor,
   canonicalOriginFor,
   localizedPathFor,
@@ -96,7 +98,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return {
       title: ptitle,
       description: pdesc,
-      alternates: alternatesFor(storeForSeo, domain, path),
+      alternates: alternatesForEntity(storeForSeo, domain, path, product),
       openGraph: {
         title: ptitle,
         description: pdesc,
@@ -129,8 +131,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         title: ptitle,
         description: pdesc,
       },
-      // noindex a draft/archived product or a non-indexable store.
-      robots: storeRobots(storeForSeo, {
+      // noindex a draft/archived product, a non-indexable store, or a product
+      // the merchant flipped out of the index.
+      robots: entityRobots(storeForSeo, product, {
         forceNoindex: !productActive,
       }),
     };

@@ -548,10 +548,25 @@ function normalizeProduct(
   // contract (ProductImage[]) — and every theme — reads `images[i].url`.
   // Coerce string entries into { id, url } objects so themes render images;
   // pass through entries that are already objects.
+  // Alt text arrives as a URL-keyed map (the API has nowhere else to put it —
+  // `images` is a bare string[]). Fold it into the objects synthesized below so
+  // themes, the SSR layer and Product JSON-LD all read `image.alt` and only
+  // fall back to the product name when the merchant hasn't written one.
+  const altByUrl: Record<string, string> =
+    raw.image_alts && typeof raw.image_alts === "object" ? raw.image_alts : {};
   const images = Array.isArray(raw.images)
-    ? raw.images.map((img: unknown, i: number) =>
-        typeof img === "string" ? { id: String(i), url: img } : img,
-      )
+    ? raw.images.map((img: unknown, i: number) => {
+        if (typeof img === "string") {
+          const alt = altByUrl[img];
+          return alt ? { id: String(i), url: img, alt } : { id: String(i), url: img };
+        }
+        if (img && typeof img === "object") {
+          const url = (img as { url?: string }).url;
+          const alt = (img as { alt?: string }).alt ?? (url ? altByUrl[url] : undefined);
+          return alt ? { ...(img as object), alt } : img;
+        }
+        return img;
+      })
     : [];
   // Variant prices now arrive in MAJOR units, same as the product price
   // (backend variant_repository was aligned to the cents convention, so the
