@@ -248,6 +248,47 @@ function splitLocalePrefix(p: string): { prefix: string | null; rest: string } {
   };
 }
 
+/** Per-entity SEO overrides the backend exposes on products and categories. */
+export interface EntitySeoOverrides {
+  robots_noindex?: boolean | null;
+  canonical_url?: string | null;
+  sitemap_exclude?: boolean | null;
+}
+
+/**
+ * `alternates` for one entity, honouring a merchant canonical override.
+ *
+ * A merchant pointing a page at its original (a seasonal duplicate, a variant
+ * landing page) has to win over the computed self-canonical — that is the whole
+ * point of the field. The hreflang alternates stay computed: they describe THIS
+ * page's locale variants, which an override doesn't change.
+ */
+export function alternatesForEntity(
+  store: StoreForSeo | null | undefined,
+  domain: string,
+  path: string | null | undefined,
+  entity: EntitySeoOverrides | null | undefined,
+): NonNullable<Metadata["alternates"]> {
+  const base = alternatesFor(store, domain, path);
+  const override = (entity?.canonical_url ?? "").trim();
+  return override ? { ...base, canonical: override } : base;
+}
+
+/**
+ * Robots for one entity: the store gate first, then the merchant's per-page
+ * switch. `follow` stays on — a noindexed page should still pass link equity
+ * to the pages it points at.
+ */
+export function entityRobots(
+  store: StoreForSeo | null | undefined,
+  entity: EntitySeoOverrides | null | undefined,
+  opts: { forceNoindex?: boolean } = {},
+): Metadata["robots"] {
+  if (opts.forceNoindex || storeBlocksIndexing(store)) return NOINDEX_ROBOTS;
+  if (entity?.robots_noindex === true) return { index: false, follow: true };
+  return storeRobots(store);
+}
+
 /**
  * `alternates` for a route: the per-URL canonical plus en/ar hreflang.
  *
