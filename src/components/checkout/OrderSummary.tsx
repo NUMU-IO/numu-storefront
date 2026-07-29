@@ -85,7 +85,13 @@ interface Cart {
   currency?: string;
   // Optional totals the backend may surface (all int cents). Absent on the
   // base CartResponse today; read defensively so we light up when present.
+  // ⚠️ `discount_amount` is the GRAND TOTAL discount and already includes
+  // everything in `applied_promotions` — never add the two together.
   discount_amount?: number;
+  // The code/coupon portion alone, written locally by the discounts preview
+  // (the backend cart read can't know about a code typed at checkout). Kept
+  // separate from `discount_amount` so neither field ever means two things.
+  code_discount_cents?: number;
   tax_amount?: number;
   shipping_cost?: number;
   // A single coupon promotion (BuiltInCart shape) …
@@ -407,6 +413,52 @@ function Lines({ cart, locale }: { cart: Cart; locale: string }) {
 }
 
 /**
+ * The ONE place checkout totals are computed.
+ *
+ * Every surface that shows money — the breakdown, the mobile collapsed bar —
+ * must read from here. They each used to re-derive it, and they drifted: the
+ * collapsed bar added `discount_amount` to `applied_promotions` and showed a
+ * total EGP 100 below the breakdown sitting right beneath it, on the one
+ * viewport where the bar is the *only* figure visible until expanded.
+ *
+ * The subtle part is `couponDiscount`. `cart.discount_amount` from the backend
+ * is the GRAND TOTAL discount and already includes everything itemised in
+ * `applied_promotions`, so the two must never be summed. `code_discount_cents`
+ * is the discounts-preview's explicit answer for a coupon typed at checkout
+ * (the backend cart read can't know about it) and wins when present.
+ */
+function computeTotals(cart: Cart, shippingCents: number | null) {
+  const subtotal =
+    cart.subtotal ?? cart.items.reduce((s, l) => s + lineTotal(l), 0);
+
+  const offers = Array.isArray(cart.applied_promotions)
+    ? cart.applied_promotions
+    : [];
+  const offersTotal = offers.reduce((s, p) => s + (p.amount || 0), 0);
+
+  const totalDiscount =
+    cart.discount_amount ?? cart.applied_promotion?.amount ?? 0;
+  const couponDiscount =
+    cart.code_discount_cents ?? Math.max(0, totalDiscount - offersTotal);
+
+  const shipping = cart.free_shipping ? 0 : (cart.shipping_cost ?? shippingCents);
+  const tax = cart.tax_amount ?? 0;
+
+  return {
+    subtotal,
+    offers,
+    offersTotal,
+    couponDiscount,
+    shipping,
+    tax,
+    total: Math.max(
+      0,
+      subtotal - couponDiscount - offersTotal + (shipping ?? 0) + tax,
+    ),
+  };
+}
+
+/**
  * Totals breakdown. Subtotal from the cart; shipping from the cached
  * checkout-state rate (or the cart's own `shipping_cost` when present);
  * discount/offers/tax read defensively from the cart response.
@@ -423,32 +475,10 @@ function Breakdown({
   const isAr = locale === "ar";
   const currency = cart.currency || "EGP";
 
-  const subtotal =
-    cart.subtotal ?? cart.items.reduce((s, l) => s + lineTotal(l), 0);
-
-  // Coupon discount: explicit `discount_amount`, else a single
-  // `applied_promotion.amount` if the response carries one.
-  const couponDiscount =
-    cart.discount_amount ?? cart.applied_promotion?.amount ?? 0;
-
-  // Automatic (non-coupon) offers — offers-v2 list.
-  const offers = Array.isArray(cart.applied_promotions)
-    ? cart.applied_promotions
-    : [];
-  const offersTotal = offers.reduce((s, p) => s + (p.amount || 0), 0);
-
-  // Shipping: a free-shipping coupon/offer zeroes it; else the cart's own
-  // value wins (authoritative if the backend surfaces it), else the cached
-  // selected-rate amount.
-  const shipping = cart.free_shipping
-    ? 0
-    : (cart.shipping_cost ?? shippingCents);
-  const tax = cart.tax_amount ?? 0;
-
-  const total = Math.max(
-    0,
-    subtotal - couponDiscount - offersTotal + (shipping ?? 0) + tax,
-  );
+  // Single source of truth — shared with the mobile collapsed bar so the two
+  // can never disagree. See `computeTotals`.
+  const { subtotal, offers, offersTotal, couponDiscount, shipping, tax, total } =
+    computeTotals(cart, shippingCents);
 
   const free = isAr ? "مجاناً" : "Free";
 
@@ -612,14 +642,15 @@ export function OrderSummary() {
             }
             // Coupon CODE discount is a separate field on the engine response
             // (`code_discount_cents`) — NOT part of `applied_promotions` /
-            // `automatic_discount_cents`. Fold it into the cart's
-            // `discount_amount` so the Breakdown renders the "Discount −EGP X"
-            // line and the Total drops the moment a code is applied. Without
-            // this the UI silently ignored every coupon.
-            const codeDiscount = Number(out?.code_discount_cents || 0);
-            if (codeDiscount > 0) {
-              c.discount_amount = codeDiscount;
-              if (couponCode) c.coupon_code = couponCode;
+            // `automatic_discount_cents`. Keep it in its OWN field rather than
+            // folding it into `discount_amount`: since the cart response
+            // started carrying offers, `discount_amount` means the GRAND TOTAL
+            // discount (automatic + code), so overwriting it with the code
+            // part alone gave that one field two contradictory meanings
+            // depending on whether this preview had landed yet.
+            c.code_discount_cents = Number(out?.code_discount_cents || 0);
+            if (c.code_discount_cents > 0 && couponCode) {
+              c.coupon_code = couponCode;
             }
             // A free-shipping coupon/offer carries a 0 monetary discount but
             // must zero the shipping line — fold the engine's flag through so
@@ -670,21 +701,12 @@ export function OrderSummary() {
 
   // Mobile collapsed bar shows the running Total (incl. shipping/discount
   // when known) rather than just the subtotal.
-  const collapsedTotal = (() => {
-    if (!cart) return 0;
-    const subtotal =
-      cart.subtotal ?? cart.items.reduce((s, l) => s + lineTotal(l), 0);
-    const discount =
-      (cart.discount_amount ?? cart.applied_promotion?.amount ?? 0) +
-      (Array.isArray(cart.applied_promotions)
-        ? cart.applied_promotions.reduce((s, p) => s + (p.amount || 0), 0)
-        : 0);
-    const shipping = cart.free_shipping
-      ? 0
-      : (cart.shipping_cost ?? shippingCents ?? 0);
-    const tax = cart.tax_amount ?? 0;
-    return Math.max(0, subtotal - discount + shipping + tax);
-  })();
+  // Same computation as the breakdown, not a second copy of it. This bar used
+  // to re-derive the discount and summed `discount_amount` with
+  // `applied_promotions`, so at 390px — where it is the ONLY figure shown
+  // until the summary is expanded — it under-reported the total by the whole
+  // offer amount.
+  const collapsedTotal = cart ? computeTotals(cart, shippingCents).total : 0;
 
   const heading = isAr ? "ملخص الطلب" : "Order summary";
 
