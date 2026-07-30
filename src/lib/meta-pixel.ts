@@ -19,6 +19,7 @@
  */
 
 import { FUNNEL_STEP_TO_TIKTOK, ttqTrack } from "./tiktok-pixel";
+import { trackingOptOut } from "./consent";
 
 // ── Store config → enabled pixel IDs ────────────────────────────────────────
 
@@ -255,6 +256,13 @@ function postTrack(extra: Record<string, unknown>): void {
         : undefined,
     attribution: readAttribution() ?? undefined,
     customer_id: readCustomerId() ?? undefined,
+    // Consent: when the merchant requires it and the visitor hasn't accepted,
+    // the event still goes out but flagged `opt_out` — Meta's documented
+    // modeled-conversions path (attribution math only, nothing retained), and
+    // `limited_data_use` on TikTok. Returns undefined when consent isn't
+    // required, so the field is absent and the payload is unchanged for the
+    // stores that don't use this.
+    opt_out: trackingOptOut(),
     ...extra,
   };
   void (async () => {
@@ -269,6 +277,55 @@ function postTrack(extra: Record<string, unknown>): void {
       /* fire-and-forget */
     }
   })();
+}
+
+/**
+ * Remember / recall the `event_id` a funnel step fired with, per session.
+ *
+ * Used to RE-fire an event with the same id once better identity is known
+ * (see `refireFunnelWithIdentity`). Meta and TikTok both dedupe on
+ * `(pixel, event_name, event_id)`, so a second delivery under the same id is
+ * treated as the same event — not a new conversion — while still contributing
+ * its match keys. Best-effort: private mode / quota just means no re-fire.
+ */
+function rememberFunnelEventId(step: string, eventId: string): void {
+  try {
+    sessionStorage.setItem(`numu_evtid_${step}`, eventId);
+  } catch {
+    /* private mode — re-fire simply won't happen */
+  }
+}
+
+function recallFunnelEventId(step: string): string | null {
+  try {
+    return sessionStorage.getItem(`numu_evtid_${step}`);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-send an already-fired funnel step server-side, reusing its original
+ * `event_id`, so the backend can attach identity it has since learned.
+ *
+ * Why this exists: `InitiateCheckout` fires when the shopper lands on the
+ * checkout contact step — i.e. BEFORE they have typed anything — so for a
+ * guest it carried no email, phone or name. Moving the fire to after the
+ * contact step would fix the identity but lose the event entirely for anyone
+ * who abandons at contact. Re-firing under the same id gets both: the entry
+ * event still exists, and the enriched copy dedupes into it.
+ *
+ * CAPI-only on purpose — no `fbq`/`ttq` call. The browser already fired its
+ * half; firing again would put a second browser event on the wire.
+ */
+export function refireFunnelWithIdentity(
+  step: string,
+  data: Record<string, unknown> = {},
+): void {
+  if (typeof window === "undefined") return;
+  const eventId = recallFunnelEventId(step);
+  if (!eventId) return; // never fired in this session — nothing to enrich
+  postTrack({ event_id: eventId, step, step_data: cleanData(data) });
 }
 
 /**
@@ -287,6 +344,9 @@ export function trackFunnel(
 ): void {
   if (typeof window === "undefined") return;
   const eventId = opts.eventId || getEventId();
+  // Recorded so a later, better-identified re-fire can reuse this id instead
+  // of minting a new one (which Meta would count as a second conversion).
+  rememberFunnelEventId(step, eventId);
   const metaEvent = FUNNEL_STEP_TO_META[step];
   if (metaEvent) fbqTrack(metaEvent, data, eventId);
   // Fire the TikTok browser pixel with the SAME event_id so TikTok dedupes

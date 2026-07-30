@@ -17,7 +17,10 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ResolvedPromotion } from "@/lib/promo-server";
 import { postPromo } from "@/lib/promo-client";
+import { CONSENT_CHANGED_EVENT } from "@/lib/consent";
 
+// Must stay in sync with the same constant in lib/consent.ts, which is what
+// the pixel gate reads.
 const CONSENT_KEY = "numu_cookie_consent_v1";
 
 interface CookieContent {
@@ -179,6 +182,14 @@ export function CookieBanner({
 
   const decide = (decision: "accepted" | "rejected") => {
     saveConsent(decision);
+    // Tell <ConsentGate> so the tracking pixels mount the moment the visitor
+    // accepts, rather than only on their next page load. Purely additive —
+    // nothing breaks if no gate is listening.
+    try {
+      window.dispatchEvent(new Event(CONSENT_CHANGED_EVENT));
+    } catch {
+      /* ignore */
+    }
     postPromo(promotion.promotion_id, "events", {
       event_type: decision === "accepted" ? "click" : "dismiss",
       metadata: { surface: "cookie_banner", decision },

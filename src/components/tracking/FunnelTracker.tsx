@@ -8,6 +8,7 @@
 
 import { useEffect, useRef } from "react";
 import { trackFunnel } from "@/lib/meta-pixel";
+import { readCartFunnelData } from "@/lib/cart-funnel-data";
 
 /** Mark a dedupe key as fired; returns false if it was already fired.
  *  Exported so imperative call sites (e.g. AddPaymentInfo on checkout
@@ -73,53 +74,7 @@ export function CartFunnelTracker({
     fired.current = true;
     if (!claim(dedupeKey)) return;
     (async () => {
-      const data: Record<string, unknown> = {};
-      try {
-        const res = await fetch("/api/cart", {
-          cache: "no-store",
-          credentials: "include",
-        });
-        if (res.ok) {
-          const json = await res.json();
-          const cart = (json?.data ?? json) as {
-            subtotal?: number;
-            currency?: string;
-            items?: Array<{
-              product_id?: string;
-              variant_id?: string;
-              id?: string;
-              quantity?: number;
-              price?: number; // unit price snapshot in CENTS (adapt-cart)
-            }>;
-          };
-          const items = Array.isArray(cart?.items) ? cart.items : [];
-          const ids = items
-            .map((li) => li.product_id || li.variant_id || li.id)
-            .filter((x): x is string => typeof x === "string");
-          if (typeof cart?.subtotal === "number") data.value = cart.subtotal / 100;
-          data.currency = cart?.currency || currency || "EGP";
-          data.num_items = items.reduce(
-            (n, li) => n + (Number(li.quantity) || 0),
-            0,
-          );
-          if (ids.length) {
-            data.content_ids = ids;
-            data.content_type = "product";
-            // item_price in MAJOR units — without it TikTok's contents
-            // mapper (toTikTokProps) falls back to price: 0 per line.
-            data.contents = items.map((li) => ({
-              id: li.product_id || li.variant_id || li.id,
-              quantity: Number(li.quantity) || 1,
-              ...(typeof li.price === "number" && li.price > 0
-                ? { item_price: li.price / 100 }
-                : {}),
-            }));
-          }
-        }
-      } catch {
-        /* fire with whatever we have */
-      }
-      trackFunnel(step, data);
+      trackFunnel(step, await readCartFunnelData(currency));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
