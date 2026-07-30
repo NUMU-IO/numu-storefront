@@ -19,6 +19,7 @@ import {
 } from "@/lib/checkout-state";
 import { getSessionFingerprint, trackFunnel } from "@/lib/meta-pixel";
 import { claim } from "@/components/tracking/FunnelTracker";
+import { readCartFunnelData } from "@/lib/cart-funnel-data";
 
 /**
  * Step 3 — payment method picker.
@@ -290,8 +291,14 @@ export function PaymentStep() {
     // Meta AddPaymentInfo — fired when the buyer confirms a payment method.
     // Deduped per session + method: back/forward re-submits don't double-fire,
     // while a genuine method change still emits a fresh event.
+    //
+    // Carries cart value/currency/contents, not just the method name. Without
+    // them Meta and TikTok can't use this event for value-based optimisation
+    // or dynamic-ads cart signals — the only two things it's good for.
     if (claim(`api_${getSessionFingerprint()}_${method}`)) {
-      trackFunnel("add_payment_info", { payment_method: method });
+      void readCartFunnelData().then((cart) =>
+        trackFunnel("add_payment_info", { ...cart, payment_method: method }),
+      );
     }
     patchCheckoutState({
       payment_method: method,

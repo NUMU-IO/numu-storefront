@@ -27,6 +27,39 @@ import { fetchStoreByHost } from "@/lib/api-client";
  */
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
+
+/**
+ * The visitor's `X-Forwarded-For` chain to hand upstream.
+ *
+ * `fetch` from this route is server-to-server, so NONE of the shopper's
+ * request headers travel with it. The backend derives the CAPI
+ * `client_ip_address` from `x-forwarded-for` (falling back to the socket
+ * peer), so without this header every event Meta and TikTok received
+ * carried THIS SERVER's address — one IP shared by every shopper on the
+ * instance. That is worse than sending no IP: a real value that is
+ * uniformly wrong actively degrades match quality rather than merely
+ * failing to help it.
+ *
+ * We append to the incoming chain rather than replace it, so the hops that
+ * already handled the request stay visible. `cf-connecting-ip` is the
+ * edge's own view of the shopper and is preferred as the contributed value;
+ * it is normally already the head of the chain, hence the duplicate check.
+ * Mirrors `upstreamForwardedFor` in the sibling track-lookup proxy.
+ */
+function upstreamForwardedFor(req: NextRequest): string | null {
+  const chain = (req.headers.get("x-forwarded-for") || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const edgeClientIp =
+    req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip");
+  if (edgeClientIp && !chain.includes(edgeClientIp)) {
+    chain.push(edgeClientIp);
+  }
+
+  return chain.length > 0 ? chain.join(", ") : null;
+}
 // Upstream call budget. Set conservatively because /track is fire-
 // and-forget — the SDK has already moved on by the time we reach
 // this proxy, so there's no human waiting on the answer. A hung
@@ -135,10 +168,21 @@ export async function POST(req: NextRequest) {
     () => controller.abort(),
     UPSTREAM_TIMEOUT_MS,
   );
+  // Carry the shopper's IP + UA to the backend. Both are first-class Meta /
+  // TikTok match keys and, for an anonymous guest, very nearly the only ones
+  // — so a wrong IP costs real match quality on every mid-funnel event.
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const forwardedFor = upstreamForwardedFor(req);
+  if (forwardedFor) headers["X-Forwarded-For"] = forwardedFor;
+  const visitorUserAgent = req.headers.get("user-agent");
+  if (visitorUserAgent) headers["User-Agent"] = visitorUserAgent;
+
   try {
     await fetch(upstream, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
       // No-keepalive: the SDK already uses keepalive on the SDK ->
       // proxy hop; the proxy -> upstream hop is server-to-server and

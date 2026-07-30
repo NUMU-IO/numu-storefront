@@ -35,6 +35,7 @@ import {
 } from "@/lib/checkout-state";
 import { EG_GOVERNORATES, governorateLabel } from "@/lib/eg-governorates";
 import { trackCartState } from "@/lib/abandoned-cart";
+import { refireFunnelWithIdentity } from "@/lib/meta-pixel";
 
 const COUNTRIES = [
   ["EG", "Egypt", "مصر"],
@@ -297,6 +298,10 @@ export function ContactStep() {
     // row so the merchant's recovery flow (WhatsApp/email) can reach a
     // customer who drops off after this step. Shares the single emit path with
     // cart-change tracking; best-effort.
+    //
+    // The re-fire below is chained onto this write, not fired alongside it:
+    // the backend resolves a guest's identity by reading the very row this
+    // call creates, so firing before it lands would enrich nothing.
     void trackCartState({
       email,
       phone: phone || undefined,
@@ -311,6 +316,13 @@ export function ContactStep() {
         country,
         phone: phone || undefined,
       },
+    }).then(() => {
+      // InitiateCheckout fired on checkout ENTRY — before this form existed —
+      // so for a guest it went out with no email, phone or name. Now that we
+      // have them, re-send that event server-side under its original
+      // event_id: Meta/TikTok dedupe it into the first delivery (no inflated
+      // conversion count) while picking up the new match keys.
+      refireFunnelWithIdentity("checkout_started");
     });
 
     patchCheckoutState({

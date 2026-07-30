@@ -27,6 +27,25 @@ function readCookie(cookieHeader: string | null, name: string): string | undefin
   return m ? decodeURIComponent(m[1]) : undefined;
 }
 
+/**
+ * The visitor's session id, read out of the `numu_attribution` cookie —
+ * the same value `getSessionFingerprint()` returns in the browser, so
+ * server-fired and browser-fired events agree on one session identity.
+ * Best-effort: a malformed cookie yields undefined rather than throwing.
+ */
+function readSessionId(cookieHeader: string | null): string | undefined {
+  const raw = readCookie(cookieHeader, "numu_attribution");
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as { session_id?: unknown };
+    return typeof parsed.session_id === "string" && parsed.session_id
+      ? parsed.session_id
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fireServerCapi(
   req: NextRequest,
   step: string,
@@ -59,17 +78,41 @@ export async function fireServerCapi(
           : `${Date.now()}`),
       fbp: readCookie(cookieHeader, "_fbp"),
       fbc: readCookie(cookieHeader, "_fbc"),
+      // Session id from the attribution cookie. The backend maps this to the
+      // pseudonymous `external_id` match key, so an anonymous AddToCart still
+      // carries an identifier that ties it to the rest of the session (and to
+      // the eventual Purchase). Browser-fired events send the same value as
+      // `fingerprint`; this is the server-route equivalent.
+      fingerprint: readSessionId(cookieHeader),
+      ttclid: readCookie(cookieHeader, "ttclid"),
+      ttp: readCookie(cookieHeader, "_ttp"),
     };
+
+    // Forward the shopper's IP + UA. This is a server-to-server fetch, so
+    // none of their headers travel automatically and the backend would
+    // otherwise attribute the event to this server's own address — the same
+    // defect the /api/storefront/track proxy had.
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(cookieHeader ? { cookie: cookieHeader } : {}),
+    };
+    const chain = (req.headers.get("x-forwarded-for") || "")
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const edgeIp =
+      req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip");
+    if (edgeIp && !chain.includes(edgeIp)) chain.push(edgeIp);
+    if (chain.length) headers["X-Forwarded-For"] = chain.join(", ");
+    const ua = req.headers.get("user-agent");
+    if (ua) headers["User-Agent"] = ua;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       await fetch(`${API_URL}/storefront/store/${store.id}/track`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(cookieHeader ? { cookie: cookieHeader } : {}),
-        },
+        headers,
         body: JSON.stringify(body),
         cache: "no-store",
         signal: controller.signal,
