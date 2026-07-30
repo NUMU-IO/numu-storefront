@@ -12,7 +12,7 @@
  * Fawry…), saved cards, gift cards, coupons, and inline validation.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   CheckoutCard,
@@ -391,6 +391,20 @@ export function CheckoutPage() {
 
   // Submit + overlays
   const [submitting, setSubmitting] = useState(false);
+  // Stable across retries — see the note in ReviewStep. A fresh UUID per
+  // submit defeats the backend's de-dupe, so a retry after the proxy's 15s
+  // timeout creates a SECOND order.
+  // Lazily initialised ONCE — `useRef(crypto.randomUUID())` would re-evaluate
+  // the argument on every render (discarding a UUID per keystroke, and calling
+  // it on the SSR path); a ref keeps it out of the render cycle entirely.
+  const idempotencyKeyRef = useRef<string>("");
+  if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
+  // The exact line items the first attempt submitted, pinned so a retry
+  // re-sends them even though the successful-but-timed-out attempt already
+  // emptied the server cart. Cleared alongside the idempotency key.
+  const submittedLineItemsRef = useRef<
+    Array<{ product_id: string; variant_id: string | null; quantity: number }> | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [codBlocked, setCodBlocked] = useState(false);
   const [pixelData, setPixelData] = useState<{
@@ -778,20 +792,35 @@ export function CheckoutPage() {
 
     try {
       // Resolve cart line items (server cart is authoritative).
-      let line_items: Array<{ product_id: string; variant_id: string | null; quantity: number }> = [];
-      try {
-        const cartRes = await fetch("/api/cart", { cache: "no-store" });
-        if (cartRes.ok) {
-          const cb = await cartRes.json();
-          const items = ((cb?.data || cb)?.items || []) as Array<Record<string, unknown>>;
-          line_items = items.map((l) => ({
-            product_id: String(l.product_id),
-            variant_id: (l.variant_id as string | null) || null,
-            quantity: Number(l.quantity) || 1,
-          }));
+      //
+      // Snapshotted for the whole checkout attempt, NOT re-fetched per submit.
+      // A first attempt that succeeds server-side but times out at the proxy
+      // has already emptied the cart, so re-reading it made the retry post
+      // `line_items: []` — rejected by the request schema's `min_length=1`
+      // BEFORE the handler runs, which is where the idempotency replay lives.
+      // The shopper was then stranded on a "failed" checkout that had in fact
+      // created their order. Reusing the snapshot lets the retry reach the
+      // replay and land on the real order.
+      let line_items = submittedLineItemsRef.current;
+      if (!line_items) {
+        line_items = [];
+        try {
+          const cartRes = await fetch("/api/cart", { cache: "no-store" });
+          if (cartRes.ok) {
+            const cb = await cartRes.json();
+            const items = ((cb?.data || cb)?.items || []) as Array<Record<string, unknown>>;
+            line_items = items.map((l) => ({
+              product_id: String(l.product_id),
+              variant_id: (l.variant_id as string | null) || null,
+              quantity: Number(l.quantity) || 1,
+            }));
+          }
+        } catch {
+          /* server resolves from the session cart anyway */
         }
-      } catch {
-        /* server resolves from the session cart anyway */
+        // Only pin a non-empty snapshot — an empty read is a transient miss,
+        // not a decision to check out with nothing.
+        if (line_items.length > 0) submittedLineItemsRef.current = line_items;
       }
 
       const payload = {
@@ -831,7 +860,10 @@ export function CheckoutPage() {
 
       const res = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKeyRef.current,
+        },
         body: JSON.stringify(payload),
       });
       const body = await res.json();
@@ -849,6 +881,20 @@ export function CheckoutPage() {
         // when present we highlight the offending field inline and show its
         // specific message; otherwise fall back to a friendly hint. Client-
         // side validation above already catches the common phone/email cases.
+        // The proxy's own failures ({error:"upstream_timeout", message}) carry
+        // a machine token in `error` and the human sentence in `message`.
+        // Falling straight through to `body.error` printed the shopper the
+        // literal string "upstream_timeout" — on the very screen whose copy is
+        // supposed to invite the (now idempotent) retry.
+        if (typeof body?.error === "string" && typeof body?.message === "string") {
+          setError(
+            (isAr && typeof body.message_ar === "string"
+              ? body.message_ar
+              : body.message) as string,
+          );
+          setSubmitting(false);
+          return;
+        }
         const fb = detail || body?.error || `Checkout failed (${res.status})`;
         let msg: string;
         if (typeof fb === "string") {
@@ -893,6 +939,11 @@ export function CheckoutPage() {
       }
 
       const data = (body?.data || body) as CheckoutResponse;
+      // Order exists (created, or replayed from the idempotency cache after a
+      // timed-out attempt). Retire the key so a later checkout in this session
+      // isn't served this order again.
+      idempotencyKeyRef.current = crypto.randomUUID();
+      submittedLineItemsRef.current = null;
       const stashPending = () => {
         try {
           window.sessionStorage.setItem(

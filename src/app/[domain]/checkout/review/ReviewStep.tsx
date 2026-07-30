@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { StepIndicator } from "@/components/checkout/StepIndicator";
@@ -84,6 +84,19 @@ export function ReviewStep() {
   // surface a "pay online instead" path rather than a dead-end error.
   const [codBlocked, setCodBlocked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Idempotency key for THIS checkout attempt.
+  //
+  // Must be stable across retries. The proxy aborts at 15s and tells the
+  // shopper to "please try again" — but the backend may well have created the
+  // order by then. It de-dupes on this key (returns the original order, 24h
+  // Redis window), so generating a fresh UUID per submit defeated the whole
+  // mechanism and the retry created a SECOND order, with stock debited twice.
+  // Rotated only after an order is successfully created.
+  // Lazily initialised ONCE — `useRef(crypto.randomUUID())` would re-evaluate
+  // the argument on every render (discarding a UUID per keystroke, and calling
+  // it on the SSR path); a ref keeps it out of the render cycle entirely.
+  const idempotencyKeyRef = useRef<string>("");
+  if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
   const [state] = useState(() => readCheckoutState());
   // Embedded-payment overlays (parity with the bazaar): Paymob Pixel and
   // Kashier return no payment_url — they render inline and the order is
@@ -189,7 +202,7 @@ export function ReviewStep() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": idempotencyKeyRef.current,
         },
         body: JSON.stringify(payload),
       });
@@ -207,6 +220,11 @@ export function ReviewStep() {
         return;
       }
       const data = (body?.data || body) as CheckoutResponse;
+      // The order exists now (either freshly created, or replayed from the
+      // idempotency cache after a timed-out first attempt). Retire the key so
+      // any subsequent checkout in this session is a genuinely new order
+      // rather than a replay of this one.
+      idempotencyKeyRef.current = crypto.randomUUID();
       const stashPending = () => {
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(
