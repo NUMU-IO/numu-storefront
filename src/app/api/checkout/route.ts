@@ -105,12 +105,19 @@ export async function POST(req: NextRequest) {
     // shopper to retry rather than hanging the page.
     const timedOut =
       err instanceof DOMException && err.name === "TimeoutError";
+    // Bilingual: `resolveApiError` prefers `message_ar` on an Arabic
+    // storefront, and Arabic is the primary locale for most NUMU stores —
+    // telling an Arabic shopper to retry in English, on the one screen whose
+    // whole job is to invite that retry, is the worst place to fall back.
     return NextResponse.json(
       {
         error: timedOut ? "upstream_timeout" : "upstream_unreachable",
         message: timedOut
           ? `Checkout service did not respond within ${CHECKOUT_TIMEOUT_MS}ms. Please try again.`
           : "Checkout service is unreachable. Please try again.",
+        message_ar: timedOut
+          ? "خدمة الدفع مااستجابتش في الوقت المحدد. حاولي تاني — طلبك ممكن يكون اتسجّل بالفعل."
+          : "خدمة الدفع مش متاحة دلوقتي. حاولي تاني.",
       },
       { status: 504 },
     );

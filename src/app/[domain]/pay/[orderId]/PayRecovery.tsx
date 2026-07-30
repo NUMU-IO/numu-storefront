@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatCents } from "@/lib/money";
 import {
   CheckoutCard,
@@ -66,6 +66,14 @@ export function PayRecovery({ orderId }: { orderId: string }) {
   const [method, setMethod] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Stable across retries. This route triggers a PAYMENT on an existing
+  // order, so a per-attempt key risks charging the shopper twice — the same
+  // defect as checkout, with worse consequences.
+  // Lazily initialised ONCE — `useRef(crypto.randomUUID())` would re-evaluate
+  // the argument on every render (discarding a UUID per keystroke, and calling
+  // it on the SSR path); a ref keeps it out of the render cycle entirely.
+  const idempotencyKeyRef = useRef<string>("");
+  if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
   const [locale, setLocale] = useState<"en" | "ar">("en");
 
   const isAr = locale === "ar";
@@ -108,7 +116,7 @@ export function PayRecovery({ orderId }: { orderId: string }) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": idempotencyKeyRef.current,
         },
         body: JSON.stringify({ payment_method: method }),
       });
