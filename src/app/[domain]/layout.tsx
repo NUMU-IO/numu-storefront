@@ -24,6 +24,8 @@ import { PageViewTracker } from "@/components/tracking/PageViewTracker";
 import { resolveMetaPixelIds } from "@/lib/meta-pixel";
 import { TikTokPixel } from "@/components/tracking/TikTokPixel";
 import { resolveTikTokPixelIds } from "@/lib/tiktok-pixel";
+import { ConsentGate } from "@/components/tracking/ConsentGate";
+import { resolveConsentPolicy } from "@/lib/consent";
 import { getActivePromotions } from "@/lib/promo-server";
 import { resolveBrandTokens } from "@/lib/brand-tokens";
 import { AnnouncementBar } from "@/components/promo/AnnouncementBar";
@@ -358,6 +360,15 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   }).catch(() => null);
   const announcementBar = promotions?.announcement_bars?.[0] ?? null;
 
+  // Consent policy for the pixel gate. `hasSurface` is whether the visitor
+  // actually has a way to consent — without a cookie-banner promotion there is
+  // no Accept button, so a `consent_required` store would otherwise sit at
+  // "never granted" with no explanation. See lib/consent.ts.
+  const consentPolicy = resolveConsentPolicy(
+    store,
+    Boolean(promotions?.cookie_banner),
+  );
+
   // Brand tokens for host-rendered overlays (cookie banner) so they adopt the
   // store's palette (bazar → cream/ink/amber) instead of a hardcoded white bar.
   const brandVars = resolveBrandTokens(
@@ -378,8 +389,14 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
           subdomain prefix. Hoisted into <head> by Next.js automatically.
           Production (subdomain hosting) doesn't need this. */}
       <base href={`/${domain}/`} />
-      {metaPixelIds.length > 0 && <MetaPixel pixelIds={metaPixelIds} />}
-      {tiktokPixelIds.length > 0 && <TikTokPixel pixelIds={tiktokPixelIds} />}
+      {/* Consent gate: withholds the browser pixels until the visitor accepts
+          WHEN the merchant has consent_required on. Off (every live store
+          today) it renders straight through, so this changes nothing for
+          them. It also publishes the policy for the /track opt_out stamp. */}
+      <ConsentGate policy={consentPolicy}>
+        {metaPixelIds.length > 0 && <MetaPixel pixelIds={metaPixelIds} />}
+        {tiktokPixelIds.length > 0 && <TikTokPixel pixelIds={tiktokPixelIds} />}
+      </ConsentGate>
       {/* First-party page-view/session tracking — unconditional (unlike the
           pixels above, this feeds NUMU's own analytics, not an ad platform).
           PDP navigations are skipped: the PDP's <FunnelTracker
