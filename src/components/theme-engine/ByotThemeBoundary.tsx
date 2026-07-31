@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
+import { isAllowedBundleUrl } from "@/lib/bundle-allowlist";
 import StorefrontSkeleton from "@/components/theme-engine/StorefrontSkeleton";
 import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
 import {
@@ -902,18 +903,55 @@ export default function ByotThemeBoundary({
       {/* Two shapes of the same container, because React forbids children
           alongside dangerouslySetInnerHTML. */}
       {hasSsrHtml ? (
-        /* Isolated SSR — the theme's own server-rendered markup, adopted by
-           `hydrateRoot` when the bundle mounts. Rendered through a memoised
-           child so no later state change in this component can make React
-           re-apply the innerHTML and blow the server DOM away (see
-           SsrThemeContainer). Deliberately carries no `bundleEmpty` styling:
-           a server-rendered theme is by definition not empty, and making the
-           element depend on changing state would defeat the memo. */
-        <SsrThemeContainer
-          key="byot-bundle-container"
-          html={ssrHtml as string}
-          containerRef={containerRef}
-        />
+        <Fragment key="byot-ssr">
+          {/* ── The theme stylesheet, SERVER-SIDE ────────────────────────────
+              Only on the SSR path, and load-bearing there.
+
+              `theme.css` is normally injected by `loadExternalCSS` from a
+              client effect, which is fine when nothing paints before the
+              bundle mounts. With server-rendered markup that assumption
+              inverts: the browser has a full page of theme HTML and no
+              stylesheet, so it paints the theme UNSTYLED and then reflows when
+              the CSS lands. Measured with the flag on: CLS 0.9391 on vionne and
+              0.7704 on bazar — versus 0.002 in production — with `<main>`
+              jumping 3,142px and shoppers looking at an expanded, unstyled nav
+              drawer for ~1.5s. It would have thrown away the entire CLS fix.
+              (Suite 11, D11-1.)
+
+              A `<link rel="stylesheet">` in the initial HTML is render-blocking
+              by default, so the first paint is already styled and there is no
+              shift to have. `precedence` opts into React 19's stylesheet
+              hoisting, which puts it in <head> and de-dupes it.
+
+              `data-numu-theme="external"` is not decoration: it is exactly what
+              `loadExternalCSS` matches on, so when the bundle mounts it finds
+              this link, sees the same href, and returns without appending a
+              second copy.
+
+              Host-gated with the SAME allowlist the client loader uses —
+              `css_url` comes from the database, and this one renders into
+              <head> without going through `loadExternalCSS`'s own check. */}
+          {cssUrl && isAllowedBundleUrl(cssUrl) ? (
+            <link
+              rel="stylesheet"
+              href={cssUrl}
+              data-numu-theme="external"
+              precedence="numu-theme"
+            />
+          ) : null}
+          {/* Isolated SSR — the theme's own server-rendered markup, adopted by
+              `hydrateRoot` when the bundle mounts. Rendered through a memoised
+              child so no later state change in this component can make React
+              re-apply the innerHTML and blow the server DOM away (see
+              SsrThemeContainer). Deliberately carries no `bundleEmpty` styling:
+              a server-rendered theme is by definition not empty, and making the
+              element depend on changing state would defeat the memo. */}
+          <SsrThemeContainer
+            key="byot-bundle-container"
+            html={ssrHtml as string}
+            containerRef={containerRef}
+          />
+        </Fragment>
       ) : (
         <>
           {/* ── The CLS 1.00 fix ─────────────────────────────────────────────
