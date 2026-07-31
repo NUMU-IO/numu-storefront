@@ -34,6 +34,44 @@ export interface ThemeSsrRequest {
   page: PageContextData;
 }
 
+/**
+ * Optional per-store allowlist, layered UNDER the master `NUMU_SSR_THEME` flag.
+ *
+ * `NUMU_SSR_THEME_STORES=vionne` limits isolated SSR to that store; unset or
+ * empty means "every store", i.e. exactly the behaviour the master flag had on
+ * its own. Matching is on subdomain or slug, case-insensitively.
+ *
+ * Why this exists: `isThemeSsrEnabled()` is a single global env read, so
+ * flipping the master flag turns SSR on for EVERY BYOT store at once — today
+ * that is vionne and rabbit — across home, PDP and collection simultaneously.
+ * That is a wide blast radius for a capability that forks a child process per
+ * render, on a box that also hosts the MCP server, with no staging environment
+ * to catch a regression first. This makes the rollout staged: enable one store,
+ * watch it, then widen by editing one env var (no redeploy, no code change).
+ *
+ * Deliberately fails OPEN on an unparseable/empty value rather than closed —
+ * a typo here should degrade to "current behaviour", not silently disable a
+ * feature someone believes they switched on.
+ */
+function isSsrAllowedForStore(store: StoreData): boolean {
+  const raw = (process.env.NUMU_SSR_THEME_STORES || "").trim();
+  if (!raw) return true;
+  const allowed = new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (allowed.size === 0) return true;
+  const s = store as { subdomain?: string; slug?: string };
+  const subdomain = (s.subdomain ?? "").trim().toLowerCase();
+  const slug = (s.slug ?? "").trim().toLowerCase();
+  return (
+    (subdomain !== "" && allowed.has(subdomain)) ||
+    (slug !== "" && allowed.has(slug))
+  );
+}
+
 export async function resolveThemeSsrHtml({
   themeSettings,
   store,
@@ -42,6 +80,9 @@ export async function resolveThemeSsrHtml({
   // Cheapest possible bail-out: with the flag off this costs one env read and
   // never touches headers, the network or a child process.
   if (!isThemeSsrEnabled()) return null;
+  // Staged rollout gate — see isSsrAllowedForStore. Also cheap: one env read
+  // plus two string compares, before any header/network/child-process work.
+  if (!isSsrAllowedForStore(store)) return null;
 
   const bundleUrl = themeSettings.external_theme?.bundle_url;
   if (!bundleUrl) return null;
@@ -51,7 +92,17 @@ export async function resolveThemeSsrHtml({
     // Marketplace preview renders a DIFFERENT tree (demo placeholders), and
     // the client derives `demo` from the URL — server-rendering it would
     // guarantee a mismatch. Skip rather than guess.
-    const isPreview = Boolean(h.get("x-numu-preview-slug"));
+    //
+    // `x-numu-editor` (stamped by proxy.ts from `?editor=`) covers the V3
+    // customizer preview, which the marketplace check does NOT: the editor
+    // opens `?preview=true&editor=v3` and carries no `preview_theme_slug`, so
+    // SSR was running inside the editor iframe. That is the one surface where
+    // server-rendered markup is actively wrong — the editor's whole loop is
+    // posting live draft settings into the mounted bundle, and pre-rendering a
+    // tree from the PUBLISHED settings means every session opens showing stale
+    // content until the first keystroke repaints it. (Suite 11, D11-4.)
+    const isPreview =
+      Boolean(h.get("x-numu-preview-slug")) || Boolean(h.get("x-numu-editor"));
     if (isPreview) return null;
 
     const locale =
