@@ -862,37 +862,38 @@ export default function ByotThemeBoundary({
       resetKey={pathname ?? undefined}
     >
       {/* The page is prerendered, but a BYOT theme paints only after its
-          bundle downloads + mounts on the client. This loading branch is part
-          of the SSR HTML (loading starts true), so a skeleton — not a blank
-          frame — is what ships in the prerender and shows instantly, then the
-          container below swaps in the real theme as soon as it mounts. Keeps
-          the layout's shape (no CLS) and kills the empty flash on every page. */}
+          bundle downloads + mounts on the client. `loading` starts true, so a
+          skeleton — not a blank frame — is what ships in the prerender and
+          shows instantly, and the theme swaps in as soon as it mounts.
+
+          ⚠️ This comment used to end "keeps the layout's shape (no CLS)". That
+          was wrong, and believing it is what hid a layout-shift score of 1.00
+          for months: the skeleton kept the shape only while it was ON SCREEN,
+          and vacated a full viewport of flow space when it left. See the fix
+          note on the reserve wrapper below. */}
       {/* Explicit keys: these siblings appear/disappear as loading/error/
           bundleEmpty flip, and `routeFallback` is an element created by the
           calling PAGE — without keys React key-diffs the shifting list and
           warns ("child from RegisterPage" etc.) on every fallback route. */}
-      {loading && !error && (
-        <Fragment key="byot-skeleton">
-          {/* ADR-7: with a content layer present, a no-JS visitor would
-              otherwise have to scroll past a full-viewport shimmer that will
-              never resolve (the bundle needs JS) before reaching the real
-              content. `<noscript>` CSS hides the skeleton for exactly those
-              visitors and is inert for everyone else — no JS involved either
-              way. `dangerouslySetInnerHTML` is the documented way to put
-              markup in a <noscript> without a hydration mismatch (browsers
-              with scripting on parse noscript children as raw text). */}
-          {hasSeoContent && (
-            <noscript
-              dangerouslySetInnerHTML={{
-                __html:
-                  "<style>[data-numu-theme-skeleton]{display:none!important}</style>",
-              }}
-            />
-          )}
-          <div data-numu-theme-skeleton="">
-            <StorefrontSkeleton />
-          </div>
-        </Fragment>
+      {loading && !error && hasSeoContent && (
+        /* ADR-7: with a content layer present, a no-JS visitor would otherwise
+           have to scroll past a full-viewport shimmer that will never resolve
+           (the bundle needs JS) before reaching the real content. `<noscript>`
+           CSS hides the skeleton — and collapses the space reserved for it —
+           for exactly those visitors, and is inert for everyone else: no JS
+           involved either way. An author-stylesheet `!important` beats the
+           reserve wrapper's inline `min-height`. `dangerouslySetInnerHTML` is
+           the documented way to put markup in a <noscript> without a hydration
+           mismatch (browsers with scripting on parse noscript children as raw
+           text). */
+        <noscript
+          key="byot-noscript"
+          dangerouslySetInnerHTML={{
+            __html:
+              "<style>[data-numu-theme-skeleton]{display:none!important}" +
+              "[data-numu-theme-reserve]{min-height:0!important}</style>",
+          }}
+        />
       )}
       {error && <Fragment key="byot-error-fallback">{fallbackUI}</Fragment>}
       {/* ENG-2 — keep the bundle container mounted always; HIDE (not unmount)
@@ -915,22 +916,85 @@ export default function ByotThemeBoundary({
         />
       ) : (
         <>
+          {/* ── The CLS 1.00 fix ─────────────────────────────────────────────
+              Lighthouse attributed a layout-shift score of exactly 1 — the
+              worst practical value — to the theme's own root div
+              (1056 × 9,155 px, `--theme-radius: 6; --theme-body_font: "Lora"`)
+              on BOTH desktop and mobile. It was not the theme "dropping in":
+              inserting content below the fold shifts nothing.
+
+              The cause was the SKELETON. It rendered as a preceding SIBLING in
+              normal flow with `min-h-screen`, so the sequence was:
+
+                1. bundle mounts, 9,155 px of theme content fills the container
+                   BELOW the still-present full-viewport skeleton (invisible,
+                   off-screen — no shift yet);
+                2. the reveal tick sees painted content and flips `loading`;
+                3. the skeleton leaves the flow and the entire theme jumps up by
+                   one full viewport.
+
+              Impact fraction ≈ 1 (everything visible moved) × distance
+              fraction ≈ 1 (a whole viewport) = a score of 1. It also explains
+              why the number was identically 1.00 on two very different
+              viewports: the skeleton is exactly `100vh` on both.
+
+              So the fix is not a `min-height` on the mount root — that would
+              leave the skeleton in flow and the jump intact. Instead: reserve
+              the space on a wrapper, and take the skeleton OUT of flow inside
+              it. Releasing `min-height` on a wrapper cannot move its children
+              (they are laid out from the top), and removing an absolutely
+              positioned element moves nothing at all — so BOTH transitions are
+              now zero-shift by construction, whatever height the theme renders.
+
+              `position: relative` is safe here: it does not create a
+              containing block for `position: fixed`, and sticky descendants
+              already resolved against the container div, not `#main`. */}
+          <div
+            key="byot-mount"
+            data-numu-theme-reserve=""
+            style={{
+              position: "relative",
+              // 100vh, not 100svh: universally supported, and over-reserving is
+              // the harmless direction — the release is a no-op either way.
+              ...(loading && !error ? { minHeight: "100vh" } : {}),
+            }}
+          >
+            <div
+              key="byot-bundle-container"
+              ref={containerRef}
+              style={
+                bundleEmpty && !fallbackSlot ? { display: "none" } : undefined
+              }
+            />
+            {loading && !error && (
+              <div
+                data-numu-theme-skeleton=""
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  insetInlineStart: 0,
+                  insetInlineEnd: 0,
+                }}
+              >
+                <StorefrontSkeleton />
+              </div>
+            )}
+          </div>
           {/* ADR-7 content layer — crawler/no-JS baseline, dropped on hydration.
               A SIBLING of the mount container, never a child of it: the bundle
               calls `createRoot()` on that container and empties it, so anything
               host React owns in there is a node it may later try to delete
               after the bundle already removed it. See the `seoContent` prop
-              doc for the NotFoundError that caused. */}
+              doc for the NotFoundError that caused.
+
+              Rendered AFTER the mount wrapper (it used to precede it). It is
+              removed the moment JS runs, and while it sat above the wrapper its
+              removal dragged the skeleton — and everything under it — upwards.
+              Below the wrapper, nothing follows it, so its removal is inert.
+              Crawlers do not care about source order; the CLS metric does. */}
           {!hydrated && seoContent ? (
             <div key="byot-seo-content">{seoContent}</div>
           ) : null}
-          <div
-            key="byot-bundle-container"
-            ref={containerRef}
-            style={
-              bundleEmpty && !fallbackSlot ? { display: "none" } : undefined
-            }
-          />
         </>
       )}
       {bundleEmpty && !error && !fallbackSlot && (
