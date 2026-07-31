@@ -13,6 +13,36 @@ const nextConfig: NextConfig = {
   // ships via that `public/` copy.
   output: "standalone",
 
+  // Isolated theme SSR needs three packages the SERVER never imports.
+  //
+  // `src/lib/ssr-theme.ts` builds a tiny module workspace at
+  // `<cwd>/.numu-ssr/node_modules` for the render child: it LINKS react +
+  // react-dom (so the child shares one physical React with `react-dom/server`)
+  // and COPIES `@numueg/theme-sdk`. All three are read from `<cwd>/node_modules`
+  // at RUNTIME — no static import anywhere — so Next's output-file tracing has
+  // nothing to follow and omits them from `.next/standalone/node_modules`.
+  //
+  // The result was not a soft failure: with `NUMU_SSR_THEME=1` every render
+  // died with `Cannot find package '@numueg/theme-sdk'` and then
+  // `Cannot find module 'scheduler'`, tripping the circuit breaker, which
+  // benched the bundle for 300s and re-tripped forever. The flag was inert in
+  // production while still paying the cost of trying. (Measured — see
+  // "Suite 11 — SSR gate" in docs/core-memory/QA-LOCAL-REPORT.md, D11-2.)
+  //
+  // `scheduler` is a react-dom dependency rather than a direct one, and the
+  // linked-not-copied react-dom inside .numu-ssr cannot resolve it upward
+  // reliably; ssr-theme.ts now links it explicitly for the same reason.
+  //
+  // Costs nothing when the flag is off: these are files in the image, not code
+  // on the request path.
+  outputFileTracingIncludes: {
+    "/**": [
+      "./node_modules/@numueg/theme-sdk/dist/**",
+      "./node_modules/@numueg/theme-sdk/package.json",
+      "./node_modules/scheduler/**",
+    ],
+  },
+
   // Pin the workspace root so Turbopack doesn't walk up to the parent
   // directory looking for package.json/lockfiles.
   turbopack: {
