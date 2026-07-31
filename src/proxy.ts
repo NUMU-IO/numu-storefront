@@ -57,6 +57,24 @@ const TENANT_METADATA_PATHS = new Set(["/sitemap.xml"]);
 // matcher if we extend to 2-5 chars later. We intentionally do NOT
 // hard-code a whitelist — themes / merchants may add locales over
 // time, and the SSR handles the fallback gracefully.
+/**
+ * The platform's own origin, as opposed to a merchant store host.
+ *
+ * Extracted from the apex-passthrough branch because the agent-discovery
+ * carve-out (further down) has to make the same distinction BEFORE that branch
+ * runs: a `/.well-known/*` document on `numueg.app` describes the platform and
+ * belongs to the landing-page repo, while one on `<store>.numueg.app`
+ * describes that merchant. Two callers, one definition.
+ */
+function isApexHost(hostname: string): boolean {
+  return (
+    hostname === PLATFORM_DOMAIN ||
+    hostname === `www.${PLATFORM_DOMAIN}` ||
+    hostname === "localhost" ||
+    hostname === "127.0.0.1"
+  );
+}
+
 const LOCALE_PREFIX_RE = /^[a-z]{2}$/i;
 
 function isLocalePrefix(segment: string): boolean {
@@ -124,6 +142,49 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── Agent-discovery documents ─────────────────────────────────────────────
+  //
+  // `/.well-known/*` and `/openapi.json` used to fall through to the
+  // subdomain→path rewrite and land on the `[...slug]` catch-all, which is a
+  // deliberate NO-404 engine — so every probe got `200 text/html`. A `.json`
+  // path answering HTML is precisely what makes agent tooling report
+  // "returned HTML instead of JSON", and a 200 for a document we do not
+  // publish is a worse answer than a 404.
+  //
+  // Handled HERE rather than as app routes because Next's file-system router
+  // does not register a `.well-known` app segment. The catch-all itself is
+  // untouched: this carve-out is limited to these exact paths, so theme routes
+  // still never dead-end.
+  //
+  // Apex is out of scope — a document on `numueg.app` describes the PLATFORM
+  // and is owned separately; this branch only answers for store hosts.
+  if (
+    !isApexHost(hostname) &&
+    (pathname === "/openapi.json" || pathname.startsWith("/.well-known/"))
+  ) {
+    // ACME HTTP-01 must never be intercepted — answering 404 here would break
+    // certificate issuance/renewal for every custom domain on the platform.
+    if (pathname.startsWith("/.well-known/acme-challenge/")) {
+      return NextResponse.next();
+    }
+    if (pathname === "/openapi.json") {
+      return NextResponse.rewrite(new URL("/api/agent/openapi", request.url));
+    }
+    if (pathname === "/.well-known/acp.json") {
+      return NextResponse.rewrite(new URL("/api/agent/acp", request.url));
+    }
+    // Honest 404 for everything we do not publish. See WP10 in the remediation
+    // plan for why OAuth/OIDC discovery, x402, MPP and UCP are deliberately
+    // absent: advertising endpoints that do not exist is worse than silence.
+    return NextResponse.json(
+      {
+        error: "not_found",
+        message: `No document is published at ${pathname}.`,
+      },
+      { status: 404, headers: { "Cache-Control": "public, max-age=3600" } },
+    );
+  }
+
   // Skip Next internals + genuine static assets. Unlike the old naive
   // `pathname.includes(".")`, this lets `/sitemap.xml` fall through to the
   // subdomain→path rewrite below while real assets (.js/.css/images/fonts/
@@ -146,12 +207,7 @@ export function proxy(request: NextRequest) {
   // a subdomain pattern in addition to whatever PLATFORM_DOMAIN is set to.
 
   // Apex passthrough.
-  if (
-    hostname === PLATFORM_DOMAIN ||
-    hostname === `www.${PLATFORM_DOMAIN}` ||
-    hostname === "localhost" ||
-    hostname === "127.0.0.1"
-  ) {
+  if (isApexHost(hostname)) {
     // Dev path-segment routing: themes naturally render absolute paths
     // like `/collections/all` (matches the prod subdomain root). On
     // apex localhost those land at `/collections/all`, miss the
@@ -319,6 +375,48 @@ export function proxy(request: NextRequest) {
     const currencyCookie = request.cookies.get("numu_currency")?.value;
     if (currencyCookie && /^[A-Z]{3}$/i.test(currencyCookie)) {
       res.headers.set("x-numu-currency", currencyCookie.toUpperCase());
+    }
+
+    // ── Document-only response headers ────────────────────────────────────
+    // Scoped to real navigations. This rewrite branch also carries
+    // /sitemap.xml, /llms.txt and other non-HTML tenant documents, and neither
+    // header below is correct for those.
+    const isDocumentNav =
+      request.headers.get("sec-fetch-dest") === "document" ||
+      (request.headers.get("accept") || "").includes("text/html");
+
+    if (isDocumentNav) {
+      // WP4 — restore back/forward cache.
+      //
+      // Chrome refuses to bf-cache any page whose MAIN RESOURCE was served
+      // with `no-store`, and Lighthouse flagged that as the one *Actionable*
+      // bf-cache reason. On a store, back-navigation is the single most common
+      // move a shopper makes (product → back → grid), and every one of them was
+      // a full re-render.
+      //
+      // The `no-store` was NOT caused by the `cache: "no-store"` fetches in
+      // api-client (those are the cart/customer/checkout/preview paths and are
+      // correct as they are). It is Next's standard header for a DYNAMIC route,
+      // and `[domain]/layout.tsx` is unavoidably dynamic: it reads `cookies()`
+      // for the store password gate, WRITES the `numu_active_store` cookie, and
+      // reads `x-numu-locale` / `x-numu-promo-preview-token`. `export const
+      // revalidate = 60` in page.tsx has never had any effect because of it.
+      //
+      // So the document genuinely varies per visitor and must NOT become
+      // shared-cacheable — `private` stays, and `cf-cache-status: HIT` is
+      // deliberately NOT a goal here. Caching a password-gated, locale-specific
+      // document at the edge would serve one shopper's state to another. What
+      // we can safely drop is `no-store`, which buys bf-cache and nothing else.
+      res.headers.set("Cache-Control", "private, max-age=0, must-revalidate");
+
+      // WP9.1 — RFC 8288 discovery. Both targets are real routes in this repo
+      // (`app/llms.txt`, `app/[domain]/sitemap.ts`), so neither advertises
+      // something that does not exist.
+      res.headers.set(
+        "Link",
+        '</llms.txt>; rel="describedby"; type="text/plain", ' +
+          '</sitemap.xml>; rel="sitemap"; type="application/xml"',
+      );
     }
     return res;
   }

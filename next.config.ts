@@ -65,6 +65,26 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "**.numu.io" },
       { protocol: "https", hostname: "**.numueg.app" },
       { protocol: "https", hostname: "**.r2.cloudflarestorage.com" },
+      // Managed public R2 buckets (pub-<hash>.r2.dev).
+      //
+      // REQUIRED IN PRODUCTION, not a dev convenience. Merchant PRODUCT images
+      // are stored with `pub-*.r2.dev` URLs — vionne's whole catalog is
+      // `pub-7c552f39278a4b9f988f096ac509d259.r2.dev/products/*.jpg` — while
+      // only customization uploads live under cdn.numueg.app. (Verified:
+      // cdn.numueg.app/products/<same-object> is a 404, so the host cannot be
+      // rewritten; the two paths are genuinely different origins.)
+      //
+      // `/api/image-transform` already allowlists `r2.dev` and 302s to
+      // `/_next/image`, but the optimizer enforces THIS list independently —
+      // so before this entry every product image sent through the proxy came
+      // back 400 "url parameter is not allowed". That is why the hero (a
+      // cdn.numueg.app image) worked through the proxy and product imagery had
+      // to bypass it, shipping 1440×1920 originals into 233×311 slots.
+      //
+      // NOTE this widens what the optimizer will fetch to any public r2.dev
+      // bucket. The transform proxy's own host allowlist is unchanged and
+      // remains the gate for theme-driven requests.
+      { protocol: "https", hostname: "**.r2.dev" },
       // In dev, allow any HTTPS host so a merchant can drop in any URL
       // for hero images; in prod we narrow to known CDNs.
       ...(isProd ? [] : [{ protocol: "https" as const, hostname: "**" }]),
