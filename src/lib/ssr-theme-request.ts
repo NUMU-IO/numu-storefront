@@ -49,10 +49,20 @@ export interface ThemeSsrRequest {
  * to catch a regression first. This makes the rollout staged: enable one store,
  * watch it, then widen by editing one env var (no redeploy, no code change).
  *
- * Deliberately fails OPEN on an unparseable/empty value rather than closed —
- * a typo here should degrade to "current behaviour", not silently disable a
- * feature someone believes they switched on.
+ * ⚠️ An UNSET or whitespace-only value means "all stores". Any other value is
+ * matched EXACTLY (no substring, no wildcard), so a value that matches nothing
+ * — a typo like `vione`, or junk — disables SSR for every store.
+ *
+ * That is deliberate. Fail-closed degrades to today's behaviour, which is a
+ * working storefront; fail-open would silently switch a child-process renderer
+ * on for every tenant because someone fat-fingered an env var. The defect worth
+ * fixing was never the direction, it was the SILENCE: the operator saw no
+ * signal and concluded the flag was broken. So a skip is now logged once per
+ * store, which turns "SSR mysteriously does nothing" into a greppable line
+ * naming both the store and the value that excluded it.
  */
+const ssrSkipLogged = new Set<string>();
+
 function isSsrAllowedForStore(store: StoreData): boolean {
   const raw = (process.env.NUMU_SSR_THEME_STORES || "").trim();
   if (!raw) return true;
@@ -62,14 +72,31 @@ function isSsrAllowedForStore(store: StoreData): boolean {
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
   );
+  // Value was non-empty but held no usable entries (e.g. ",,,") — treat as
+  // unset rather than as "deny everything", since no store was ever named.
   if (allowed.size === 0) return true;
+
   const s = store as { subdomain?: string; slug?: string };
   const subdomain = (s.subdomain ?? "").trim().toLowerCase();
   const slug = (s.slug ?? "").trim().toLowerCase();
-  return (
+  const ok =
     (subdomain !== "" && allowed.has(subdomain)) ||
-    (slug !== "" && allowed.has(slug))
-  );
+    (slug !== "" && allowed.has(slug));
+
+  if (!ok) {
+    // Once per store per process — a per-request log on the hot path would be
+    // its own defect.
+    const key = subdomain || slug || String(store.id ?? "unknown");
+    if (!ssrSkipLogged.has(key)) {
+      ssrSkipLogged.add(key);
+      console.warn(
+        `[ssr-theme] skipping store "${key}": not listed in ` +
+          `NUMU_SSR_THEME_STORES="${raw}". Unset that variable to enable ` +
+          `every store, or add this one to it.`,
+      );
+    }
+  }
+  return ok;
 }
 
 export async function resolveThemeSsrHtml({

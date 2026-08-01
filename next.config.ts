@@ -43,6 +43,18 @@ const nextConfig: NextConfig = {
     ],
   },
 
+  // …and keep the SSR worker's RUNTIME cache out of the build output.
+  //
+  // `.numu-ssr` is generated on whatever machine last ran a render — it holds a
+  // copied SDK build and a bundle cache. On a developer machine it gets traced
+  // into `.next/standalone`, so the image would ship a stale SDK copy that the
+  // worker then resolves in preference to the correct one. It also masked a
+  // test: the re-gate had to `rm -rf .numu-ssr` before it could reproduce the
+  // real standalone shape at all.
+  outputFileTracingExcludes: {
+    "/**": ["./.numu-ssr/**"],
+  },
+
   // Pin the workspace root so Turbopack doesn't walk up to the parent
   // directory looking for package.json/lockfiles.
   turbopack: {
