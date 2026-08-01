@@ -123,6 +123,14 @@ function ensureWorkspace(): boolean {
     // instance in the process, which is the whole ballgame for hooks.
     linkOnce(path.join(repoNm, "react"), path.join(nm, "react"));
     linkOnce(path.join(repoNm, "react-dom"), path.join(nm, "react-dom"));
+    // `scheduler` is react-dom's own dependency, not one of ours, so nothing
+    // links it — and react-dom sitting in `.numu-ssr/node_modules` cannot be
+    // relied on to resolve it upward out of that directory. In the standalone
+    // runner that surfaced as `Cannot find module 'scheduler'` on EVERY render,
+    // right after the SDK failure, which tripped the circuit breaker and left
+    // the whole feature inert (Suite 11, D11-2). Linking it costs nothing and
+    // removes the dependency on resolution order.
+    linkOnce(path.join(repoNm, "scheduler"), path.join(nm, "scheduler"));
     materializeSdk(nm, repoNm);
 
     // Keep the cache out of git and out of Next's file watcher.
