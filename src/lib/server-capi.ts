@@ -28,22 +28,38 @@ function readCookie(cookieHeader: string | null, name: string): string | undefin
 }
 
 /**
- * The visitor's session id, read out of the `numu_attribution` cookie —
- * the same value `getSessionFingerprint()` returns in the browser, so
- * server-fired and browser-fired events agree on one session identity.
+ * The visitor's session id — the same value `getSessionFingerprint()` returns
+ * in the browser, so server-fired and browser-fired events agree on one
+ * session identity.
+ *
+ * Two sources, in order:
+ *   1. `numu_attribution.session_id` — present only when the visitor landed
+ *      on a URL carrying a UTM / gclid / fbclid, because that is the only
+ *      condition under which `captureAndPersist` writes the cookie.
+ *   2. `numu_sid` — written by `persistSessionId()` on every visit.
+ *
+ * Source 2 is the fix for the funnel defect where `add_to_cart` (the ONLY
+ * server-emitted step) landed with a NULL session fingerprint for every
+ * non-ad visitor and was silently dropped by `COUNT(DISTINCT …)`, making
+ * Checkout appear larger than Add to Cart. Attribution keeps priority so
+ * ad-click sessions keep the id their attribution envelope already carries.
+ *
  * Best-effort: a malformed cookie yields undefined rather than throwing.
  */
 function readSessionId(cookieHeader: string | null): string | undefined {
   const raw = readCookie(cookieHeader, "numu_attribution");
-  if (!raw) return undefined;
-  try {
-    const parsed = JSON.parse(raw) as { session_id?: unknown };
-    return typeof parsed.session_id === "string" && parsed.session_id
-      ? parsed.session_id
-      : undefined;
-  } catch {
-    return undefined;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as { session_id?: unknown };
+      if (typeof parsed.session_id === "string" && parsed.session_id) {
+        return parsed.session_id;
+      }
+    } catch {
+      /* fall through to the dedicated session cookie */
+    }
   }
+  const sid = readCookie(cookieHeader, "numu_sid");
+  return sid || undefined;
 }
 
 export async function fireServerCapi(
