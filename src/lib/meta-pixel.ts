@@ -171,18 +171,91 @@ function readCustomerId(): string | null {
   }
 }
 
+/** Name of the first-party session cookie — see `persistSessionId`. */
+export const SESSION_COOKIE = "numu_sid";
+
+/**
+ * Mirror the session id into a cookie the SERVER can read.
+ *
+ * Why this exists: `add_to_cart` is the only funnel step emitted server-side
+ * (theme → SDK `addItem` → POST /api/cart/add → fireServerCapi). That route
+ * has no access to `window`, so it read the session id out of the
+ * `numu_attribution` cookie — which `captureAndPersist` only writes when the
+ * landing URL carried a UTM / gclid / fbclid. For direct, organic and
+ * social-referral shoppers no cookie existed, so the funnel row was written
+ * with `session_fingerprint = NULL`, and `COUNT(DISTINCT session_fingerprint)`
+ * drops NULLs — the add-to-cart bar counted ONLY ad-click sessions while every
+ * other bar counted all sessions. A real store reported Checkout (11) above
+ * Add to Cart (4), with cart abandonment rendering as -175%.
+ *
+ * Writing the id we already computed into its own cookie closes the gap for
+ * every visitor without touching attribution semantics. (Always writing
+ * `numu_attribution` instead would make a direct visit the `first_touch` and
+ * silently rewrite attribution history for every store.)
+ *
+ * Not HttpOnly: same trust level as `numu_attribution`, and the browser half
+ * of the tracking stack reads it too. It is a random per-session id, not PII.
+ */
+function persistSessionId(fp: string): void {
+  if (typeof document === "undefined" || !fp || fp === "ssr") return;
+  try {
+    if (new RegExp(`(?:^|; )${SESSION_COOKIE}=`).test(document.cookie)) return;
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    // Session-scoped (no Max-Age): the id is per-visit, and a persistent
+    // cookie would glue separate visits into one "session".
+    document.cookie = `${SESSION_COOKIE}=${encodeURIComponent(fp)}; Path=/; SameSite=Lax${secure}`;
+  } catch {
+    /* private mode / disabled cookies — server leg falls back to no id */
+  }
+}
+
+/** Read back the session id this visit already established, if any. */
+function readSessionCookie(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  try {
+    const m = document.cookie.match(
+      new RegExp(`(?:^|; )${SESSION_COOKIE}=([^;]*)`),
+    );
+    return m ? decodeURIComponent(m[1]) || undefined : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Stable per-session fingerprint, identical strategy to the SDK. Exported so
  * other host surfaces (e.g. abandoned-cart tracking) share the same session id.
+ *
+ * Resolution order matters. `__numu_session_fp` is a per-DOCUMENT global, so it
+ * dies on every full page load; the cookie is read BEFORE minting a new id so a
+ * reload, a new tab, or any non-soft navigation keeps the same session.
+ *
+ * Without that cookie read this function would mint a fresh uuid on load 2
+ * while `persistSessionId` (write-once) kept serving load 1's id to the server.
+ * The browser-fired steps and the server-fired `add_to_cart` would then land on
+ * two different session ids — no longer NULL, but still unjoinable, which drives
+ * cart abandonment to 100% instead of -175%. Same bug wearing a different hat.
  */
 export function getSessionFingerprint(): string {
   const win = w();
   if (!win) return "ssr";
   const sid = readAttribution()?.session_id;
-  if (sid) return sid;
-  if (win.__numu_session_fp) return win.__numu_session_fp;
+  if (sid) {
+    persistSessionId(sid);
+    return sid;
+  }
+  if (win.__numu_session_fp) {
+    persistSessionId(win.__numu_session_fp);
+    return win.__numu_session_fp;
+  }
+  const fromCookie = readSessionCookie();
+  if (fromCookie) {
+    win.__numu_session_fp = fromCookie;
+    return fromCookie;
+  }
   const fp = crypto.randomUUID();
   win.__numu_session_fp = fp;
+  persistSessionId(fp);
   return fp;
 }
 
