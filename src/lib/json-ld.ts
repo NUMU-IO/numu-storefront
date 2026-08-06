@@ -225,6 +225,117 @@ export function buildCollectionLd({
  * URL template here because it depends on the storefront's `/search`
  * route shape — caller passes baseUrl and we build it.
  */
+/**
+ * Query params that identify a *share event*, not the profile. Merchants
+ * overwhelmingly paste links copied from a phone's share sheet or a QR code, so
+ * these are the common case rather than the exception.
+ */
+const SOCIAL_TRACKING_PARAMS = new Set([
+  "igsh",
+  "igshid",
+  "mibextid",
+  "fbclid",
+  "gclid",
+  "si",
+  "_rdr",
+  "rdid",
+  "ref",
+  "ref_src",
+  "ref_url",
+  "share_url",
+  // TikTok's share sheet appends these two to every copied profile link.
+  "_t",
+  "_r",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+]);
+
+/** Mobile/legacy hostnames folded onto the canonical one the platform itself uses. */
+const SOCIAL_HOST_ALIASES: Record<string, string> = {
+  "instagram.com": "www.instagram.com",
+  "m.instagram.com": "www.instagram.com",
+  "instagr.am": "www.instagram.com",
+  "facebook.com": "www.facebook.com",
+  "m.facebook.com": "www.facebook.com",
+  "web.facebook.com": "www.facebook.com",
+  "fb.com": "www.facebook.com",
+  "twitter.com": "x.com",
+  "www.twitter.com": "x.com",
+  "www.x.com": "x.com",
+  "youtube.com": "www.youtube.com",
+  "m.youtube.com": "www.youtube.com",
+  "linkedin.com": "www.linkedin.com",
+  "tiktok.com": "www.tiktok.com",
+};
+
+/**
+ * Paths that point at a piece of content or a share redirect rather than at the
+ * account. `facebook.com/share/r/<id>` is the one that shows up most: it is what
+ * the Facebook app's share button produces, and it identifies nothing.
+ */
+const NON_PROFILE_PATHS = [
+  /^\/share(\/|$)/i,
+  /^\/p\//i,
+  /^\/reel/i,
+  /^\/stories\//i,
+  /^\/posts\//i,
+  /^\/watch/i,
+];
+
+/**
+ * Reduce a merchant-supplied social link to the canonical profile URL, or null
+ * if it does not identify an account.
+ *
+ * `sameAs` is how a search engine decides that this store and that Instagram
+ * account are one entity. A URL carrying `?igsh=…&utm_source=qr` is not the
+ * string the platform publishes as canonical, so it corroborates weakly at
+ * best. A live store shipped exactly that, plus a `facebook.com/share/r/…`
+ * redirect, which identifies no account at all.
+ *
+ * Returning null is deliberate for non-profile links: a wrong or meaningless
+ * `sameAs` is worse than a missing one, because it actively points entity
+ * resolution somewhere that isn't the merchant.
+ */
+export function canonicalizeSocialUrl(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    // Not a URL at all. WhatsApp entries are routinely a bare phone number;
+    // those belong in `telephone`, never here.
+    return null;
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  url.protocol = "https:";
+  url.username = "";
+  url.password = "";
+  url.hash = "";
+  url.port = "";
+
+  const host = url.hostname.toLowerCase();
+  url.hostname = SOCIAL_HOST_ALIASES[host] ?? host;
+
+  for (const key of [...url.searchParams.keys()]) {
+    if (SOCIAL_TRACKING_PARAMS.has(key.toLowerCase())) url.searchParams.delete(key);
+  }
+
+  if (NON_PROFILE_PATHS.some((re) => re.test(url.pathname))) return null;
+
+  // Compute on a local, then assign. Writing "" to URL.pathname normalises it
+  // straight back to "/", so checking url.pathname after the write would never
+  // catch a bare domain.
+  const path = url.pathname.replace(/\/+$/, "");
+  // A bare domain names the platform, not the merchant.
+  if (path === "") return null;
+  url.pathname = path;
+
+  return url.toString();
+}
+
 export interface BuildOrganizationLdProps {
   baseUrl: string;
   storeName: string;
@@ -252,12 +363,17 @@ export function buildOrganizationLd({
   // WhatsApp entry is routinely a bare phone number — a live store shipped
   // `"sameAs": ["+201098433918", …]`, which is not a URL and invalidates the
   // property. A phone belongs in `telephone`, never here.
+  //
+  // canonicalizeSocialUrl also strips share/QR tracking and drops links that
+  // point at a post or a share redirect instead of the account — see its doc.
   const urls = socialLinks
     ? Object.values(socialLinks)
-        .map((u) => (typeof u === "string" ? u.trim() : ""))
-        .filter((u) => /^https?:\/\//i.test(u))
+        .map((u) => (typeof u === "string" ? canonicalizeSocialUrl(u) : null))
+        .filter((u): u is string => u !== null)
     : [];
-  const sameAs = urls.length > 0 ? urls : undefined;
+  // Two aliases of one profile (m.facebook.com/x and www.facebook.com/x) collapse
+  // to the same string above, and listing it twice weakens rather than doubles it.
+  const sameAs = urls.length > 0 ? [...new Set(urls)] : undefined;
   return {
     "@context": "https://schema.org",
     // A merchant-declared subtype (ClothingStore, JewelryStore, …) is a direct
