@@ -45,6 +45,7 @@ import {
   fetchStoreMenus,
 } from "@/lib/api-client";
 import { fetchBlogsList } from "@/lib/blogs";
+import { canonicalizeSocialUrl } from "@/lib/json-ld";
 import {
   canonicalOriginFor,
   resolveStoreDomainFromHeaders,
@@ -199,10 +200,16 @@ function contactLines(store: StoreForLlms): string[] {
     // The Social Links map is free-form and its WhatsApp entry is routinely a
     // bare phone number rather than a URL (see the sameAs note in json-ld.ts),
     // so only http(s) values become links; the rest are stated as plain text.
+    //
+    // Prefer the canonical profile URL, but fall back to the raw one. Unlike
+    // `sameAs`, this file is a reading list rather than an identity claim — a
+    // share redirect is still a working link here, so dropping it would lose
+    // information for no benefit.
+    const clean = canonicalizeSocialUrl(url) ?? url;
     lines.push(
-      /^https?:\/\//i.test(url)
-        ? `- [${mdText(name)}](${url})`
-        : `- ${mdText(name)}: ${mdText(url)}`,
+      /^https?:\/\//i.test(clean)
+        ? `- [${mdText(name)}](${clean})`
+        : `- ${mdText(name)}: ${mdText(clean)}`,
     );
   }
   return lines;
