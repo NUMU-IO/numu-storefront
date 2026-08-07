@@ -20,12 +20,12 @@ interface PageProps {
 
 // ── Hero LCP preload (best-effort) ──────────────────────────────────────────
 // Read the first home-template section's image server-side and emit a
-// width-only <link rel=preload as=image fetchpriority=high> for the DESKTOP
-// hero. The width ladder + sizes MUST match HeroMedia's desktop <img> — which
-// is width-only since the §7 prereq — so the preloaded bytes are exactly the
-// resource the <img> requests (otherwise the browser fetches it twice). Mobile
-// is intentionally NOT preloaded. Best-effort: empty/sanitized/marketplace
-// templates → nothing emitted; never throws.
+// width-only <link rel=preload as=image fetchpriority=high> per art-direction
+// branch. The width ladder + sizes MUST match HeroMedia's <img> — which is
+// width-only (see focalSrc's crop gate) — so the preloaded bytes are exactly
+// the resource the <img> requests (otherwise the browser fetches it twice).
+// Best-effort: empty/sanitized/marketplace templates → nothing emitted; never
+// throws.
 const HERO_IMAGE_KEYS = [
   "hero_image_url",
   "hero_image",
@@ -38,9 +38,17 @@ const HERO_IMAGE_KEYS = [
 // MUST equal HeroMedia's HERO_WIDTHS (+ sizes="100vw") so the preload is
 // CREDITED at every viewport: a narrower subset lets the browser pick a
 // candidate (e.g. 768w at ~768px/DPR1) not in the preload set, leaving the
-// <link> "unused" and double-fetching the hero. Desktop-only by design (the
-// mobile LCP is usually the headline; the <picture> mobile <source> serves it).
-const PRELOAD_WIDTHS_DESKTOP = [640, 768, 1024, 1280, 1920];
+// <link> "unused" and double-fetching the hero.
+const PRELOAD_WIDTHS = [640, 768, 1024, 1280, 1920];
+// HeroMedia's DESKTOP_BASE_WIDTH / MOBILE_BASE_WIDTH — the width it puts on the
+// bare `src`. Only used for the <link href>, which is the no-srcset fallback.
+const BASE_WIDTH_DESKTOP = 1920;
+const BASE_WIDTH_MOBILE = 1280;
+// HeroMedia's DEFAULT_BREAKPOINT. Its mobile bitmap is chosen by
+// `matchMedia("(max-width: 767px)")`, so these two media queries partition the
+// viewport exactly the way the component does.
+const MEDIA_DESKTOP = "(min-width: 768px)";
+const MEDIA_MOBILE = "(max-width: 767px)";
 
 function readImageUrl(v: unknown): string | null {
   if (typeof v === "string") return v || null;
@@ -49,6 +57,38 @@ function readImageUrl(v: unknown): string | null {
     return typeof u === "string" && u ? u : null;
   }
   return null;
+}
+
+/**
+ * The mobile art-direction bitmap for the hero setting `key`, or null when the
+ * theme will render the DESKTOP image on phones too.
+ *
+ * Every V3 hero follows one convention: the mobile image lives at
+ * `<key>_mobile` and is used only when the section's `use_mobile_image` toggle
+ * is on. This function has to agree with the theme, because the two preloads
+ * below partition the viewport between them — guess wrong and the phone
+ * preloads a bitmap the theme never requests while the one it does request
+ * arrives with no hint at all.
+ *
+ * Reading `hero_image_mobile` alone (the previous behaviour) only ever matched
+ * the single-image heroes. Slideshow heroes name theirs `slide_1_image_mobile`
+ * (vionne) and `image_1_mobile` (empire), so those stores resolved to null →
+ * the desktop `<link>` lost its `media` guard and phones downloaded the desktop
+ * hero at fetchpriority=high and threw it away, while the real mobile hero went
+ * undiscovered until the theme hydrated 6.9 s later. That was the bulk of
+ * vionne's 18.7 s mobile LCP.
+ *
+ * `=== true` mirrors what 12 of the 13 V3 heroes do. gilded-glamour defaults
+ * the toggle ON (`!== false`); an unset toggle there means we skip the mobile
+ * preload and leave the desktop one ungated — i.e. exactly today's behaviour,
+ * never worse.
+ */
+function readMobileHero(
+  s: Record<string, unknown>,
+  key: string,
+): string | null {
+  if (s["use_mobile_image"] !== true) return null;
+  return readImageUrl(s[`${key}_mobile`]) ?? readImageUrl(s["hero_image_mobile"]);
 }
 
 function extractHero(themeSettings: ThemeSettingsV3): {
@@ -67,7 +107,7 @@ function extractHero(themeSettings: ThemeSettingsV3): {
     for (const k of HERO_IMAGE_KEYS) {
       const u = readImageUrl(s[k]);
       if (u) {
-        return { desktop: u, mobile: readImageUrl(s["hero_image_mobile"]) };
+        return { desktop: u, mobile: readMobileHero(s, k) };
       }
     }
   }
@@ -147,20 +187,35 @@ export default async function HomePage({ params }: PageProps) {
     baseUrl,
     storeName: store.name || domain,
   });
-  // Best-effort hero preload — desktop-only, media-scoped so it never fires on
-  // mobile when an art-directed mobile image is in play. Folded into ldScripts
-  // so both the BYOT and built-in returns hoist it to <head>.
+  // Best-effort hero preload, one <link> per art-direction branch. When the
+  // theme swaps bitmaps on phones the two are media-scoped so each viewport
+  // fetches exactly one; when it doesn't, the desktop link runs ungated and
+  // serves both. Folded into ldScripts so the BYOT and built-in returns both
+  // hoist them to <head>.
   const heroLcp = extractHero(themeSettings);
   const heroPreload = heroLcp.desktop ? (
-    <link
-      rel="preload"
-      as="image"
-      href={imgTransformUrl(heroLcp.desktop, 1920)}
-      imageSrcSet={preloadSrcSet(heroLcp.desktop, PRELOAD_WIDTHS_DESKTOP)}
-      imageSizes="100vw"
-      fetchPriority="high"
-      media={heroLcp.mobile ? "(min-width: 768px)" : undefined}
-    />
+    <>
+      <link
+        rel="preload"
+        as="image"
+        href={imgTransformUrl(heroLcp.desktop, BASE_WIDTH_DESKTOP)}
+        imageSrcSet={preloadSrcSet(heroLcp.desktop, PRELOAD_WIDTHS)}
+        imageSizes="100vw"
+        fetchPriority="high"
+        media={heroLcp.mobile ? MEDIA_DESKTOP : undefined}
+      />
+      {heroLcp.mobile && (
+        <link
+          rel="preload"
+          as="image"
+          href={imgTransformUrl(heroLcp.mobile, BASE_WIDTH_MOBILE)}
+          imageSrcSet={preloadSrcSet(heroLcp.mobile, PRELOAD_WIDTHS)}
+          imageSizes="100vw"
+          fetchPriority="high"
+          media={MEDIA_MOBILE}
+        />
+      )}
+    </>
   ) : null;
   const ldScripts = (
     <>
