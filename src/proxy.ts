@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveImageTransform } from "@/lib/image-transform";
 
 // Port-stripped, because every comparison below is against a port-stripped
 // hostname. The documented dev value is `localhost:3100`, so leaving the port
@@ -129,6 +130,28 @@ export function proxy(request: NextRequest) {
   // cart"). Inject the apex-form host (`<store>.numueg.app`) so the backend
   // extracts `<store>` correctly. On the 1-level bazaar host
   // (PLATFORM_DOMAIN=numueg.app) this branch is a no-op.
+  // ── Image transform: rewrite, don't redirect ──────────────────────────────
+  //
+  // `/api/image-transform` is the stable image URL every theme builds. Its
+  // route handler can only ANSWER or REDIRECT, so it answered with a 302 to
+  // `/_next/image` — an extra round trip for every image on the page. Measured
+  // on vionne's mobile run: ~1.6 s on the hero alone, repeated for each of the
+  // 12 product thumbnails.
+  //
+  // Middleware can `rewrite()`, which reaches the same bytes with no hop at
+  // all. `resolveImageTransform` is the SAME function the route calls, so the
+  // SSRF allowlist and the width/quality clamps are unchanged — this only
+  // removes the round trip. The CF branch still returns `redirect`, which we
+  // pass through to the handler: `/cdn-cgi/image/…` lives at Cloudflare's edge,
+  // and rewriting to it would resolve against Next and 404.
+  if (pathname === "/api/image-transform") {
+    const decision = resolveImageTransform(request.nextUrl.searchParams);
+    if (decision.kind === "rewrite") {
+      return NextResponse.rewrite(new URL(decision.path, request.url));
+    }
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/")) {
     if (
       PLATFORM_DOMAIN !== "numueg.app" &&

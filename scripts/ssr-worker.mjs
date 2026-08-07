@@ -33,6 +33,15 @@
 import { pathToFileURL } from "node:url";
 import { renderToString } from "react-dom/server";
 
+// Mirror the flag the browser gets inlined by RuntimeImportMap. The SDK's
+// `focalSrc` reads it off globalThis to decide whether an image URL carries
+// crop params (`fp-x`/`fp-y`/`ar`/`fit`) — `/api/image-transform` only honors
+// those under Cloudflare Image Resizing, and emitting them otherwise just
+// builds a URL that misses the hero's <link rel=preload>. Setting it here
+// keeps the server-rendered `src` byte-identical to the client's.
+globalThis.__NUMU_CF_IMAGE_RESIZING__ =
+  process.env.NUMU_CF_IMAGE_RESIZING === "1";
+
 const MODULE_CACHE_MAX = 8;
 /** bundlePath -> module namespace (insertion-ordered for LRU eviction). */
 const modules = new Map();
