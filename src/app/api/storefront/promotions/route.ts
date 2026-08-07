@@ -31,6 +31,30 @@ export async function GET(req: NextRequest) {
   const locale = url.searchParams.get("locale") === "ar" ? "ar" : "en";
   const page = url.searchParams.get("page") || "/";
   const qs = new URLSearchParams({ page, device: "desktop", locale });
+  // Cart context, so CATALOG-SCOPED promotions survive eligibility.
+  //
+  // The backend builds a VisitorContextInput from these and
+  // PromotionEligibilityChecker._target_matches resolves PRODUCT / CATEGORY
+  // targets against `cart_product_ids` / `cart_category_ids`. Sending neither
+  // meant an untagged inclusion target could never match, so the checker
+  // returned `include target ... did not match` and the promotion was dropped
+  // from the response entirely — the theme never learned it existed, and a
+  // merchant's "20% off this category" offer was invisible on the storefront
+  // while still being charged correctly at checkout.
+  //
+  // Repeated params (the shape FastAPI expects for a list query), and capped so
+  // a large cart can't build an unbounded query string.
+  const MAX_CART_IDS = 100;
+  for (const key of ["product_ids", "category_ids"] as const) {
+    const values = url.searchParams.getAll(key).slice(0, MAX_CART_IDS);
+    for (const v of values) {
+      if (v) qs.append(key === "product_ids" ? "cart_product_ids" : "cart_category_ids", v);
+    }
+  }
+  const subtotal = url.searchParams.get("subtotal_cents");
+  if (subtotal && /^\d{1,12}$/.test(subtotal)) {
+    qs.set("cart_subtotal_cents", subtotal);
+  }
   const cookie = req.headers.get("cookie");
 
   try {

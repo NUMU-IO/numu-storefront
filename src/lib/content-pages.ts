@@ -71,6 +71,13 @@ export const TEMPLATE_TYPE_BY_HANDLE: Record<string, string> = {
   story: "about",
   contact: "contact",
   "contact-us": "contact",
+  // Vionne ships a designed bilingual `faq` template that answers the shipping,
+  // returns, payment and privacy questions on one page. Without this the handle
+  // arrives as the generic `page` type and the theme renders an empty CMS body.
+  // (The theme also resolves this handle itself, so it degrades gracefully on a
+  // storefront that predates this entry — this makes the intent visible here.)
+  faq: "faq",
+  faqs: "faq",
   // Account → the theme's `profile` template; post-purchase → its
   // `order-confirmation` template.
   profile: "profile",
