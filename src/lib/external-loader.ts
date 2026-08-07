@@ -127,6 +127,25 @@ async function loadAndVerifyImportMap(
   if (!bundleMap.federate) return { map: bundleMap, ok: true };
 
   // Federated bundle — verify against host's runtime manifest.
+  //
+  // RuntimeImportMap inlines it into the document (it reads the same file off
+  // disk to build the import map, so this costs the server nothing). Taking it
+  // from there removes a blocking round trip from the critical path: the
+  // bundle cannot be evaluated until this check passes, so the fetch sat
+  // directly between "theme JS is parsed" and "theme starts rendering".
+  //
+  // The inline copy is also strictly fresher than the fetched one — it is
+  // stamped by the render that served this document, whereas the file itself
+  // is an unversioned, mutable pointer served with `immutable` (see the
+  // `no-cache` note below). The fetch stays as the fallback for documents
+  // rendered before this shipped and for the SSR-worker path.
+  const inlineManifest = (
+    globalThis as { __NUMU_RUNTIME_MANIFEST__?: HostRuntimeManifest }
+  ).__NUMU_RUNTIME_MANIFEST__;
+  if (inlineManifest?.sdk_version) {
+    return checkCompat(bundleMap, inlineManifest);
+  }
+
   let hostManifest: HostRuntimeManifest;
   try {
     const res = await fetch("/__numu-runtime/manifest.json", {
@@ -165,6 +184,20 @@ async function loadAndVerifyImportMap(
     };
   }
 
+  return checkCompat(bundleMap, hostManifest);
+}
+
+/**
+ * The SDK major/minor compatibility gate, given a resolved host manifest.
+ *
+ * Split out so the inlined manifest and the fetched one go through the exact
+ * same checks — a second copy of this would be a silent way for the fast path
+ * to accept a bundle the slow path rejects.
+ */
+function checkCompat(
+  bundleMap: BundleImportMap,
+  hostManifest: HostRuntimeManifest,
+): { map: BundleImportMap | null; ok: boolean; reason?: string } {
   const versionParts = hostManifest.sdk_version.split(".");
   const hostMajor = parseInt(versionParts[0] ?? "0", 10);
   const hostMinor = parseInt(versionParts[1] ?? "0", 10);

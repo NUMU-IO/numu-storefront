@@ -356,7 +356,18 @@ function spawnWorker(): Worker | null {
       execArgv,
       // Scrubbed env: the child gets what Node itself needs and nothing else.
       // No NUMU_API_URL, no REVALIDATION_SECRET, no DB credentials.
-      env: { PATH: process.env.PATH ?? "", NODE_ENV: "production" },
+      //
+      // NUMU_CF_IMAGE_RESIZING is a non-secret boolean and has to come along:
+      // the SDK's `focalSrc` reads it to decide whether to put crop params on
+      // an image URL. Without it the worker would render width-only `src`
+      // values while the client (which gets the flag inlined by
+      // RuntimeImportMap) rendered cropped ones — a hydration mismatch on
+      // every image the moment CF resizing is switched on.
+      env: {
+        PATH: process.env.PATH ?? "",
+        NODE_ENV: "production",
+        NUMU_CF_IMAGE_RESIZING: process.env.NUMU_CF_IMAGE_RESIZING ?? "",
+      },
       stdio: ["ignore", "ignore", "pipe", "ipc"],
     });
   } catch (err) {
