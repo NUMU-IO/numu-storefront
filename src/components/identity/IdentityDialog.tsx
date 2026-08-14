@@ -335,20 +335,25 @@ export function IdentityDialog({
             </p>
             <div className="mt-4">
               <Field label={t.phoneLabel} required>
-                <div dir="ltr" className="flex gap-2">
+                {/* One combined field: borderless dial-code select + tel
+                    input inside a single rounded frame (per design). */}
+                <div
+                  dir="ltr"
+                  className="flex items-stretch overflow-hidden rounded-xl border border-[var(--ck-border,rgba(0,0,0,0.2))] bg-[var(--ck-surface,#fff)] transition-colors focus-within:border-[var(--ck-ring,#7c3aed)] focus-within:ring-2 focus-within:ring-[var(--ck-ring,#7c3aed)]/20"
+                >
                   <select
                     value={cc}
                     onChange={(e) => setCc(e.target.value)}
                     aria-label="Country code"
-                    className="w-24 shrink-0 rounded-[var(--ck-radius-sm,0.5rem)] border border-[var(--ck-border,rgba(0,0,0,0.15))] bg-[var(--ck-surface,#fff)] px-2 py-2 text-sm"
+                    className="shrink-0 border-0 bg-transparent ps-3 pe-1 py-3 text-sm outline-none"
                   >
                     {COUNTRIES.map(([codeC]) => (
                       <option key={codeC} value={codeC}>
-                        {codeC} {DIAL[codeC]}
+                        {DIAL[codeC]}
                       </option>
                     ))}
                   </select>
-                  <TextInput
+                  <input
                     type="tel"
                     inputMode="tel"
                     autoComplete="tel"
@@ -357,6 +362,7 @@ export function IdentityDialog({
                     onChange={(e) => setLocalPhone(e.target.value)}
                     placeholder={t.phonePlaceholder}
                     autoFocus
+                    className="min-w-0 flex-1 border-0 bg-transparent px-2 py-3 text-sm outline-none placeholder:text-[var(--ck-muted,#9ca3af)]"
                   />
                 </div>
               </Field>
@@ -366,8 +372,12 @@ export function IdentityDialog({
                 <ErrorBanner>{error}</ErrorBanner>
               </div>
             )}
-            <div className="mt-4">
-              <PrimaryButton type="submit" disabled={busy}>
+            <div className="mt-5">
+              <PrimaryButton
+                type="submit"
+                disabled={busy}
+                className="w-full rounded-xl"
+              >
                 {busy
                   ? t.sending
                   : variant === "save-cart"
@@ -417,8 +427,12 @@ export function IdentityDialog({
                 <ErrorBanner>{error}</ErrorBanner>
               </div>
             )}
-            <div className="mt-4">
-              <PrimaryButton type="submit" disabled={busy || code.length < 4}>
+            <div className="mt-5">
+              <PrimaryButton
+                type="submit"
+                disabled={busy || code.length < 4}
+                className="w-full rounded-xl"
+              >
                 {busy ? t.verifying : t.verify}
               </PrimaryButton>
             </div>
