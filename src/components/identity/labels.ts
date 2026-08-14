@@ -8,20 +8,22 @@ export type IdentityLocale = "en" | "ar";
 export function identityLabels(locale: IdentityLocale) {
   const ar = locale === "ar";
   return {
-    // ── Phone step — checkout variant ──────────────────────────────
-    titleCheckout: ar ? "أكد رقم موبايلك" : "Verify your phone",
+    // ── Phone step — checkout variant (login framing per design) ───
+    titleCheckout: ar ? "تسجيل الدخول" : "Sign in",
     subtitleCheckout: ar
-      ? "هنبعت لك كود تأكيد على واتساب لإتمام الطلب."
-      : "We'll send a WhatsApp code to confirm your order.",
+      ? "أدخل رقم واتساب للحصول على رمز التحقق."
+      : "Enter your WhatsApp number to get a verification code.",
     // ── Phone step — save-cart variant ─────────────────────────────
     titleSaveCart: ar ? "احفظ سلتك 🛒" : "Save your cart 🛒",
     subtitleSaveCart: ar
       ? "اكتب رقم واتساب وهنحفظ لك سلتك — ونفكرك لو سبتها."
       : "Enter your WhatsApp number and we'll keep your cart safe — and remind you if you leave it behind.",
-    phoneLabel: ar ? "رقم الموبايل (واتساب)" : "Phone number (WhatsApp)",
+    phoneLabel: ar ? "رقم واتساب" : "WhatsApp number",
     phonePlaceholder: ar ? "01xxxxxxxxx" : "01xxxxxxxxx",
     phoneInvalid: ar ? "رقم الموبايل غير صحيح" : "Please enter a valid phone number",
-    sendCode: ar ? "ابعت الكود" : "Send code",
+    sendCode: ar
+      ? "إرسال رمز التحقق عبر واتساب"
+      : "Send verification code via WhatsApp",
     sending: ar ? "جاري الإرسال…" : "Sending…",
     saveCart: ar ? "احفظ سلتي" : "Save my cart",
     notNow: ar ? "لاحقاً" : "Not now",
