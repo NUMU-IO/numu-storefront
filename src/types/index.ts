@@ -47,6 +47,19 @@ export interface ExternalThemeMetadata {
    * only gate.
    */
   checksum?: string | null;
+  /**
+   * Absolute URLs to the theme's static error / loading fragments, injected by
+   * `[domain]/error.tsx` instead of the platform's generic chrome.
+   *
+   * These were consumed by `layout.tsx` and `error.tsx` from the day the BYOT
+   * contract shipped, but nothing ever WROTE them — the field was missing from
+   * this type, the theme-resolution API does not surface `error_template`, and
+   * `resolve-theme.ts` synthesised only bundle/css/checksum. So every V3 theme
+   * declared a branded failure state in its theme.json and every shopper saw
+   * the generic one. `resolve-theme.ts` now derives them from `bundle_url`.
+   */
+  error_template_url?: string | null;
+  loading_template_url?: string | null;
   mode?: string;
   settings_schema?: Record<string, any> | null;
   section_schemas?: Record<string, any> | null;

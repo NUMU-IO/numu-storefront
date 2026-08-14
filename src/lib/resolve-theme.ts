@@ -82,11 +82,45 @@ function normalizeRaw(raw: Record<string, any>): ThemeSettingsV3 {
       const checksum =
         (typeof raw.bundle_checksum === "string" && raw.bundle_checksum) ||
         (prev?.bundle_url === outerBundleUrl ? (prev?.checksum ?? null) : null);
+      // Static error/loading templates.
+      //
+      // Themes declare these in theme.json (`error_template:
+      // "templates/error.html"`) and the plugin copies the PATH into
+      // manifest.json — but the theme-resolution endpoint does not surface the
+      // field at all (verified: its payload has no `error_template` key), so
+      // `external_theme.error_template_url` was never populated by anything
+      // and `error.tsx` took its `if (!url) return;` path every single time.
+      // Every V3 theme therefore promises a branded failure state and shows
+      // the platform's generic one.
+      //
+      // Derived by CONVENTION rather than configuration: the deploy script
+      // uploads `dist/` recursively, so `templates/*.html` always lands beside
+      // `theme.js` under the same immutable version prefix. Resolving the
+      // relative path against bundle_url is therefore correct whenever the
+      // theme ships the file, and harmless when it does not — `error.tsx`
+      // already falls back to platform chrome on a 404, and this fetch only
+      // happens on a page that is already erroring.
+      //
+      // The durable fix is API-side: surface `error_template` /
+      // `loading_template` on the resolution payload so the host can honour a
+      // theme that names them something else.
+      const templateUrl = (rel: string): string | null => {
+        try {
+          return new URL(rel, outerBundleUrl).toString();
+        } catch {
+          return null;
+        }
+      };
+
       return {
         ...v3,
         external_theme: {
           bundle_url: outerBundleUrl,
           css_url: raw.css_url ?? prev?.css_url ?? null,
+          error_template_url:
+            prev?.error_template_url ?? templateUrl("templates/error.html"),
+          loading_template_url:
+            prev?.loading_template_url ?? templateUrl("templates/loading.html"),
           mode: prev?.mode ?? "production",
           settings_schema: raw.settings_schema ?? prev?.settings_schema ?? null,
           section_schemas: raw.section_schemas ?? prev?.section_schemas ?? null,
