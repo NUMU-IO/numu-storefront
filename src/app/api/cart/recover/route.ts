@@ -37,6 +37,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       headers: { Location: "/cart" },
     });
     for (const c of setCookies) res.headers.append("set-cookie", c);
+    // Remember WHICH abandoned checkout this session restored. The shopper
+    // usually opens the link on a different device/browser than the one
+    // that built the cart, so their session_fingerprint is brand new —
+    // without this marker every cart event after a recovery click created
+    // a DUPLICATE contactless abandoned row while the original (the one
+    // holding the phone/email we messaged) stayed "abandoned" forever.
+    // trackCartState() reads it and sends recovered_from_id; the backend
+    // then updates the original row and adopts the new fingerprint.
+    // Not HttpOnly on purpose (client JS reads it); unguessable UUID, and
+    // the backend validates it store-scoped + un-recovered.
+    if (recoverId) {
+      const secure = req.nextUrl.protocol === "https:" ? "; Secure" : "";
+      res.headers.append(
+        "set-cookie",
+        `numu_recovered_id=${encodeURIComponent(recoverId)}; Path=/; Max-Age=${7 * 24 * 3600}; SameSite=Lax${secure}`,
+      );
+    }
     return res;
   };
 

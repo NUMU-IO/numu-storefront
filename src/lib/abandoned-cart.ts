@@ -96,6 +96,20 @@ export async function trackCartState(
       payload.shipping_address = overrides.shipping_address;
     if (overrides.coupon_code) payload.coupon_code = overrides.coupon_code;
 
+    // Recovery-link continuity: the /api/cart/recover redirect stamped the
+    // restored abandoned-checkout id in this cookie. Sending it lets the
+    // backend update the ORIGINAL row (which carries the contact we
+    // messaged) instead of creating a duplicate contactless row under this
+    // session's brand-new fingerprint.
+    const recoveredId = decodeURIComponent(
+      document.cookie.match(/(?:^|; )numu_recovered_id=([^;]+)/)?.[1] ?? "",
+    );
+    // Only a UUID is worth sending — the backend field is typed UUID and a
+    // junk ?cart= value would 422 the whole track payload.
+    if (/^[0-9a-f-]{36}$/i.test(recoveredId)) {
+      payload.recovered_from_id = recoveredId;
+    }
+
     const body = JSON.stringify(payload);
     // Contact/address enrichment must always be sent; plain cart snapshots
     // are de-duped so browsing navigation doesn't spam the endpoint.
