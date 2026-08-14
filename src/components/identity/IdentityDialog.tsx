@@ -64,6 +64,9 @@ interface IdentityDialogProps {
 
 type Step = "phone" | "code" | "done";
 
+// Matches the backend's OTP_CODE_LENGTH (otp_service.py).
+const OTP_LENGTH = 4;
+
 function readCsrf(): string {
   if (typeof document === "undefined") return "";
   return document.cookie.match(/(?:^|; )numu_csrf=([^;]+)/)?.[1] ?? "";
@@ -83,11 +86,6 @@ async function ensureCsrf(): Promise<string> {
     token = readCsrf();
   }
   return token;
-}
-
-function maskPhone(e164: string): string {
-  if (e164.length < 7) return e164;
-  return `${e164.slice(0, 3)}•••${e164.slice(-4)}`;
 }
 
 export function IdentityDialog({
@@ -233,11 +231,10 @@ export function IdentityDialog({
     await issue(phone);
   };
 
-  const handleVerify = async (e: FormEvent) => {
-    e.preventDefault();
+  const verify = async () => {
     if (busy || !otpId) return;
     const trimmed = code.trim();
-    if (trimmed.length < 4) return;
+    if (trimmed.length < OTP_LENGTH) return;
     setBusy(true);
     setError(null);
     try {
@@ -272,6 +269,7 @@ export function IdentityDialog({
       }
       if (verdict === "wrong_code") {
         setError(t.wrongCode(Number(data?.attempts_left ?? 0)));
+        setCode(""); // empty the boxes for the retry
       } else if (verdict === "locked") {
         setError(t.lockedCode);
       } else if (verdict === "expired") {
@@ -285,6 +283,20 @@ export function IdentityDialog({
       setBusy(false);
     }
   };
+
+  const handleVerify = async (e: FormEvent) => {
+    e.preventDefault();
+    await verify();
+  };
+
+  // Auto-submit the moment the fourth digit lands (per design — the boxes
+  // ARE the submit). The button stays as the fallback for edge cases.
+  useEffect(() => {
+    if (step === "code" && code.length === OTP_LENGTH && !busy && otpId) {
+      void verify();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, step]);
 
   if (!mounted || !open) return null;
 
@@ -402,25 +414,60 @@ export function IdentityDialog({
             <h2 className="pe-8 text-lg [font-family:var(--ck-heading-font)] [font-weight:var(--ck-heading-weight,700)]">
               {t.codeTitle}
             </h2>
+            {/* Full number, accent-colored, per design — the shopper typed
+                it seconds ago; masking here only causes doubt. */}
             <p className="mt-1 text-sm text-[var(--ck-muted,#6b7280)]">
-              {t.codeSubtitle(maskPhone(composed))}
+              {t.codeSubtitlePrefix}{" "}
+              <span
+                dir="ltr"
+                className="font-semibold text-[var(--ck-button,#7c3aed)]"
+              >
+                {composed}
+              </span>{" "}
+              {t.codeSubtitleSuffix}
             </p>
             <div className="mt-4">
-              <Field label={t.codeLabel} required>
-                <TextInput
+              {/* Four dedicated boxes (per design). One REAL invisible input
+                  drives them — that keeps the numeric mobile keyboard, paste,
+                  and one-time-code autofill working, which N separate inputs
+                  routinely break. Boxes always render LTR: digit sequences
+                  don't mirror in RTL. */}
+              <div dir="ltr" className="relative">
+                <input
                   type="text"
                   inputMode="numeric"
                   autoComplete="one-time-code"
-                  dir="ltr"
-                  maxLength={8}
+                  maxLength={OTP_LENGTH}
                   value={code}
                   onChange={(e) =>
-                    setCode(e.target.value.replace(/\D/g, ""))
+                    setCode(
+                      e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH),
+                    )
                   }
                   autoFocus
-                  className="text-center text-xl tracking-[0.4em]"
+                  aria-label={t.codeLabel}
+                  className="absolute inset-0 z-10 h-full w-full cursor-text opacity-0"
                 />
-              </Field>
+                <div className="flex justify-center gap-3">
+                  {Array.from({ length: OTP_LENGTH }, (_, i) => (
+                    <div
+                      key={i}
+                      aria-hidden
+                      className={`flex h-14 w-12 items-center justify-center rounded-xl border text-xl font-semibold transition-colors ${
+                        i === Math.min(code.length, OTP_LENGTH - 1) && !busy
+                          ? "border-[var(--ck-ring,#7c3aed)] ring-2 ring-[var(--ck-ring,#7c3aed)]/20"
+                          : "border-[var(--ck-border,rgba(0,0,0,0.2))]"
+                      } bg-[var(--ck-surface,#fff)]`}
+                    >
+                      {code[i] ?? (
+                        <span className="text-[var(--ck-muted,#d1d5db)]">
+                          {i === code.length ? "|" : ""}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
             {error && (
               <div className="mt-3">
@@ -430,7 +477,7 @@ export function IdentityDialog({
             <div className="mt-5">
               <PrimaryButton
                 type="submit"
-                disabled={busy || code.length < 4}
+                disabled={busy || code.length < OTP_LENGTH}
                 className="w-full rounded-xl"
               >
                 {busy ? t.verifying : t.verify}

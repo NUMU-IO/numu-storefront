@@ -29,11 +29,12 @@ export function identityLabels(locale: IdentityLocale) {
     notNow: ar ? "لاحقاً" : "Not now",
 
     // ── Code step ──────────────────────────────────────────────────
-    codeTitle: ar ? "اكتب الكود" : "Enter the code",
-    codeSubtitle: (masked: string) =>
-      ar
-        ? `بعتنا كود تأكيد على واتساب ${masked}`
-        : `We sent a verification code on WhatsApp to ${masked}`,
+    codeTitle: ar ? "تحقق من رقم الهاتف" : "Verify your phone number",
+    // Split so the number renders as its own accent-colored LTR span.
+    codeSubtitlePrefix: ar
+      ? "أدخل رمز التحقق المرسل إلى"
+      : "Enter the verification code sent to",
+    codeSubtitleSuffix: ar ? "عبر واتساب" : "via WhatsApp",
     codeLabel: ar ? "كود التحقق" : "Verification code",
     verify: ar ? "تأكيد ومتابعة" : "Verify & continue",
     verifying: ar ? "جاري التأكيد…" : "Verifying…",
