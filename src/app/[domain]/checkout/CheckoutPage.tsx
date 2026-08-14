@@ -44,6 +44,10 @@ import { readCartFunnelData } from "@/lib/cart-funnel-data";
 import { claim } from "@/components/tracking/FunnelTracker";
 import { trackCartState } from "@/lib/abandoned-cart";
 import {
+  IdentityDialog,
+  type IdentityVerifiedResult,
+} from "@/components/identity";
+import {
   fetchCheckoutFieldsConfig,
   stdField,
   validateCustomFieldValues,
@@ -60,46 +64,9 @@ import {
 import { useAttribution } from "@/components/layout/AttributionProvider";
 import type { CheckoutResponse, ShippingRateOption } from "@/types/checkout";
 
-const COUNTRIES = [
-  ["EG", "Egypt", "مصر"],
-  ["AE", "United Arab Emirates", "الإمارات"],
-  ["SA", "Saudi Arabia", "السعودية"],
-  ["KW", "Kuwait", "الكويت"],
-  ["QA", "Qatar", "قطر"],
-  ["BH", "Bahrain", "البحرين"],
-  ["OM", "Oman", "عُمان"],
-  ["JO", "Jordan", "الأردن"],
-  ["LB", "Lebanon", "لبنان"],
-] as const;
-
-// International dial codes for the phone-prefix dropdown (keyed by the
-// COUNTRIES code above). Default EG (+20).
-const DIAL: Record<string, string> = {
-  EG: "+20",
-  AE: "+971",
-  SA: "+966",
-  KW: "+965",
-  QA: "+974",
-  BH: "+973",
-  OM: "+968",
-  JO: "+962",
-  LB: "+961",
-};
-
-/**
- * Combine the selected dial code with the typed local number into an E.164-ish
- * string for submission. Numbers the buyer already wrote in international form
- * (leading "+") are left untouched; otherwise the local trunk "0" is stripped
- * and the dial code prepended (e.g. EG + "01001234567" → "+201001234567").
- */
-function composePhone(cc: string, local: string): string {
-  const trimmed = local.trim();
-  if (!trimmed) return "";
-  if (trimmed.startsWith("+")) return trimmed.replace(/[\s()-]/g, "");
-  const dial = DIAL[cc] || "";
-  const national = trimmed.replace(/[\s()-]/g, "").replace(/^0+/, "");
-  return dial ? `${dial}${national}` : national;
-}
+// Country/dial data + composePhone moved to the shared lib so the identity
+// dialog (phone-first OTP) renders the exact same phone input.
+import { COUNTRIES, DIAL, composePhone } from "@/lib/phone";
 
 // ── Payment config (same normalizer the old PaymentStep used) ──────
 interface MethodOption {
@@ -322,6 +289,13 @@ export function CheckoutPage() {
   const [locationOpen, setLocationOpen] = useState(false);
   const [mapsEnabled, setMapsEnabled] = useState(false);
 
+  // Phone-first identity gate. `identityOpen` is UX only — the SERVER
+  // rejects an unverified checkout with 403 phone_verification_required,
+  // which re-opens the dialog below. `identityPhone` locks the phone field
+  // to the number the customer actually proved.
+  const [identityOpen, setIdentityOpen] = useState(false);
+  const [identityPhone, setIdentityPhone] = useState<string | null>(null);
+
   // Merchant field config + custom values
   const [fieldsConfig, setFieldsConfig] = useState<CheckoutFieldsConfig | null>(null);
   const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
@@ -521,6 +495,28 @@ export function CheckoutPage() {
         }
       } catch {
         /* anonymous */
+      }
+    })();
+
+    // Phone-first identity gate: open the OTP dialog when this store
+    // requires verification and this session hasn't proven a phone yet.
+    // `required` from the backend is already ANDed with otp_available, so a
+    // store whose transport can't deliver a code never shows the gate.
+    (async () => {
+      try {
+        const res = await fetch("/api/identity/status", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!res.ok) return; // fail open — the server still enforces
+        const data = (await res.json().catch(() => ({})))?.data;
+        if (data?.verified && typeof data?.phone_masked === "string") {
+          // Already proven this session (or a verified returning customer).
+          return;
+        }
+        if (data?.required) setIdentityOpen(true);
+      } catch {
+        /* fail open — server-side enforcement is the guard */
       }
     })();
 
@@ -875,6 +871,18 @@ export function CheckoutPage() {
       if (!res.ok) {
         const detail = body?.detail;
         if (detail && typeof detail === "object" && detail.code) {
+          // Identity enforcement: the session's phone proof is missing or
+          // doesn't match the shipping phone (e.g. the 24h flag expired, or
+          // the customer edited the number after verifying). Re-open the
+          // OTP dialog instead of stranding them on an opaque error.
+          if (detail.code === "phone_verification_required") {
+            const msg = String(detail.message || "");
+            const [en, ar] = msg.split("|").map((p: string) => p.trim());
+            setError(isAr ? ar || en : en || msg);
+            setIdentityOpen(true);
+            setSubmitting(false);
+            return;
+          }
           setError((isAr ? detail.message_ar : detail.message_en) || detail.message_en || `Checkout failed (${res.status})`);
           setCodBlocked(detail.code === "cod_trust_blocked");
           setSubmitting(false);
@@ -1187,6 +1195,17 @@ export function CheckoutPage() {
                 htmlFor="phone"
                 error={fieldErrors.phone}
                 required={stdField(fieldsConfig, "phone").required}
+                hint={
+                  identityPhone && composedPhone === identityPhone
+                    ? isAr
+                      ? "تم التأكيد عبر واتساب ✓"
+                      : "Verified via WhatsApp ✓"
+                    : identityPhone
+                      ? isAr
+                        ? "الرقم اتغيّر — هيتطلب تأكيده تاني عند إتمام الطلب"
+                        : "Number changed — it will need verification again at submit"
+                      : undefined
+                }
               >
                 <div className="flex gap-2" dir="ltr">
                   <select
@@ -1542,6 +1561,32 @@ export function CheckoutPage() {
           onConfirm={applyCapturedLocation}
         />
       )}
+
+      <IdentityDialog
+        open={identityOpen}
+        variant="checkout"
+        // Dismissible: the shopper may want to read the form first. The
+        // server 403s an unverified submit and re-opens this dialog.
+        onOpenChange={setIdentityOpen}
+        initialPhone={phone}
+        onVerified={(result: IdentityVerifiedResult) => {
+          setIdentityOpen(false);
+          setIdentityPhone(result.phone);
+          // The verified E.164 becomes the checkout phone; composePhone
+          // passes "+…" numbers through untouched, so cc is irrelevant.
+          setPhone(result.phone);
+          clearErr("phone");
+          // Returning customer: prefill what they'd otherwise retype. The
+          // verify response set auth cookies, so /api/customer/me now
+          // answers for the rest of the session too.
+          const p = result.profile;
+          if (p) {
+            setFirstName((prev) => prev || p.first_name || "");
+            setLastName((prev) => prev || p.last_name || "");
+            if (p.email) setEmail((prev) => prev || p.email || "");
+          }
+        }}
+      />
     </>
   );
 }

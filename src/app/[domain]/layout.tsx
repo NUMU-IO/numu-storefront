@@ -12,6 +12,7 @@ import { SectionGroupRenderer } from "@/components/theme-engine/SectionGroupRend
 import { ByotChromeFallback } from "@/components/theme-engine/ByotChromeFallback";
 import type { SectionGroup } from "@/types";
 import { AbandonedCartTracker } from "@/components/tracking/AbandonedCartTracker";
+import { SaveCartNudge } from "@/components/identity";
 import { ThemeDataProvider } from "@/components/layout/ThemeDataProvider";
 import { AttributionProvider } from "@/components/layout/AttributionProvider";
 import { CustomerBridgeProvider } from "@/components/layout/CustomerBridgeProvider";
@@ -438,6 +439,11 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             on every cart change (design: track from add-to-cart, not just at
             the contact step). */}
         <AbandonedCartTracker />
+        {/* Phone-first identity: the "save your cart" nudge. Renders nothing
+            until the merchant-configured cart thresholds are crossed, and
+            self-suppresses on /checkout (the gate owns that surface), for
+            verified sessions, and for 7 days after a dismissal. */}
+        <SaveCartNudge />
         {announcementBar && (
           <AnnouncementBar
             promotion={announcementBar}
