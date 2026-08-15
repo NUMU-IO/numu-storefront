@@ -466,6 +466,48 @@ export async function fetchCustomerOrder(
   }
 }
 
+/**
+ * Public, no-auth view of an order — the confirmation page's guest fallback.
+ *
+ * `fetchCustomerOrder` hits `/storefront/me/orders/{id}`, which needs a
+ * customer session. A guest checkout has none, so it returns null and the
+ * thank-you page had no totals to put on the Meta Purchase — the event fired
+ * with `value: undefined`, which Meta rejects ("value must be a numeric value
+ * greater than 0"). For a COD store where most buyers never create an
+ * account, that was every Purchase.
+ *
+ * This endpoint is protected by the unguessable order UUID and deliberately
+ * returns a sanitised subset — no email, phone, street or payment ids. We
+ * only read totals and line quantities off it, so nothing about the buyer
+ * reaches the browser pixel by this path. `line_items` carries no
+ * `product_id`, so `content_ids` still comes from the authenticated order
+ * (or, for guests, from the server-side CAPI Purchase which dedupes into the
+ * same `event_id`).
+ */
+export async function fetchPublicOrderTracking(
+  orderId: string,
+  storeScope?: string | null,
+): Promise<Record<string, any> | null> {
+  try {
+    // Scope the lookup to this store so one storefront can't resolve another
+    // tenant's order by UUID (the API 404s on mismatch).
+    const qs = storeScope ? `?store=${encodeURIComponent(storeScope)}` : "";
+    const res = await fetch(
+      `${API_URL}/storefront/track/${encodeURIComponent(orderId)}${qs}`,
+      {
+        method: "GET",
+        cache: "no-store",
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    return (json?.data as Record<string, any>) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchCustomerAddresses(
   cookieHeader: string | null | undefined,
 ): Promise<any[]> {
