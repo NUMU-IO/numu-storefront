@@ -88,9 +88,15 @@ export default async function ThankYouPage({
   const orderCurrency =
     (order?.currency as string) || (purchaseFallback?.currency as string);
   const quantityLines = purchaseLines.length ? purchaseLines : fallbackLines;
-  const contentIds = purchaseLines
+  // `content_ids` now falls back to the public order view too. That view had
+  // no product id, so a GUEST Purchase — most COD buyers — carried no product
+  // attribution at all: Meta could neither credit the catalog nor clear those
+  // shoppers out of "viewed but didn't buy" retargeting audiences. The public
+  // projection exposes the merchant's Meta catalog id where one exists, so
+  // these ids join the product feed rather than being internal UUIDs.
+  const contentIds = (purchaseLines.length ? purchaseLines : fallbackLines)
     .map((l) => l.product_id)
-    .filter((x): x is string => typeof x === "string");
+    .filter((x): x is string => typeof x === "string" && x.length > 0);
 
   const purchaseTracker = (
     <FunnelTracker

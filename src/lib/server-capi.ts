@@ -46,6 +46,41 @@ function readCookie(cookieHeader: string | null, name: string): string | undefin
  *
  * Best-effort: a malformed cookie yields undefined rather than throwing.
  */
+/**
+ * The signed-in customer's id, resolved from their auth cookies.
+ *
+ * Costs one upstream call and only on `add_to_cart`, which already runs in an
+ * `after()` block so the shopper never waits on it. Anonymous shoppers short-
+ * circuit on the absence of a session cookie rather than paying for a request
+ * that will 401 — the overwhelmingly common case on a COD storefront.
+ *
+ * Returns undefined on any failure: a missed enrichment is a weaker event,
+ * while a throw here would lose the event entirely.
+ */
+async function resolveCustomerId(
+  cookieHeader: string | null,
+): Promise<string | undefined> {
+  // `customer_access_token` is the httpOnly cookie the API's customer auth
+  // dependency reads (`api/dependencies/auth.py`). No cookie ⇒ guest ⇒ don't
+  // spend a request on a call that will 401.
+  if (!cookieHeader || !/(?:^|;\s*)customer_access_token=/.test(cookieHeader)) {
+    return undefined;
+  }
+  try {
+    const res = await fetch(`${API_URL}/storefront/me/profile`, {
+      headers: { cookie: cookieHeader },
+      cache: "no-store",
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!res.ok) return undefined;
+    const json = (await res.json()) as { data?: { id?: string }; id?: string };
+    const id = json?.data?.id ?? json?.id;
+    return typeof id === "string" && id ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function readSessionId(cookieHeader: string | null): string | undefined {
   const raw = readCookie(cookieHeader, "numu_attribution");
   if (raw) {
@@ -100,6 +135,16 @@ export async function fireServerCapi(
       // the eventual Purchase). Browser-fired events send the same value as
       // `fingerprint`; this is the server-route equivalent.
       fingerprint: readSessionId(cookieHeader),
+      // Authenticated shopper's id, so the backend can enrich this event from
+      // the customer record (email, phone, name, default address).
+      //
+      // `add_to_cart` is the ONLY funnel step emitted server-side, and it had
+      // no `customer_id` — unlike the browser path, which sends one. So even
+      // a fully logged-in customer with full PII on file produced an AddToCart
+      // carrying nothing but a hashed session id, IP, UA and cookies. The
+      // backend only trusts `body.customer_id`; it never reads auth cookies
+      // itself, so forwarding the cookie header alone was not enough.
+      customer_id: await resolveCustomerId(cookieHeader),
       ttclid: readCookie(cookieHeader, "ttclid"),
       ttp: readCookie(cookieHeader, "_ttp"),
     };
