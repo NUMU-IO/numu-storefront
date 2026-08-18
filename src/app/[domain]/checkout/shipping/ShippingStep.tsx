@@ -18,6 +18,8 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { resolveApiError } from "@/lib/api-error";
+import { trackFunnel } from "@/lib/meta-pixel";
+import { readCartFunnelData } from "@/lib/cart-funnel-data";
 import type { ShippingRateOption } from "@/types/checkout";
 
 interface PickupLocation {
@@ -302,6 +304,23 @@ export function ShippingStep() {
         shipping_cost_cents: 0,
       });
     }
+    // The shipping step is where the address is finally complete — city,
+    // governorate, postal code and country are all confirmed by now. It is
+    // already a valid backend funnel step and is in the API's
+    // `_IDENTITY_RESOLUTION_STEPS`, but nothing had ever emitted it, so the
+    // richest identity moment in the whole funnel produced no event and a
+    // shopper who abandoned here left Meta with the identity-free
+    // InitiateCheckout and nothing more.
+    void readCartFunnelData(undefined).then((cart) =>
+      trackFunnel("add_shipping_info", {
+        ...cart,
+        shipping_method:
+          mode === "ship"
+            ? rates?.find((r) => r.id === selected)?.name || undefined
+            : "pickup",
+      }),
+    );
+
     router.push(`/${params.domain}/checkout/payment`);
   }
 

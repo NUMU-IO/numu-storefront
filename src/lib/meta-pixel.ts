@@ -20,6 +20,7 @@
 
 import { FUNNEL_STEP_TO_TIKTOK, ttqTrack } from "./tiktok-pixel";
 import { trackingOptOut } from "./consent";
+import { identityForCapi } from "./meta-identity";
 
 // ── Store config → enabled pixel IDs ────────────────────────────────────────
 
@@ -73,6 +74,16 @@ export function resolveMetaPixelIds(store: unknown): string[] {
   const valid = (id: unknown): id is string =>
     typeof id === "string" && PIXEL_ID_RE.test(id.trim());
 
+  // Top-level kill switch, honoured BEFORE `pixels[]`.
+  //
+  // `pixels[]` was resolved first and the top-level flags ignored entirely,
+  // so a multi-pixel store that hit "Disconnect" in the hub kept firing on
+  // every page — the merchant believed they had stopped sending data to Meta
+  // and had not. The API now also disables each array entry, but this is the
+  // backstop that protects stores whose settings were written before that
+  // fix, including any still sitting in an ISR cache.
+  if (meta.pixel_enabled === false) return [];
+
   const ids: string[] = [];
   if (Array.isArray(meta.pixels)) {
     for (const p of meta.pixels) {
@@ -81,7 +92,9 @@ export function resolveMetaPixelIds(store: unknown): string[] {
       }
     }
   }
-  if (ids.length === 0 && meta.pixel_enabled !== false && valid(meta.pixel_id)) {
+  // No `pixel_enabled !== false` guard here — the kill switch above already
+  // returned for that case, so repeating it is dead code.
+  if (ids.length === 0 && valid(meta.pixel_id)) {
     ids.push(meta.pixel_id.trim());
   }
   // Legacy fallback — the flat `settings.meta_pixel_id` written by the hub's
@@ -106,6 +119,11 @@ export const FUNNEL_STEP_TO_META: Record<string, string> = {
   product_view: "ViewContent",
   add_to_cart: "AddToCart",
   checkout_started: "InitiateCheckout",
+  // Custom event, not a Meta standard one — deliberate. The shipping step is
+  // where the full address lands, and a custom event still carries complete
+  // `user_data` and still counts toward the dataset's match quality. Must stay
+  // in step with `FUNNEL_STEP_TO_META_EVENT` in the API's meta_capi task.
+  add_shipping_info: "AddShippingInfo",
   add_payment_info: "AddPaymentInfo",
   order_completed: "Purchase",
   search: "Search",
@@ -315,6 +333,63 @@ export function fbqTrack(
   }
 }
 
+/**
+ * Events Meta cannot use without a value. Only `Purchase` is gated: an
+ * `AddToCart` with no value is still a useful signal, a `Purchase` with no
+ * value is a conversion Meta refuses to count and reports as "0% valid value".
+ */
+const VALUE_REQUIRED_EVENTS = new Set(["Purchase"]);
+
+/**
+ * Reason this payload must not be fired browser-side, or null if it is fine.
+ *
+ * Zero is deliberately allowed: a fully-discounted or gift-carded order is a
+ * real conversion, and suppressing it would trade a reporting blemish for a
+ * missing sale. Same rule as the API's `validate_conversion_value`.
+ */
+function conversionValueDefect(
+  metaEvent: string,
+  data: Record<string, unknown>,
+): string | null {
+  if (!VALUE_REQUIRED_EVENTS.has(metaEvent)) return null;
+
+  const rawValue = data.value;
+  if (rawValue === undefined || rawValue === null) return "missing_value";
+  const value = typeof rawValue === "number" ? rawValue : Number(rawValue);
+  if (!Number.isFinite(value)) return `non_numeric_value:${String(rawValue)}`;
+  if (value < 0) return `negative_value:${value}`;
+
+  const currency = data.currency;
+  if (typeof currency !== "string" || !/^[A-Za-z]{3}$/.test(currency.trim())) {
+    return `invalid_currency:${String(currency)}`;
+  }
+  return null;
+}
+
+/**
+ * Suppress the browser copy and say so loudly.
+ *
+ * The CAPI leg still fires — `postTrack` is outside this guard — and the server
+ * builds `value` from the authoritative order total. So the conversion is not
+ * lost; only the malformed browser duplicate is withheld, which is precisely
+ * the copy that would otherwise win deduplication and mask a correct value.
+ */
+function reportTrackingDefect(
+  metaEvent: string,
+  reason: string,
+  data: Record<string, unknown>,
+): void {
+  try {
+    console.warn(
+      `[numu] suppressed browser ${metaEvent}: ${reason}. ` +
+        "The server-side CAPI event still carries this conversion.",
+      data,
+    );
+  } catch {
+    /* console can be stubbed out by a theme */
+  }
+}
+
 /** POST the CAPI/funnel event to the host proxy (which enriches _fbp/_fbc). */
 function postTrack(extra: Record<string, unknown>): void {
   const win = w();
@@ -329,6 +404,12 @@ function postTrack(extra: Record<string, unknown>): void {
         : undefined,
     attribution: readAttribution() ?? undefined,
     customer_id: readCustomerId() ?? undefined,
+    // Identity the shopper has typed into checkout this page-load, if any.
+    // Sent raw to OUR origin; the API hashes it per Meta's field rules and
+    // allowlists exactly these keys. Previously the checkout knew the email
+    // and phone and forwarded them to neither the pixel nor this body, so
+    // every guest event reached Meta with no PII at all.
+    user_data: identityForCapi(),
     // Consent: when the merchant requires it and the visitor hasn't accepted,
     // the event still goes out but flagged `opt_out` — Meta's documented
     // modeled-conversions path (attribution math only, nothing retained), and
@@ -421,7 +502,20 @@ export function trackFunnel(
   // of minting a new one (which Meta would count as a second conversion).
   rememberFunnelEventId(step, eventId);
   const metaEvent = FUNNEL_STEP_TO_META[step];
-  if (metaEvent) fbqTrack(metaEvent, data, eventId);
+  if (metaEvent) {
+    // A conversion Meta cannot value is worse than a late one: Events Manager
+    // reported 0% valid value on website Purchase for a live store because
+    // `value` arrived undefined and `cleanData` stripped the key silently, so
+    // the event looked perfectly well-formed from the inside. Never fire the
+    // browser leg without a usable value — the server leg still carries the
+    // conversion, and a loud console warning beats an invisible defect.
+    const defect = conversionValueDefect(metaEvent, data);
+    if (defect) {
+      reportTrackingDefect(metaEvent, defect, data);
+    } else {
+      fbqTrack(metaEvent, data, eventId);
+    }
+  }
   // Fire the TikTok browser pixel with the SAME event_id so TikTok dedupes
   // the browser event against the server-side Events API fire. One dispatcher,
   // one /track POST — the backend fans the server side to BOTH Meta + TikTok.
