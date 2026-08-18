@@ -189,8 +189,11 @@ function readCustomerId(): string | null {
   }
 }
 
-/** Name of the first-party session cookie — see `persistSessionId`. */
+/** Name of the first-party visitor cookie — see `persistSessionId`. */
 export const SESSION_COOKIE = "numu_sid";
+
+/** 180 days — long enough that a returning shopper keeps one `external_id`. */
+const VISITOR_COOKIE_MAX_AGE = 180 * 24 * 60 * 60;
 
 /**
  * Mirror the session id into a cookie the SERVER can read.
@@ -219,9 +222,20 @@ function persistSessionId(fp: string): void {
   try {
     if (new RegExp(`(?:^|; )${SESSION_COOKIE}=`).test(document.cookie)) return;
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
-    // Session-scoped (no Max-Age): the id is per-visit, and a persistent
-    // cookie would glue separate visits into one "session".
-    document.cookie = `${SESSION_COOKIE}=${encodeURIComponent(fp)}; Path=/; SameSite=Lax${secure}`;
+    // Persistent (180 days), not session-scoped.
+    //
+    // This id is sent to Meta and TikTok as `external_id` — a match key whose
+    // entire value is being STABLE for one person. Session-scoping it meant a
+    // returning shopper minted a fresh id every visit, so the ad platforms saw
+    // N strangers rather than one returning customer, and no amount of
+    // coverage on that key could compensate. Only visitors who happened to
+    // arrive through a tagged ad URL got a durable id (via the 90-day
+    // `numu_attribution` cookie) — exactly backwards, since those are the
+    // visitors Meta can already identify.
+    //
+    // Per-VISIT analytics are unaffected: funnel/session reports key on the
+    // rows' own timestamps, not on this cookie's lifetime.
+    document.cookie = `${SESSION_COOKIE}=${encodeURIComponent(fp)}; Path=/; Max-Age=${VISITOR_COOKIE_MAX_AGE}; SameSite=Lax${secure}`;
   } catch {
     /* private mode / disabled cookies — server leg falls back to no id */
   }

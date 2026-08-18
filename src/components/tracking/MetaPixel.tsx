@@ -24,6 +24,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import {
   fbqTrack,
+  getEventId,
   pageViewEventId,
   getSessionFingerprint,
   FUNNEL_STEP_TO_META,
@@ -78,7 +79,11 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
       const step = EVENT_NAME_TO_FUNNEL_STEP[d.event];
       const metaEvent = step ? FUNNEL_STEP_TO_META[step] : undefined;
       if (!metaEvent) return;
-      fbqTrack(metaEvent, d.payload || {}, d.event_id);
+      // Default the id rather than omitting it. `fbqTrack` passes
+      // `eventID` only when truthy, so a theme dispatching an event without
+      // one produced an fbq fire with NO eventID — inherently undedupable
+      // against its CAPI twin, which Meta then counts twice.
+      fbqTrack(metaEvent, d.payload || {}, d.event_id || getEventId());
     }
     window.addEventListener("numu:analytics:event", onEvt as EventListener);
     return () =>
