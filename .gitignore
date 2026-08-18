@@ -33,3 +33,6 @@ next-env.d.ts
 # transient build/start logs
 .next-build.log
 .next-start.log
+
+# Cygwin/msys crash dumps — never source
+*.stackdump
