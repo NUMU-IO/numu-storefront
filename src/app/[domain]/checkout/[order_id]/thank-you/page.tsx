@@ -76,9 +76,13 @@ export default async function ThankYouPage({
     : Array.isArray(order?.items)
       ? order!.items
       : [];
-  // Totals fall back to the public order view for guests. `content_ids` does
-  // NOT — that view carries no product_id, and for a guest the server-side
-  // CAPI Purchase supplies them under this same event_id anyway.
+  // Totals AND `content_ids` both fall back to the public order view for
+  // guests. That view used to carry no product_id, so a guest Purchase — most
+  // COD buyers — reached Meta with no product attribution at all: the catalog
+  // could not be credited, and those shoppers were never cleared out of
+  // "viewed but didn't buy" retargeting audiences. The projection now exposes
+  // the merchant's Meta catalog id where one exists, so these ids join the
+  // product feed rather than being internal UUIDs.
   const fallbackLines: Array<Record<string, unknown>> = Array.isArray(
     purchaseFallback?.line_items,
   )
@@ -88,13 +92,7 @@ export default async function ThankYouPage({
   const orderCurrency =
     (order?.currency as string) || (purchaseFallback?.currency as string);
   const quantityLines = purchaseLines.length ? purchaseLines : fallbackLines;
-  // `content_ids` now falls back to the public order view too. That view had
-  // no product id, so a GUEST Purchase — most COD buyers — carried no product
-  // attribution at all: Meta could neither credit the catalog nor clear those
-  // shoppers out of "viewed but didn't buy" retargeting audiences. The public
-  // projection exposes the merchant's Meta catalog id where one exists, so
-  // these ids join the product feed rather than being internal UUIDs.
-  const contentIds = (purchaseLines.length ? purchaseLines : fallbackLines)
+  const contentIds = quantityLines
     .map((l) => l.product_id)
     .filter((x): x is string => typeof x === "string" && x.length > 0);
 
