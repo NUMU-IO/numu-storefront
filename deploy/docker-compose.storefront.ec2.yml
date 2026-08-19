@@ -80,8 +80,12 @@ services:
       - storefront
     ports:
       - "80:80"
+      # 443 serves Cloudflare-for-SaaS custom hostnames only; *.numueg.app
+      # still arrives on :80 via the zone's Flexible mode.
+      - "443:443"
     volumes:
       - ./nginx/ec2-prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     networks:
       - edge
 

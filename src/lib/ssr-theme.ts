@@ -300,6 +300,20 @@ async function acquireBundle(bundleUrl: string): Promise<BundleRecord | null> {
     try {
       fs.mkdirSync(dir, { recursive: true });
       if (!safeExists(filePath)) fs.writeFileSync(filePath, bytes);
+      // Declare the bundle as ESM. Theme server bundles are ES modules, but
+      // the file lands as `.js`, and Node resolves a `.js` extension by walking
+      // up for the nearest package.json `type` — finding none, it assumes
+      // CommonJS, fails to parse the `import` statements, and the worker dies:
+      //
+      //   [MODULE_TYPELESS_PACKAGE_JSON] ... doesn't parse as CommonJS
+      //
+      // which benched every bundle. A one-line package.json beside the file is
+      // the narrowest fix; renaming to `.mjs` would also work but would break
+      // the checksum-keyed path the manifest and cache agree on.
+      const typeMarker = path.join(dir, "package.json");
+      if (!safeExists(typeMarker)) {
+        fs.writeFileSync(typeMarker, '{"type":"module"}', "utf8");
+      }
     } catch (err) {
       warn("ssr_bundle_write_failed", err);
       return null;
@@ -342,9 +356,10 @@ function spawnWorker(): Worker | null {
   // processes / worker threads / native addons denied by default. Enabled
   // opportunistically: on an older Node the flag would abort the fork, so we
   // only pass it when the running major supports it.
-  if (supportsPermissionModel()) {
+  const permFlag = permissionFlag();
+  if (permFlag) {
     execArgv.push(
-      "--permission",
+      permFlag,
       `--allow-fs-read=${WORKSPACE}${path.sep}*`,
       `--allow-fs-read=${path.join(process.cwd(), "node_modules")}${path.sep}*`,
       `--allow-fs-read=${path.resolve(process.cwd(), "..", "numu-theme-sdk")}${path.sep}*`,
@@ -408,17 +423,30 @@ function spawnWorker(): Worker | null {
   return worker;
 }
 
-function supportsPermissionModel(): boolean {
-  if (process.env.NUMU_SSR_NO_PERMISSION === "1") return false;
+function permissionFlag(): string | null {
+  if (process.env.NUMU_SSR_NO_PERMISSION === "1") return null;
   // Windows is a DEV-ONLY environment here (prod runs Linux on EC2), and the
   // permission model's path allowlisting is unreliable with Windows path
   // separators + junctions — a failed fork there would look like "SSR is
   // broken" when the hardening simply couldn't apply. Skip it on win32 so
   // local verification exercises the real render path; every production host
   // gets the sandbox.
-  if (process.platform === "win32") return false;
+  if (process.platform === "win32") return null;
   const major = Number(process.versions.node.split(".")[0]);
-  return Number.isFinite(major) && major >= 20;
+  if (!Number.isFinite(major)) return null;
+
+  // The flag was RENAMED, not just stabilised: Node 20-22 expose it as
+  // `--experimental-permission`, and `--permission` only exists from 23.
+  //
+  // This gate previously returned true from major >= 20 and then passed
+  // `--permission` regardless, so on the Node 20 image prod actually runs,
+  // every fork died with `node: bad option: --permission`, the bundle was
+  // benched, and the storefront fell back to the client mount. Theme SSR had
+  // therefore never rendered a single page — silently, because the fallback
+  // IS the old behaviour and looks like nothing is wrong.
+  if (major >= 23) return "--permission";
+  if (major >= 20) return "--experimental-permission";
+  return null;
 }
 
 function takeWorker(): Worker | null {
@@ -577,7 +605,9 @@ export function themeSsrStatus(): Record<string, unknown> {
   return {
     enabled: isThemeSsrEnabled(),
     workerScript: workerScriptPath(),
-    permissionModel: supportsPermissionModel(),
+    // The actual flag, not a boolean: knowing WHICH one is the difference
+    // between a working sandbox and a fork that aborts on this Node.
+    permissionModel: permissionFlag(),
     pool: { size: pool.length, max: POOL_SIZE, busy: pool.filter((w) => w.busy).length },
     cachedBundles: bundleCache.size,
     benched: [...breaker.entries()]

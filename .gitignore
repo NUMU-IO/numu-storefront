@@ -33,6 +33,7 @@ next-env.d.ts
 # transient build/start logs
 .next-build.log
 .next-start.log
+deploy/nginx/certs/
 
 # Cygwin/msys crash dumps — never source
 *.stackdump
