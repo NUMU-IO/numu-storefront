@@ -11,6 +11,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ResolvedPromotion } from "@/lib/promo-server";
+import { trackFunnel, getSessionFingerprint } from "@/lib/meta-pixel";
+import { identifyShopper } from "@/lib/meta-identity";
 import {
   postPromo,
   submitPromoForm,
@@ -301,6 +303,19 @@ export function PopupModal({
     });
     setBusy(false);
     setRevealed(out?.discount_code ?? content.discount_code_to_reveal ?? "");
+
+    // An email capture is a Lead, and `lead` has been mapped end-to-end
+    // (browser + CAPI) the whole time with nothing ever emitting it — so the
+    // one moment a shopper voluntarily hands over an email produced no signal
+    // at all. Recording the identity first means this Lead, and every event
+    // after it in the session, carries a hashed `em`.
+    //
+    // `accepts_marketing: true` above is the consent this relies on.
+    identifyShopper({ email }, getSessionFingerprint());
+    trackFunnel("lead", {
+      content_name: promotion.promotion_id,
+      content_category: "promo_popup",
+    });
   };
 
   return (

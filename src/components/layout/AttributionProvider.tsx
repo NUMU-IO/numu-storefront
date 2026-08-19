@@ -1,6 +1,11 @@
 "use client";
 
 /**
+ * `useLayoutEffect` on the client, `useEffect` during SSR — React warns about
+ * layout effects on the server, and there is nothing to lay out there anyway.
+ */
+
+/**
  * AttributionProvider — page-load capture of the numu_attribution cookie.
  *
  * Mounts alongside ThemeDataProvider in app/[domain]/layout.tsx. On
@@ -23,12 +28,22 @@
  * `useAttribution()` (importable directly) over the window bridge.
  */
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   captureAndPersist,
   readCookie,
 } from "@/lib/attribution-client";
 import type { AttributionSnapshot } from "@/lib/attribution-types";
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 const AttributionContext = createContext<AttributionSnapshot | null>(null);
 
@@ -46,7 +61,19 @@ export function AttributionProvider({ children }: { children: ReactNode }) {
     return readCookie();
   });
 
-  useEffect(() => {
+  // useLayoutEffect, not useEffect — and the distinction is load-bearing.
+  //
+  // React runs EVERY layout effect before ANY passive effect, whereas passive
+  // effects run in tree order. <PageViewTracker /> is a PRECEDING sibling of
+  // this provider in [domain]/layout.tsx, so with a passive effect here the
+  // very first event of every session fired BEFORE the attribution cookie
+  // existed: the landing hit of an ad click had no `fbc`, no attribution, and
+  // a session id no other event in that session shared — the one event where
+  // click attribution matters most.
+  //
+  // Reordering the JSX would work too, but it would leave the ordering
+  // dependency implicit and one refactor away from silently returning.
+  useIsomorphicLayoutEffect(() => {
     if (typeof window === "undefined") return;
     const next = captureAndPersist({
       search: window.location.search,

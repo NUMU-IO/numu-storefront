@@ -14,7 +14,7 @@
 
 import { headers } from "next/headers";
 import { resolveByotFork } from "@/lib/byot-fork";
-import { fetchCustomerOrder } from "@/lib/api-client";
+import { fetchCustomerOrder, fetchPublicOrderTracking } from "@/lib/api-client";
 import { notFound } from "next/navigation";
 import { ThankYou } from "./ThankYou";
 import { FunnelTracker } from "@/components/tracking/FunnelTracker";
@@ -47,6 +47,17 @@ export default async function ThankYouPage({
     () => null,
   );
 
+  // Guest fallback for the Purchase event ONLY. The fetch above needs a
+  // customer session, so a guest checkout gets null — and the Purchase then
+  // fired with no `value`, which Meta rejects outright. On a COD store where
+  // most buyers never make an account that was every order. This public view
+  // is PII-sanitised (see fetchPublicOrderTracking) and is used solely for
+  // totals/quantities; it is NOT threaded into the theme ctx or <ThankYou>,
+  // both of which already re-fetch client-side with the buyer's own session.
+  const purchaseFallback = order
+    ? null
+    : await fetchPublicOrderTracking(order_id, domain).catch(() => null);
+
   const fork = await resolveByotFork(domain, {
     type: "checkout_thank_you",
     title: "Order confirmed",
@@ -65,7 +76,26 @@ export default async function ThankYouPage({
     : Array.isArray(order?.items)
       ? order!.items
       : [];
-  const orderTotal = order?.total;
+  // Totals AND `content_ids` both fall back to the public order view for
+  // guests. That view used to carry no product_id, so a guest Purchase — most
+  // COD buyers — reached Meta with no product attribution at all: the catalog
+  // could not be credited, and those shoppers were never cleared out of
+  // "viewed but didn't buy" retargeting audiences. The projection now exposes
+  // the merchant's Meta catalog id where one exists, so these ids join the
+  // product feed rather than being internal UUIDs.
+  const fallbackLines: Array<Record<string, unknown>> = Array.isArray(
+    purchaseFallback?.line_items,
+  )
+    ? (purchaseFallback!.line_items as Array<Record<string, unknown>>)
+    : [];
+  const orderTotal = order?.total ?? purchaseFallback?.total;
+  const orderCurrency =
+    (order?.currency as string) || (purchaseFallback?.currency as string);
+  const quantityLines = purchaseLines.length ? purchaseLines : fallbackLines;
+  const contentIds = quantityLines
+    .map((l) => l.product_id)
+    .filter((x): x is string => typeof x === "string" && x.length > 0);
+
   const purchaseTracker = (
     <FunnelTracker
       step="order_completed"
@@ -73,17 +103,17 @@ export default async function ThankYouPage({
       dedupeKey={`purchase_${order_id}`}
       data={{
         order_id,
-        order_number: order?.order_number || n || undefined,
+        order_number:
+          order?.order_number || purchaseFallback?.order_number || n || undefined,
         value: typeof orderTotal === "number" ? orderTotal / 100 : undefined,
-        currency: (order?.currency as string) || "EGP",
-        content_ids: purchaseLines
-          .map((l) => l.product_id)
-          .filter((x): x is string => typeof x === "string"),
-        content_type: purchaseLines.length ? "product" : undefined,
-        num_items: purchaseLines.reduce(
-          (acc, l) => acc + (Number(l.quantity) || 0),
-          0,
-        ),
+        currency: orderCurrency || "EGP",
+        // Omit rather than send [] — an empty array is a claim that the
+        // purchase contained no products.
+        content_ids: contentIds.length ? contentIds : undefined,
+        content_type: contentIds.length ? "product" : undefined,
+        num_items:
+          quantityLines.reduce((acc, l) => acc + (Number(l.quantity) || 0), 0) ||
+          undefined,
       }}
     />
   );

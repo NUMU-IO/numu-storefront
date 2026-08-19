@@ -228,7 +228,7 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
       visitorPath === "/password" || visitorPath.startsWith("/password/");
     if (!onPasswordRoute) {
       const unlockCookie = cookieStore.get(UNLOCK_COOKIE)?.value;
-      if (!isUnlocked(unlockCookie, protection.password_hash)) {
+      if (!isUnlocked(unlockCookie, store?.id ? String(store.id) : null)) {
         const next = encodeURIComponent(visitorPath || "/");
         redirect(`/password?next=${next}`);
       }

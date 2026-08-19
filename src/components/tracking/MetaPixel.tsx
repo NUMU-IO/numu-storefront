@@ -24,10 +24,13 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import {
   fbqTrack,
+  getEventId,
   pageViewEventId,
+  getSessionFingerprint,
   FUNNEL_STEP_TO_META,
   EVENT_NAME_TO_FUNNEL_STEP,
 } from "@/lib/meta-pixel";
+import { applyAdvancedMatching } from "@/lib/meta-identity";
 
 interface AnalyticsEventDetail {
   event?: string;
@@ -51,6 +54,21 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
     fbqTrack("PageView", {}, pageViewEventId(pathname));
   }, [pathname]);
 
+  // Attach `external_id` (and any identity already learned this page-load) to
+  // the pixels once `getSessionFingerprint()` has resolved. The inline
+  // bootstrap can only read a `numu_sid` cookie that already exists; on a
+  // visitor's very first page it does not, and this covers that case. Runs
+  // after the initial PageView by design — re-initialising is how Meta
+  // attaches Advanced Matching to *subsequent* events, and the earlier event
+  // is upgraded server-side by the identity-enrichment resend instead.
+  useEffect(() => {
+    try {
+      applyAdvancedMatching(getSessionFingerprint());
+    } catch {
+      /* tracking must never break the page */
+    }
+  }, []);
+
   // Bridge theme/SDK events → browser Pixel. The SDK already POSTs the CAPI
   // side from useAnalytics().track(); we add the matching browser event so
   // themes that fire events get full Pixel coverage with no extra wiring.
@@ -61,7 +79,11 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
       const step = EVENT_NAME_TO_FUNNEL_STEP[d.event];
       const metaEvent = step ? FUNNEL_STEP_TO_META[step] : undefined;
       if (!metaEvent) return;
-      fbqTrack(metaEvent, d.payload || {}, d.event_id);
+      // Default the id rather than omitting it. `fbqTrack` passes
+      // `eventID` only when truthy, so a theme dispatching an event without
+      // one produced an fbq fire with NO eventID — inherently undedupable
+      // against its CAPI twin, which Meta then counts twice.
+      fbqTrack(metaEvent, d.payload || {}, d.event_id || getEventId());
     }
     window.addEventListener("numu:analytics:event", onEvt as EventListener);
     return () =>
@@ -73,13 +95,56 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
 
   if (!pixelIds.length) return null;
 
-  const inits = pixelIds.map((id) => `fbq('init','${id}');`).join("");
+  // First-party `_fbc` / `_fbp`, minted BEFORE fbevents.js loads.
+  //
+  // The pixel is client-only (`afterInteractive`), so `_fbp` did not exist
+  // until the script had downloaded and run — while the first /track POST
+  // fired in the same commit. Measured on the live dataset, that produced a
+  // perfect coverage gradient: PageView 63.6% → ViewContent 95% → AddToCart
+  // 100%, i.e. only the landing event was missing the cookie. Meta's own
+  // guidance is to set these server/first-party with a 90-day expiry, and
+  // `fbevents.js` ADOPTS an existing value rather than overwriting it, so
+  // seeding them here is safe and closes the gap at the root.
+  //
+  // `fb.1.` matches what `_synthesize_fbc` sends from the API for a
+  // `*.numueg.app` host, so both legs agree. `fbclid` is used verbatim —
+  // Meta's spec says the click id is case sensitive and must not be modified.
+  const bootstrap =
+    `try{var _d=document,_l=location;` +
+    `var _ck=function(n){var m=_d.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]*)'));return m?m[1]:null};` +
+    `var _sc=function(n,v){_d.cookie=n+'='+v+'; Path=/; Max-Age=7776000; SameSite=Lax'+(_l.protocol==='https:'?'; Secure':'')};` +
+    // Meta's subdomainIndex = number of labels in the public suffix
+    // (`app` → 1, `com.eg` → 2). The regex matches the generic two-label
+    // pattern (`com.eg`, `co.uk`, `com.sa`, `net.au`, …) rather than an
+    // enumerated list, so it cannot drift out of sync the way a hardcoded
+    // table would. Must agree with `subdomain_index_for_host` in the API's
+    // `meta/click_id.py` — the browser cookie WINS over server synthesis
+    // (the proxy fills `body.fbc` from it), so a mismatch here silently
+    // overrides the server's correct value on a custom domain.
+    `var _sfx=_l.hostname.split('.').slice(-2).join('.');` +
+    `var _si=/^(com|net|org|edu|gov|co|ac|me)\\.[a-z]{2}$/.test(_sfx)?2:1;` +
+    `var _cid=new URLSearchParams(_l.search).get('fbclid');` +
+    `if(_cid&&!_ck('_fbc'))_sc('_fbc','fb.'+_si+'.'+Date.now()+'.'+_cid);` +
+    `if(!_ck('_fbp'))_sc('_fbp','fb.'+_si+'.'+Date.now()+'.'+Math.floor(Math.random()*1e10));` +
+    // external_id on the browser leg. Read-only: if `numu_sid` has not been
+    // written yet we send nothing rather than minting a second id, because a
+    // browser id that disagrees with the server's is worse than none. The
+    // effect below covers that case once getSessionFingerprint() has run.
+    `window.__numu_sid=_ck('numu_sid');}catch(e){}`;
+
+  const inits = pixelIds
+    .map(
+      (id) =>
+        `fbq('init','${id}',window.__numu_sid?{external_id:decodeURIComponent(window.__numu_sid)}:undefined);`,
+    )
+    .join("");
   const snippet =
     `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?` +
     `n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;` +
     `n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;` +
     `t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}` +
     `(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');` +
+    bootstrap +
     // Mint the initial PageView's event_id and seed window.__numu_pv so
     // <PageViewTracker>'s first-party /track POST reuses the SAME id
     // (pageViewEventId) — that's what lets CAPI dedupe the initial PageView.
@@ -90,6 +155,11 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
 
   return (
     <>
+      {/* The pixel is fetched cross-origin after hydration; opening the
+          connection early shortens the window in which `_fbp` does not yet
+          exist and trims the landing-event latency. */}
+      <link rel="preconnect" href="https://connect.facebook.net" />
+      <link rel="dns-prefetch" href="https://connect.facebook.net" />
       <Script
         id="numu-meta-pixel"
         strategy="afterInteractive"

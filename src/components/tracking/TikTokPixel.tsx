@@ -26,7 +26,7 @@ import {
   FUNNEL_STEP_TO_TIKTOK,
   ensureTtclidCaptured,
 } from "@/lib/tiktok-pixel";
-import { EVENT_NAME_TO_FUNNEL_STEP } from "@/lib/meta-pixel";
+import { EVENT_NAME_TO_FUNNEL_STEP, getEventId } from "@/lib/meta-pixel";
 
 interface AnalyticsEventDetail {
   event?: string;
@@ -72,7 +72,9 @@ export function TikTokPixel({ pixelIds }: { pixelIds: string[] }) {
       const step = EVENT_NAME_TO_FUNNEL_STEP[d.event];
       const tiktokEvent = step ? FUNNEL_STEP_TO_TIKTOK[step] : undefined;
       if (!tiktokEvent) return;
-      ttqTrack(tiktokEvent, d.payload || {}, d.event_id);
+      // Same defaulting as the Meta bridge — an event with no id cannot
+      // dedupe against its server-side twin.
+      ttqTrack(tiktokEvent, d.payload || {}, d.event_id || getEventId());
     }
     window.addEventListener("numu:analytics:event", onEvt as EventListener);
     return () =>

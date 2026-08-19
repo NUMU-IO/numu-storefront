@@ -35,7 +35,11 @@ import {
 } from "@/lib/checkout-state";
 import { EG_GOVERNORATES, governorateLabel } from "@/lib/eg-governorates";
 import { trackCartState } from "@/lib/abandoned-cart";
-import { refireFunnelWithIdentity } from "@/lib/meta-pixel";
+import {
+  refireFunnelWithIdentity,
+  getSessionFingerprint,
+} from "@/lib/meta-pixel";
+import { identifyShopper } from "@/lib/meta-identity";
 
 const COUNTRIES = [
   ["EG", "Egypt", "مصر"],
@@ -324,6 +328,30 @@ export function ContactStep() {
       // conversion count) while picking up the new match keys.
       refireFunnelWithIdentity("checkout_started");
     });
+
+    // This is the moment the shopper stops being anonymous, and until now
+    // nothing downstream was told. Recording it here does two things:
+    //   1. attaches Meta Advanced Matching (and TikTok identify) to every
+    //      subsequent browser event — the browser leg previously carried no
+    //      customer information at all, on any event, for any store;
+    //   2. puts `user_data` on every following /track POST, including the
+    //      re-fire above, so the CAPI leg no longer depends solely on the
+    //      backend's abandoned-checkout lookup to learn who this is.
+    // Identity lives in a module closure for the life of the document — never
+    // in localStorage, which BYOT theme bundles on this origin could read.
+    identifyShopper(
+      {
+        email,
+        phone: phone || undefined,
+        firstName,
+        lastName,
+        city,
+        state: state || undefined,
+        zip: postalCode || undefined,
+        country,
+      },
+      getSessionFingerprint(),
+    );
 
     patchCheckoutState({
       email,

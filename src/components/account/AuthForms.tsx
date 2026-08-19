@@ -15,6 +15,8 @@
  */
 
 import { useState } from "react";
+import { trackFunnel, getSessionFingerprint } from "@/lib/meta-pixel";
+import { identifyShopper } from "@/lib/meta-identity";
 
 const inputCls =
   "block w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black";
@@ -157,6 +159,18 @@ export function RegisterForm({ redirectTo = "/account" }: { redirectTo?: string 
     });
     setBusy(false);
     if (r.ok) {
+      // `complete_registration` is mapped end-to-end (browser + CAPI) and had
+      // no emitter, so account creation — a high-intent, fully-identified
+      // moment Meta builds lookalikes from — produced no signal.
+      //
+      // Fire BEFORE the navigation below: `trackFunnel` posts with
+      // `keepalive`, but the browser pixel has no such guarantee, so ordering
+      // is what gives it a chance to leave.
+      identifyShopper(
+        { email, phone: phone || undefined, firstName, lastName },
+        getSessionFingerprint(),
+      );
+      trackFunnel("complete_registration", { content_name: "account" });
       window.location.href = redirectTo;
       return;
     }
