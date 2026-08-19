@@ -32,6 +32,7 @@
 import { NextRequest } from "next/server";
 import { fetchStoreByDomain } from "@/lib/api-client";
 import {
+  canonicalOriginFor,
   resolveStoreDomainFromHeaders,
   storeBlocksIndexing,
   type StoreForSeo,
@@ -81,7 +82,6 @@ function textResponse(body: string): Response {
 
 export async function GET(req: NextRequest): Promise<Response> {
   const domain = resolveStoreDomainFromHeaders(req.headers);
-  const platformDomain = process.env.NUMU_PLATFORM_DOMAIN || "numueg.app";
   const isProd = process.env.NEXT_PUBLIC_NUMU_ENV === "production";
 
   // No resolvable store: emit a permissive default rather than throwing. A 500
@@ -94,10 +94,6 @@ export async function GET(req: NextRequest): Promise<Response> {
       ),
     );
   }
-
-  const sitemapUrl = isProd
-    ? `https://${domain}.${platformDomain}/sitemap.xml`
-    : `http://${(req.headers.get("host") || "localhost:3100").trim()}/sitemap.xml`;
 
   // Indexing gate: a suspended / inactive / pending store, or a merchant who
   // turned indexing off, must not be crawlable. A failed lookup is treated as
@@ -116,6 +112,22 @@ export async function GET(req: NextRequest): Promise<Response> {
       ["User-Agent: *", "Disallow: /", "", `Host: ${domain}`, ""].join("\n"),
     );
   }
+
+  // Built AFTER the store is fetched, and via canonicalOriginFor, because a
+  // custom domain is already a complete host. The previous form appended the
+  // platform domain unconditionally:
+  //
+  //     `https://${domain}.${platformDomain}/sitemap.xml`
+  //
+  // which is right for a subdomain store (`vionne` -> vionne.numueg.app) and
+  // produced `https://vionneeg.com.numueg.app/sitemap.xml` for the first
+  // merchant to connect their own domain — a host that does not resolve, so
+  // the sitemap was undiscoverable on exactly the domain meant to rank.
+  // canonicalOriginFor also refuses a custom domain whose status is not active,
+  // so an unverified hostname can never leak into robots.txt.
+  const sitemapUrl = isProd
+    ? `${canonicalOriginFor(store, domain)}/sitemap.xml`
+    : `http://${(req.headers.get("host") || "localhost:3100").trim()}/sitemap.xml`;
 
   return textResponse(
     [
