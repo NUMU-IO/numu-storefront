@@ -60,6 +60,25 @@ wait_until_healthy() {
 export NUMU_STOREFRONT_IMAGE
 log "Image=${NUMU_STOREFRONT_IMAGE}"
 
+# nginx now has a `listen 443 ssl` block for Cloudflare-for-SaaS custom
+# hostnames, and nginx REFUSES TO START if ssl_certificate is missing — which
+# would take down :80 for every storefront, an outage far worse than the one
+# 443 exists to prevent. So guarantee a certificate before recreating.
+#
+# The real cert is a Cloudflare Origin CA cert placed on the box once (it holds
+# a private key, so it is deliberately not in git). If it is absent — a fresh
+# box, a wiped directory — fall back to a self-signed pair so nginx still binds
+# 443 and :80 keeps serving. Cloudflare's Full mode accepts a self-signed origin
+# cert, so custom domains keep working too; only Full (strict) would object.
+CERT_DIR="deploy/nginx/certs"
+if [[ ! -s "${CERT_DIR}/origin.pem" || ! -s "${CERT_DIR}/origin.key" ]]; then
+    log "No origin certificate found — generating a self-signed fallback so nginx can bind :443"
+    mkdir -p "${CERT_DIR}"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650         -keyout "${CERT_DIR}/origin.key" -out "${CERT_DIR}/origin.pem"         -subj "/CN=numueg.app/O=NUMU self-signed fallback"         -addext "subjectAltName=DNS:numueg.app,DNS:*.numueg.app" >/dev/null 2>&1         || die "could not generate a fallback certificate (is openssl installed?)"
+    chmod 600 "${CERT_DIR}/origin.key"
+    log "Self-signed fallback written. Replace with a Cloudflare Origin CA cert for Full (strict)."
+fi
+
 log "Pulling storefront image..."
 docker pull "${NUMU_STOREFRONT_IMAGE}"
 
