@@ -17,7 +17,11 @@ import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { themeOwnsCheckout } from "@/lib/byot-fork";
 import type { CSSProperties } from "react";
-import { resolveBrandTokens, brandVarsToCss } from "@/lib/brand-tokens";
+import {
+  resolveBrandTokens,
+  brandVarsToCss,
+  brandFontHref,
+} from "@/lib/brand-tokens";
 import { CheckoutTrustBadges } from "@/components/checkout/CheckoutTrustBadges";
 import { SuspendExternalThemeCss } from "@/components/checkout/SuspendExternalThemeCss";
 import { NOINDEX_ROBOTS } from "@/lib/seo";
@@ -62,6 +66,7 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
       ).global_settings as Record<string, unknown> | undefined)
     : undefined;
   const brandVars = resolveBrandTokens(brandGlobals);
+  const fontHref = brandFontHref(brandGlobals);
 
   const hdrs = await headers();
   const locale =
@@ -105,6 +110,17 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
       {/* Mirror the tokens onto :root so React portals (the map-picker dialog,
           rendered into document.body) inherit the same brand palette. Scoped
           to the checkout route — unmounts when the visitor leaves checkout. */}
+      {/* The store's own typeface. `SuspendExternalThemeCss` deliberately
+          drops the theme's stylesheet here so a bundle cannot restyle the
+          payment form — but that also drops its webfonts, and the tokens
+          below name families the browser would otherwise never fetch. */}
+      {fontHref && (
+        <>
+          <link rel="preconnect" href="https://fonts.googleapis.com" />
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+          <link rel="stylesheet" href={fontHref} />
+        </>
+      )}
       <style
         dangerouslySetInnerHTML={{ __html: brandVarsToCss(brandVars) }}
       />
