@@ -12,6 +12,7 @@ import {
   Select,
   TextInput,
 } from "@/components/checkout/ui";
+import { PaymentMark } from "@/components/checkout/PaymentMark";
 import {
   hasShippingStep,
   patchCheckoutState,
@@ -331,7 +332,7 @@ export function PaymentStep() {
       <StepIndicator current="payment" locale={locale} />
       <form onSubmit={submit} className="space-y-5">
         <CheckoutCard title={t("payment")}>
-          {loading && <p className="text-sm text-gray-500">{t("loading")}</p>}
+          {loading && <p className="text-sm text-[var(--ck-muted)]">{t("loading")}</p>}
           {!loading && methods.length === 0 && (
             <p className="text-sm text-red-700">{t("none")}</p>
           )}
@@ -349,9 +350,14 @@ export function PaymentStep() {
                       name="payment"
                       checked={method === m.code}
                       onChange={() => setMethod(m.code)}
-                      className="h-4 w-4 accent-gray-900"
+                      className="sr-only"
                     />
-                    <span className="font-medium text-gray-900">
+                    <PaymentMark
+                      code={m.code}
+                      label={typeof m === "object" ? m.label : undefined}
+                      isAr={isAr}
+                    />
+                    <span className="flex-1 font-medium text-[var(--ck-fg)]">
                       {methodLabel(m, isAr)}
                     </span>
                   </OptionRow>
@@ -371,9 +377,9 @@ export function PaymentStep() {
                     name="saved-card"
                     checked={savedCardId === null}
                     onChange={() => setSavedCardId(null)}
-                    className="h-4 w-4 accent-gray-900"
+                    className="h-4 w-4 accent-[var(--ck-accent)]"
                   />
-                  <span className="text-sm text-gray-900">{t("newCard")}</span>
+                  <span className="text-sm text-[var(--ck-fg)]">{t("newCard")}</span>
                 </OptionRow>
               </li>
               {savedCardsForMethod.map((c) => (
@@ -384,9 +390,9 @@ export function PaymentStep() {
                       name="saved-card"
                       checked={savedCardId === c.id}
                       onChange={() => setSavedCardId(c.id)}
-                      className="h-4 w-4 accent-gray-900"
+                      className="h-4 w-4 accent-[var(--ck-accent)]"
                     />
-                    <span className="text-sm text-gray-900">
+                    <span className="text-sm text-[var(--ck-fg)]">
                       {c.display_name ||
                         `${c.card_brand || "Card"} •••• ${c.last_four || "????"}`}
                     </span>
@@ -569,7 +575,7 @@ function GiftCardSection({ locale }: { locale: string }) {
               <button
                 type="button"
                 onClick={() => remove(a.code)}
-                className="text-xs text-gray-500 hover:text-red-700"
+                className="text-xs text-[var(--ck-muted)] hover:text-red-700"
                 aria-label={`${g("remove")} ${a.last_four}`}
               >
                 {g("remove")}
