@@ -25,6 +25,7 @@ import {
   Textarea,
   TextInput,
 } from "@/components/checkout/ui";
+import { PaymentMark } from "@/components/checkout/PaymentMark";
 import {
   LocationButton,
   LocationDialog,
@@ -238,29 +239,31 @@ const T = {
 } as const;
 
 // ── Inline icons (numu-storefront ships no icon library) ───────────
-function PayIcon({ code }: { code: string }) {
-  // Cash banknote for COD; a generic card for every online method.
-  if (code === "cod" || code === "fawry") {
-    return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-[var(--ck-fg)]">
-        <rect x="2" y="6" width="20" height="12" rx="2" />
-        <circle cx="12" cy="12" r="2.5" />
-        <path d="M6 12h.01M18 12h.01" />
-      </svg>
-    );
-  }
+/**
+ * The chosen-row marker. A filled disc rather than a bare tick: at a glance
+ * down a list, a solid shape reads as "this one" from further away than a
+ * hairline check, and it echoes the radio the row is standing in for.
+ */
+function SelectedDot() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-[var(--ck-fg)]">
-      <rect x="2" y="5" width="20" height="14" rx="2" />
-      <path d="M2 10h20" />
-    </svg>
+    <span
+      aria-hidden
+      className="ck-selected-dot grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--ck-accent)]"
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--ck-accent-text)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    </span>
   );
 }
-function CheckIcon() {
+
+/** Empty counterpart, so every row has a marker slot and nothing shifts. */
+function UnselectedDot() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-[var(--ck-accent)]">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
+    <span
+      aria-hidden
+      className="h-5 w-5 shrink-0 rounded-full border-[1.5px] border-[var(--ck-frame)]"
+    />
   );
 }
 
@@ -1019,10 +1022,10 @@ export function CheckoutPage() {
   if (pixelData) {
     return (
       <div className="mx-auto max-w-lg py-6">
-        <h2 className="mb-1 text-lg font-bold text-gray-900">
+        <h2 className="mb-1 text-lg font-bold text-[var(--ck-fg)]">
           {isAr ? "إتمام الدفع" : "Complete payment"}
         </h2>
-        <p className="mb-4 text-sm text-gray-500">
+        <p className="mb-4 text-sm text-[var(--ck-muted)]">
           {isAr ? "طلب رقم" : "Order"} #{pixelData.orderNumber}
         </p>
         <PaymobPixel
@@ -1141,7 +1144,7 @@ export function CheckoutPage() {
               )}
             </PrimaryButton>
             {codBlocked && (
-              <p className="mt-2 text-center text-xs text-gray-500">
+              <p className="mt-2 text-center text-xs text-[var(--ck-muted)]">
                 {isAr ? "اختر الدفع الأونلاين بالأعلى." : "Choose an online payment method above."}
               </p>
             )}
@@ -1389,9 +1392,9 @@ export function CheckoutPage() {
                 checked={whatsappConsent}
                 disabled={!phone}
                 onChange={(e) => setWhatsappConsent(e.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-gray-900"
+                className="mt-0.5 h-4 w-4 accent-[var(--ck-accent)]"
               />
-              <span className="text-xs leading-snug text-gray-500">{t("waConsent")}</span>
+              <span className="text-xs leading-snug text-[var(--ck-muted)]">{t("waConsent")}</span>
             </label>
           </CheckoutCard>
 
@@ -1418,7 +1421,7 @@ export function CheckoutPage() {
           {/* Shipping method */}
           {governorate && (
             <CheckoutCard title={t("shipping")}>
-              {shippingLoading && <p className="text-sm text-gray-500">{t("loadingShip")}</p>}
+              {shippingLoading && <p className="text-sm text-[var(--ck-muted)]">{t("loadingShip")}</p>}
               {!shippingLoading && rates && rates.length === 0 && (
                 <p className="text-sm text-red-700">{t("noRates")}</p>
               )}
@@ -1433,19 +1436,35 @@ export function CheckoutPage() {
                           name="rate"
                           checked={selectedRate === r.id}
                           onChange={() => setSelectedRate(r.id)}
-                          className="h-4 w-4 accent-gray-900"
+                          className="sr-only"
                         />
                         <span className="flex-1">
-                          <span className="block font-medium text-gray-900">{r.name}</span>
+                          <span className="block font-medium text-[var(--ck-fg)]">{r.name}</span>
                           {(r.estimated_days_min || r.estimated_days_max) && (
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-[var(--ck-muted)]">
                               {r.estimated_days_min ?? "?"}–{r.estimated_days_max ?? "?"} {t("days")}
                             </span>
                           )}
                         </span>
-                        <span className="font-medium text-gray-900">
-                          {r.amount_cents === 0 ? t("free") : formatCents(r.amount_cents, r.currency)}
+                        <span className="font-medium text-[var(--ck-fg)]">
+                          {r.amount_cents === 0 ? (
+                            // A filled chip, not accent-coloured text. Vionne's
+                            // gold is 1.99:1 as text on the row tint — pretty
+                            // and unreadable. As a fill it carries
+                            // `--ck-accent-text`, which the token layer already
+                            // picked for contrast (9.2:1 here), and free
+                            // shipping gets to look like the small win it is.
+                            <span className="inline-block rounded-full bg-[var(--ck-accent)] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-[var(--ck-accent-text)]">
+                              {t("free")}
+                            </span>
+                          ) : (
+                            formatCents(r.amount_cents, r.currency)
+                          )}
                         </span>
+                        {/* Marker last, matching the payment rows. A selection
+                            marker that moves side between two adjacent lists
+                            makes the shopper re-learn the control mid-flow. */}
+                        {selectedRate === r.id ? <SelectedDot /> : <UnselectedDot />}
                       </OptionRow>
                     </li>
                   ))}
@@ -1456,7 +1475,7 @@ export function CheckoutPage() {
 
           {/* Payment method */}
           <CheckoutCard title={t("payment")}>
-            {!payConfig && <p className="text-sm text-gray-500">{t("loadingPay")}</p>}
+            {!payConfig && <p className="text-sm text-[var(--ck-muted)]">{t("loadingPay")}</p>}
             {payConfig && payMethods.length === 0 && (
               <p className="text-sm text-red-700">{t("noPay")}</p>
             )}
@@ -1473,18 +1492,22 @@ export function CheckoutPage() {
                         onChange={() => setMethod(m.code)}
                         className="sr-only"
                       />
-                      <PayIcon code={m.code} />
+                      <PaymentMark
+                        code={m.code}
+                        label={typeof m === "object" ? m.label : undefined}
+                        isAr={isAr}
+                      />
                       <span className="flex-1">
-                        <span className="block font-medium text-gray-900">
+                        <span className="block font-medium text-[var(--ck-fg)]">
                           {methodLabel(m, isAr)}
                         </span>
                         {methodSubLabel(m.code, isAr) && (
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-[var(--ck-muted)]">
                             {methodSubLabel(m.code, isAr)}
                           </span>
                         )}
                       </span>
-                      {method === m.code && <CheckIcon />}
+                      {method === m.code ? <SelectedDot /> : <UnselectedDot />}
                     </OptionRow>
                   </li>
                 ))}
@@ -1513,7 +1536,7 @@ export function CheckoutPage() {
 
             {savedForMethod.length > 0 && (
               <div className="mt-4 border-t border-[var(--ck-border)] pt-4">
-                <p className="mb-2 text-xs font-medium text-gray-500">{t("savedCards")}</p>
+                <p className="mb-2 text-xs font-medium text-[var(--ck-muted)]">{t("savedCards")}</p>
                 <ul className="space-y-2.5">
                   <li>
                     <OptionRow selected={savedCardId === null}>
@@ -1522,9 +1545,9 @@ export function CheckoutPage() {
                         name="saved-card"
                         checked={savedCardId === null}
                         onChange={() => setSavedCardId(null)}
-                        className="h-4 w-4 accent-gray-900"
+                        className="h-4 w-4 accent-[var(--ck-accent)]"
                       />
-                      <span className="text-sm text-gray-900">{t("newCard")}</span>
+                      <span className="text-sm text-[var(--ck-fg)]">{t("newCard")}</span>
                     </OptionRow>
                   </li>
                   {savedForMethod.map((c) => (
@@ -1535,9 +1558,9 @@ export function CheckoutPage() {
                           name="saved-card"
                           checked={savedCardId === c.id}
                           onChange={() => setSavedCardId(c.id)}
-                          className="h-4 w-4 accent-gray-900"
+                          className="h-4 w-4 accent-[var(--ck-accent)]"
                         />
-                        <span className="text-sm text-gray-900">
+                        <span className="text-sm text-[var(--ck-fg)]">
                           {c.display_name ||
                             `${c.card_brand || "Card"} •••• ${c.last_four || "????"}`}
                         </span>
@@ -1620,9 +1643,9 @@ function CustomFieldInput({
             type="checkbox"
             checked={value === true}
             onChange={(e) => onChange(e.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-gray-900"
+            className="mt-0.5 h-4 w-4 accent-[var(--ck-accent)]"
           />
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-[var(--ck-fg)]">
             {label}
             {field.required ? " *" : ""}
           </span>

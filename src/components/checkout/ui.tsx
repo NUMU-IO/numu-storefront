@@ -224,11 +224,20 @@ export function OptionRow({
   return (
     <label
       htmlFor={htmlFor}
+      data-selected={selected ? "true" : undefined}
       className={cn(
-        "flex cursor-pointer items-center gap-3 rounded-[var(--ck-radius-sm)] border-[length:var(--ck-frame-width)] p-3.5 transition-colors",
+        "ck-option relative flex cursor-pointer items-center gap-3.5 rounded-[var(--ck-radius-sm)]",
+        "border-[length:var(--ck-frame-width)] p-3.5",
+        // 160ms: fast enough to feel like a direct response to the tap, slow
+        // enough to be seen. Colors and border only — nothing that reflows.
+        "transition-[background-color,border-color,box-shadow] duration-160 ease-out",
         selected
           ? "border-[var(--ck-accent)] bg-[var(--ck-accent-tint)]"
-          : "border-[var(--ck-frame)] hover:border-[var(--ck-accent)]",
+          : "border-[var(--ck-frame)] hover:border-[var(--ck-accent-line)] hover:bg-[var(--ck-surface-2)]",
+        // The radio inside is `sr-only`, so without this a keyboard user tabs
+        // through the payment choice with no visible focus at all — the row
+        // they are about to select looks identical to every other row.
+        "focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--ck-ring)]",
         className,
       )}
     >
