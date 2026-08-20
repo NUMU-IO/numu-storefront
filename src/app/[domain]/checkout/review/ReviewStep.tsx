@@ -24,6 +24,7 @@ import { PaymobPixel } from "@/components/checkout/PaymobPixel";
 import { KashierCheckout } from "@/components/checkout/KashierCheckout";
 import {
   ManualTransferInstructions,
+  manualResumePath,
   type ManualTransferPayload,
 } from "@/components/checkout/ManualTransferInstructions";
 import type { CheckoutResponse } from "@/types/checkout";
@@ -375,8 +376,15 @@ export function ReviewStep() {
         locale={locale}
         onContinue={() => {
           clearCheckoutState();
+          // The upload step, NOT thank-you: the merchant needs the
+          // receipt, and this is the only screen that asks for it.
           router.replace(
-            `/${params.domain}/checkout/${instapayData.orderId}/thank-you?n=${encodeURIComponent(instapayData.orderNumber)}`,
+            manualResumePath(
+              params.domain as string,
+              instapayData.data.provider,
+              instapayData.orderId,
+              instapayData.data.reference_code,
+            ),
           );
         }}
       />

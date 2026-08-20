@@ -89,6 +89,24 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   );
 }
 
+/**
+ * Where a buyer goes to upload their receipt.
+ *
+ * Hyphenated segments, matching the storefront routes and the `?ref=`
+ * links the backend puts in confirmation emails. The reference code is
+ * what authorizes the page — without it a guest gets the "type your
+ * reference" gate instead of their order.
+ */
+export function manualResumePath(
+  domain: string,
+  provider: ManualTransferPayload["provider"],
+  orderId: string,
+  referenceCode: string,
+): string {
+  const segment = provider === "vodafone_cash" ? "vodafone-cash" : "instapay";
+  return `/${domain}/${segment}/${orderId}?ref=${encodeURIComponent(referenceCode)}`;
+}
+
 /** Per-rail copy + presentation. Everything that differs lives here. */
 function railCopy(provider: ManualTransferPayload["provider"], isAr: boolean) {
   if (provider === "vodafone_cash") {
@@ -228,7 +246,7 @@ export function ManualTransferInstructions({
       ? "بعد التحويل سنؤكد الدفع ونجهّز طلبك. احتفظ بالرقم المرجعي."
       : "After you transfer, we'll confirm payment and process your order. Keep the reference.",
     fallback: isAr ? "للمساعدة اتصل/واتساب" : "Need help? Call / WhatsApp",
-    done: isAr ? "لقد حوّلت — متابعة" : "I've paid — continue",
+    done: isAr ? "لقد حوّلت — أرفق الإيصال" : "I've paid — upload receipt",
     depositNote: isAr ? "هذا عربون؛ الباقي عند الاستلام" : "This is a deposit; balance due on delivery",
   };
 
