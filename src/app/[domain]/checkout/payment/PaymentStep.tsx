@@ -131,6 +131,7 @@ function methodLabel(opt: MethodOption | string, isAr: boolean): string {
     fawry: ["Fawry", "فوري"],
     fawaterak: ["Fawaterak", "فواتيرك"],
     instapay: ["InstaPay", "إنستاباي"],
+    vodafone_cash: ["Vodafone Cash", "فودافون كاش"],
     cod: ["Cash on Delivery", "الدفع عند الاستلام"],
   };
   const entry = labels[code];
