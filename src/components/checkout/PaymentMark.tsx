@@ -8,14 +8,20 @@
  * interface refuses to help with, at the exact step where hesitation costs the
  * order.
  *
- * These are **brand-coloured wordmarks**, not official logo files. That is a
- * deliberate call: shipping third-party logo assets means honouring each
- * brand's usage rules (clear space, no recolouring, no distortion) and keeping
- * them updated, and Vodafone in particular is strict. Wordmarks in the correct
- * brand colour carry the recognition — which is what the shopper is scanning
- * for — at a fraction of the risk, with no extra network request and no raster
- * asset to go stale. Swapping in official SVGs later means editing this one
- * file.
+ * Marks with an official asset in `public/` render that file; the rest are
+ * brand-coloured wordmarks drawn inline.
+ *
+ * The wordmarks were a stand-in from when nothing was bundled, and they are
+ * still the right answer for three cases:
+ *   • **cards** — the shopper recognises Visa/Mastercard, the schemes in their
+ *     wallet, not "Paymob" or "Kashier". An acquirer logo would mean nothing.
+ *   • **Apple Pay** — the glyph below IS the Apple mark, drawn rather than
+ *     fetched.
+ *   • **COD / bank transfer / Fawaterak** — no official file in the repo.
+ *
+ * Logos are rendered inside the same tile at `object-contain` with clear
+ * space, never recoloured or stretched, which is what the brand guidelines
+ * (Vodafone's in particular) actually require.
  *
  * Every mark renders into the same 40×26 tile so the rows align down a common
  * edge no matter which methods a store has enabled.
@@ -80,6 +86,37 @@ function Tile({
   );
 }
 
+/**
+ * A real brand asset inside the same 40×26 box as the drawn tiles.
+ *
+ * A plain <img>, not an <svg><image>: it keeps the intrinsic aspect ratio,
+ * lets the browser cache and decode it normally, and `object-contain` in a
+ * padded box is exactly the "clear space, no distortion" the guidelines ask
+ * for. Marked presentational — the row's own text already names the method,
+ * so announcing the brand again would be duplicate noise for a screen reader.
+ */
+function LogoTile({ src, bare = false }: { src: string; bare?: boolean }) {
+  return (
+    <span
+      className={
+        "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[3px]" +
+        (bare ? "" : " border border-black/[0.14] bg-white")
+      }
+      style={{ width: W, height: H }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        aria-hidden="true"
+        className="h-full w-full object-contain p-[3px]"
+        loading="lazy"
+        decoding="async"
+      />
+    </span>
+  );
+}
+
 /** Centred wordmark inside the tile. */
 function Word({
   text,
@@ -125,32 +162,17 @@ export function PaymentMark({
 }) {
   switch (markKey(code, label)) {
     case "instapay":
-      // InstaPay's identity is its violet; the italic cut reads as the mark
-      // even at 40px.
-      return (
-        <Tile>
-          <Word text="InstaPay" fill="#63297B" size={7.6} weight={800} italic />
-        </Tile>
-      );
+      return <LogoTile src="/instapay-logo.svg" />;
 
     case "vodafone":
-      return (
-        <Tile fill="#E60000" stroke="transparent">
-          <Word
-            text={isAr ? "فودافون كاش" : "Vodafone"}
-            fill="#ffffff"
-            size={isAr ? 6.6 : 7.4}
-            weight={700}
-          />
-        </Tile>
-      );
+      // The speech mark alone, not the full lockup: at 40×26 the "vodafone"
+      // wordmark in the lockup is ~2px tall and unreadable, while the red O
+      // is recognised instantly.
+      return <LogoTile src="/vodafone-mark.png" />;
 
     case "fawry":
-      return (
-        <Tile fill="#FFCC00" stroke="transparent">
-          <Word text={isAr ? "فوري" : "fawry"} fill="#0B2C5E" size={8.4} weight={800} />
-        </Tile>
-      );
+      // The asset carries its own yellow field, so no tile chrome behind it.
+      return <LogoTile src="/fawry-logo.webp" bare />;
 
     case "fawaterak":
       return (
