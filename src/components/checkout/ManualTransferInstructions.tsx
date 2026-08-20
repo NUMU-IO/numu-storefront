@@ -95,6 +95,10 @@ function railCopy(provider: ManualTransferPayload["provider"], isAr: boolean) {
     return {
       brand: "Vodafone Cash",
       brandAr: "فودافون كاش",
+      // The official lockup. Wide (2.6:1), so it needs more height than
+      // InstaPay's mark before the "vodafone" wordmark stops being legible.
+      logo: "/vodafone-cash-logo.png",
+      logoClass: "h-10",
       title: isAr ? "أكمل الدفع عبر فودافون كاش" : "Complete your Vodafone Cash payment",
       toDestination: isAr
         ? "إلى رقم محفظة فودافون كاش"
@@ -115,6 +119,8 @@ function railCopy(provider: ManualTransferPayload["provider"], isAr: boolean) {
   return {
     brand: "InstaPay",
     brandAr: "إنستاباي",
+    logo: "/instapay-logo.svg",
+    logoClass: "h-8",
     title: isAr ? "أكمل الدفع عبر إنستاباي" : "Complete your InstaPay payment",
     toDestination: isAr
       ? "إلى عنوان إنستاباي (IPA)"
@@ -229,20 +235,12 @@ export function ManualTransferInstructions({
   return (
     <div className="mx-auto max-w-lg">
       <div className="mb-4 text-center">
-        {provider === "instapay" ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src="/instapay-logo.svg"
-            alt="InstaPay"
-            className="mx-auto mb-3 h-8 w-auto"
-          />
-        ) : (
-          // No bundled Vodafone mark — a wordmark in Vodafone red reads
-          // as the brand without shipping a trademarked asset.
-          <p className="mb-3 text-lg font-extrabold tracking-tight text-[#e60000]">
-            {isAr ? rail.brandAr : rail.brand}
-          </p>
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={rail.logo}
+          alt={rail.brand}
+          className={`mx-auto mb-3 w-auto ${rail.logoClass}`}
+        />
         <h2 className="text-lg font-bold text-[var(--ck-fg)]">{rail.title}</h2>
         {orderNumber ? (
           <p className="mt-1 text-sm text-[var(--ck-muted)]">
