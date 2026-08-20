@@ -91,6 +91,14 @@ const T = {
     en: "We couldn't find this payment. Check the link in your email.",
     ar: "تعذّر العثور على هذه الدفعة. راجع الرابط في بريدك الإلكتروني.",
   },
+  // Deliberately NOT "we couldn't find it". If the buyer has already
+  // transferred, telling them the payment doesn't exist is alarming and,
+  // when the cause is a 502, untrue.
+  unreachable: {
+    en: "We couldn't load your payment just now. Your transfer is safe — try again in a moment.",
+    ar: "تعذّر تحميل بيانات الدفع الآن. تحويلك في أمان — حاول مرة أخرى بعد قليل.",
+  },
+  retry: { en: "Try again", ar: "حاول مرة أخرى" },
   needRef: {
     en: "Enter your payment reference",
     ar: "أدخل الرقم المرجعي للدفع",
@@ -199,6 +207,18 @@ const POLL_INTERVAL_MS = 15_000;
 const POLL_MAX_MS = 15 * 60_000;
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+type LoadOutcome = "ok" | "forbidden" | "missing" | "unreachable";
+
+/**
+ * Silent retries before the buyer is shown anything is wrong.
+ *
+ * The common cause of a transient failure here is a cold start or a deploy
+ * rolling — both resolve in a couple of seconds, well inside the time it
+ * takes someone to read the page.
+ */
+const LOAD_RETRIES = 2;
+const LOAD_RETRY_DELAY_MS = 1200;
+
 /**
  * A random idempotency key that works outside a secure context.
  *
@@ -268,6 +288,10 @@ export function ManualPaymentResume({
   const [view, setView] = useState<StatusView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(initialReference));
+  // Only set for the transient kind — there is nothing to retry about a
+  // payment that genuinely isn't there.
+  const [canRetry, setCanRetry] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -289,19 +313,23 @@ export function ManualPaymentResume({
   }, []);
 
   const load = useCallback(
-    async (ref: string): Promise<"ok" | "forbidden" | "error"> => {
+    async (ref: string): Promise<LoadOutcome> => {
       try {
         const res = await fetch(
           `/api/payment-proof/${encodeURIComponent(orderId)}?ref=${encodeURIComponent(ref)}`,
           { cache: "no-store" },
         );
         if (res.status === 403) return "forbidden";
-        if (!res.ok) return "error";
+        // 404 is the only status that means "this payment is not a thing".
+        // A 5xx, a proxy timeout or a dropped connection mean the opposite:
+        // it exists, we just couldn't read it.
+        if (res.status === 404) return "missing";
+        if (!res.ok) return "unreachable";
         const body = await res.json();
         setView((body?.data || body) as StatusView);
         return "ok";
       } catch {
-        return "error";
+        return "unreachable";
       }
     },
     [orderId],
@@ -313,7 +341,14 @@ export function ManualPaymentResume({
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const outcome = await load(reference);
+      let outcome = await load(reference);
+      // Only the transient kind is worth retrying: a 403 or a 404 will say
+      // the same thing however many times we ask.
+      for (let i = 0; i < LOAD_RETRIES && outcome === "unreachable"; i++) {
+        await new Promise((r) => setTimeout(r, LOAD_RETRY_DELAY_MS));
+        if (cancelled) return;
+        outcome = await load(reference);
+      }
       if (cancelled) return;
       setLoading(false);
       if (outcome === "forbidden") {
@@ -321,15 +356,18 @@ export function ManualPaymentResume({
         // showing a 403 the buyer can't act on.
         setReference("");
         setLoadError(T.badRef[isAr ? "ar" : "en"]);
-      } else if (outcome === "error") {
+      } else if (outcome === "missing") {
         setLoadError(T.notFound[isAr ? "ar" : "en"]);
+      } else if (outcome === "unreachable") {
+        setLoadError(T.unreachable[isAr ? "ar" : "en"]);
+        setCanRetry(true);
       }
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reference, orderId]);
+  }, [reference, orderId, retryNonce]);
 
   // Poll only while a proof is genuinely pending a human.
   const pendingReview = view?.latest_proof?.status === "awaiting_review";
@@ -456,11 +494,33 @@ export function ManualPaymentResume({
 
   if (loading && !view) {
     return (
-      <p className="text-center text-sm text-[var(--ck-muted)]">{t("loading")}</p>
+      <Screen isAr={isAr}>
+        <p className="text-center text-sm text-[var(--ck-muted)]">
+          {t("loading")}
+        </p>
+      </Screen>
     );
   }
   if (loadError && !view) {
-    return <ErrorBanner>{loadError}</ErrorBanner>;
+    return (
+      <Screen isAr={isAr}>
+        <ErrorBanner>{loadError}</ErrorBanner>
+        {canRetry && (
+          <PrimaryButton
+            type="button"
+            className="w-full"
+            onClick={() => {
+              setLoadError(null);
+              setCanRetry(false);
+              setLoading(true);
+              setRetryNonce((n) => n + 1);
+            }}
+          >
+            {t("retry")}
+          </PrimaryButton>
+        )}
+      </Screen>
+    );
   }
   if (!view) return null;
 
