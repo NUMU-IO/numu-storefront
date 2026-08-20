@@ -27,6 +27,11 @@ const POST_DOMAIN_SEGMENTS = new Set([
   "blogs",
   "policies",
   "password",
+  // Manual-payment resume pages, reached from a link in the buyer's
+  // email (see [domain]/instapay + [domain]/vodafone-cash). Without
+  // these the apex/dev fallback reads "instapay" as a store subdomain.
+  "instapay",
+  "vodafone-cash",
 ]);
 
 // Genuine static assets bypass the tenant rewrite entirely. We match by
