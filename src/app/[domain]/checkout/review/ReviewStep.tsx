@@ -23,9 +23,9 @@ import { useAttribution } from "@/components/layout/AttributionProvider";
 import { PaymobPixel } from "@/components/checkout/PaymobPixel";
 import { KashierCheckout } from "@/components/checkout/KashierCheckout";
 import {
-  InstaPayInstructions,
-  type InstaPayPayload,
-} from "@/components/checkout/InstaPayInstructions";
+  ManualTransferInstructions,
+  type ManualTransferPayload,
+} from "@/components/checkout/ManualTransferInstructions";
 import type { CheckoutResponse } from "@/types/checkout";
 
 /**
@@ -72,6 +72,13 @@ const T = {
   continueShopping: { en: "Continue shopping", ar: "متابعة التسوق" },
 } as const;
 
+// Rails with no hosted payment page — the customer transfers
+// out-of-band and we verify a proof afterwards.
+const MANUAL_TRANSFER_PROVIDERS: ReadonlySet<string | undefined> = new Set([
+  "instapay",
+  "vodafone_cash",
+]);
+
 export function ReviewStep() {
   const router = useRouter();
   const params = useParams() as { domain: string };
@@ -114,11 +121,12 @@ export function ReviewStep() {
     orderId: string;
     orderNumber: string;
   } | null>(null);
-  // InstaPay is manual-verification (no hosted page): we render the IPA +
+
+  // Manual rails are verification-by-proof (no hosted page): we render
   // reference + QR instructions inline; the order stays PENDING until the
   // merchant confirms the transfer.
   const [instapayData, setInstapayData] = useState<{
-    data: InstaPayPayload;
+    data: ManualTransferPayload;
     orderId: string;
     orderNumber: string;
   } | null>(null);
@@ -274,11 +282,12 @@ export function ReviewStep() {
         return;
       }
 
-      // InstaPay — manual bank transfer; show IPA + reference + QR inline.
-      if (pd && pd.provider === "instapay") {
+      // Manual rails — InstaPay (IPA + QR) and Vodafone Cash (wallet
+      // number, no QR). Destination + reference render inline.
+      if (pd && MANUAL_TRANSFER_PROVIDERS.has(pd.provider)) {
         stashPending();
         setInstapayData({
-          data: data.payment_data as unknown as InstaPayPayload,
+          data: data.payment_data as unknown as ManualTransferPayload,
           orderId: data.order_id,
           orderNumber: data.order_number,
         });
@@ -360,7 +369,7 @@ export function ReviewStep() {
 
   if (instapayData) {
     return (
-      <InstaPayInstructions
+      <ManualTransferInstructions
         data={instapayData.data}
         orderNumber={instapayData.orderNumber}
         locale={locale}

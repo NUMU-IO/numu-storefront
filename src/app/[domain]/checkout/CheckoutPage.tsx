@@ -9,7 +9,8 @@
  * step-to-step navigation. All the wiring is preserved: merchant checkout-field
  * config (standard + custom), Google-Maps pin, zone-resolved shipping, the
  * enabled payment methods (COD + deposit, Paymob Pixel, Kashier, InstaPay,
- * Fawry…), saved cards, gift cards, coupons, and inline validation.
+ * Vodafone Cash, Fawry…), saved cards, gift cards, coupons, and inline
+ * validation.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -59,9 +60,9 @@ import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { PaymobPixel } from "@/components/checkout/PaymobPixel";
 import { KashierCheckout } from "@/components/checkout/KashierCheckout";
 import {
-  InstaPayInstructions,
-  type InstaPayPayload,
-} from "@/components/checkout/InstaPayInstructions";
+  ManualTransferInstructions,
+  type ManualTransferPayload,
+} from "@/components/checkout/ManualTransferInstructions";
 import { useAttribution } from "@/components/layout/AttributionProvider";
 import type { CheckoutResponse, ShippingRateOption } from "@/types/checkout";
 
@@ -169,11 +170,17 @@ function methodLabel(opt: MethodOption | string, isAr: boolean): string {
     fawry: ["Fawry", "فوري"],
     fawaterak: ["Fawaterak", "فواتيرك"],
     instapay: ["InstaPay", "انستاباي"],
+    vodafone_cash: ["Vodafone Cash", "فودافون كاش"],
     cod: ["Cash on delivery", "الدفع عند الاستلام"],
   };
   const entry = labels[code];
   return entry ? (isAr ? entry[1] : entry[0]) : code;
 }
+const MANUAL_TRANSFER_PROVIDERS: ReadonlySet<string | undefined> = new Set([
+  "instapay",
+  "vodafone_cash",
+]);
+
 function methodSubLabel(code: string, isAr: boolean): string {
   const map: Record<string, [string, string]> = {
     cod: ["Pay cash when it arrives", "ادفع نقدًا عند الاستلام"],
@@ -181,6 +188,10 @@ function methodSubLabel(code: string, isAr: boolean): string {
     paymob_card: ["Visa / Mastercard", "فيزا / ماستركارد"],
     kashier: ["Visa / Mastercard", "فيزا / ماستركارد"],
     instapay: ["Bank transfer via InstaPay", "تحويل بنكي عبر انستاباي"],
+    vodafone_cash: [
+      "Transfer from your Vodafone wallet",
+      "حوّل من محفظة فودافون كاش",
+    ],
     fawry: ["Pay at any Fawry outlet", "ادفع في أي منفذ فوري"],
   };
   const e = map[code];
@@ -399,7 +410,7 @@ export function CheckoutPage() {
     orderNumber: string;
   } | null>(null);
   const [instapayData, setInstapayData] = useState<{
-    data: InstaPayPayload;
+    data: ManualTransferPayload;
     orderId: string;
     orderNumber: string;
   } | null>(null);
@@ -999,10 +1010,12 @@ export function CheckoutPage() {
         });
         return;
       }
-      if (pd && pd.provider === "instapay") {
+      // Manual rails (InstaPay, Vodafone Cash): no hosted page — we
+      // render the transfer instructions inline.
+      if (pd && MANUAL_TRANSFER_PROVIDERS.has(pd.provider)) {
         stashPending();
         setInstapayData({
-          data: data.payment_data as unknown as InstaPayPayload,
+          data: data.payment_data as unknown as ManualTransferPayload,
           orderId: data.order_id,
           orderNumber: data.order_number,
         });
@@ -1074,7 +1087,7 @@ export function CheckoutPage() {
   if (instapayData) {
     return (
       <div className="py-6">
-        <InstaPayInstructions
+        <ManualTransferInstructions
           data={instapayData.data}
           orderNumber={instapayData.orderNumber}
           locale={locale}
