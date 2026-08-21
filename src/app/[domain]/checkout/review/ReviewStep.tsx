@@ -19,6 +19,7 @@ import {
 } from "@/lib/checkout-state";
 import { resolveApiError } from "@/lib/api-error";
 import { getSessionFingerprint } from "@/lib/meta-pixel";
+import { suppressCartTracking } from "@/lib/abandoned-cart";
 import { useAttribution } from "@/components/layout/AttributionProvider";
 import { PaymobPixel } from "@/components/checkout/PaymobPixel";
 import { KashierCheckout } from "@/components/checkout/KashierCheckout";
@@ -234,6 +235,9 @@ export function ReviewStep() {
       // any subsequent checkout in this session is a genuinely new order
       // rather than a replay of this one.
       idempotencyKeyRef.current = crypto.randomUUID();
+      // Order exists — mute abandoned-checkout tracking so a late cart
+      // snapshot can't re-list this cart as a new abandoned row.
+      suppressCartTracking();
       const stashPending = () => {
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(

@@ -108,6 +108,7 @@ export function composeTouchFromUrl(args: {
     utm_content: truncOrNull(parsed.utm_content, CAP_UTM),
     gclid: truncOrNull(parsed.gclid, CAP_CLICK_ID),
     fbclid: truncOrNull(parsed.fbclid, CAP_CLICK_ID),
+    ttclid: truncOrNull(parsed.ttclid, CAP_CLICK_ID),
     referrer: truncOrNull(args.referrer, CAP_REFERRER),
     landing_path: truncOrNull(args.landingPath, CAP_LANDING),
   };
