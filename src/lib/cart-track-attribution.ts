@@ -5,14 +5,20 @@
  * and the merchant's Abandoned Checkouts page displays them — but only
  * shoppers arriving from merchant-tagged links carry explicit UTMs. Ad
  * platforms, however, ALWAYS append their click ids to ad clicks
- * (`fbclid` for Meta, `ttclid` for TikTok, `gclid` for Google), so when
+ * (`ttclid` for TikTok, `fbclid` for Meta, `gclid` for Google), so when
  * no utm_source was captured we derive the platform from the click id.
  * Derived sources use the canonical platform slug and utm_medium "paid"
  * so they are distinguishable from merchant-tagged traffic.
  *
- * Last-touch wins (same rule as the attribution envelope). `ttclid`
- * lives outside the numu_attribution cookie (it is not part of the
- * backend attribution contract), so it acts as the final fallback.
+ * Last-touch wins (same rule as the attribution envelope). Each touch is a
+ * snapshot of ONE landing URL, so whichever click id it carries IS that
+ * touch's platform — there is no cross-touch precedence. This used to check
+ * `fbclid` on the last AND first touch before ever looking at `ttclid`, and
+ * `ttclid` was not part of the envelope, so a shopper with any Meta click in
+ * the last 90 days who then arrived from a TikTok ad was shown as Meta.
+ *
+ * The bare `ttclid` cookie remains a final fallback for envelopes written
+ * before `ttclid` was captured into them.
  */
 
 import { readCookie } from "./attribution-client";
@@ -23,6 +29,30 @@ export interface TrafficSource {
   utm_source?: string;
   utm_medium?: string;
   utm_campaign?: string;
+}
+
+/**
+ * Click id → canonical platform slug. Mirrors `CLICK_ID_SOURCES` in the
+ * API's `click_id_attribution.py`; the two must agree or the order and its
+ * abandoned-checkout twin would name the same visit differently.
+ */
+const CLICK_ID_SOURCES: ReadonlyArray<
+  readonly [keyof AttributionTouch, string]
+> = [
+  ["ttclid", "tiktok"],
+  ["fbclid", "facebook"],
+  ["gclid", "google"],
+];
+
+export function deriveSourceFromClickIds(
+  touch: AttributionTouch | null | undefined,
+): string | null {
+  if (!touch) return null;
+  for (const [key, source] of CLICK_ID_SOURCES) {
+    const v = touch[key];
+    if (typeof v === "string" && v.trim()) return source;
+  }
+  return null;
 }
 
 function fromTouch(
@@ -36,7 +66,7 @@ function fromTouch(
       utm_campaign: touch.utm_campaign ?? undefined,
     };
   }
-  const derived = touch.fbclid ? "facebook" : touch.gclid ? "google" : null;
+  const derived = deriveSourceFromClickIds(touch);
   if (!derived) return null;
   return {
     utm_source: derived,

@@ -44,7 +44,7 @@ import { EG_GOVERNORATES, governorateLabel } from "@/lib/eg-governorates";
 import { getSessionFingerprint, trackFunnel } from "@/lib/meta-pixel";
 import { readCartFunnelData } from "@/lib/cart-funnel-data";
 import { claim } from "@/components/tracking/FunnelTracker";
-import { trackCartState } from "@/lib/abandoned-cart";
+import { suppressCartTracking, trackCartState } from "@/lib/abandoned-cart";
 import {
   IdentityDialog,
   type IdentityVerifiedResult,
@@ -972,6 +972,10 @@ export function CheckoutPage() {
       // isn't served this order again.
       idempotencyKeyRef.current = crypto.randomUUID();
       submittedLineItemsRef.current = null;
+      // The order exists: mute abandoned-checkout tracking so the pending
+      // enrichment effect / submit backstop can't re-create this cart as a
+      // new abandoned row after the backend has marked it recovered.
+      suppressCartTracking();
       const stashPending = () => {
         try {
           window.sessionStorage.setItem(
