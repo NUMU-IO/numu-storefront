@@ -31,6 +31,24 @@ type CartItem = Record<string, unknown>;
 // Reset naturally on a full page reload (module re-evaluates).
 let lastSignature: string | null = null;
 
+// Tracking is muted for a short window after an order is placed. The submit
+// handler fires a contact-enrichment POST and the order request together,
+// and the form's debounced enrichment effect may still be pending — any of
+// those landing after the order's reconciliation re-listed the cart that had
+// just been bought as a fresh "Abandoned" checkout. The backend has the same
+// guard (`recently_recovered_for_shopper`); this stops the POST at the source.
+let suppressedUntil = 0;
+
+/** Mute cart-state tracking for `ms` (default 2 min) — call on order success. */
+export function suppressCartTracking(ms = 120_000): void {
+  suppressedUntil = Date.now() + ms;
+  lastSignature = null;
+}
+
+function trackingSuppressed(): boolean {
+  return Date.now() < suppressedUntil;
+}
+
 /**
  * Read the current cart and upsert it into the backend's abandoned-checkout
  * store. Best-effort: never throws, never blocks the shopper. Pass
@@ -42,6 +60,7 @@ export async function trackCartState(
   overrides: CartTrackOverrides = {},
 ): Promise<void> {
   if (typeof window === "undefined") return;
+  if (trackingSuppressed()) return;
   try {
     const res = await fetch("/api/cart", {
       cache: "no-store",
@@ -120,6 +139,10 @@ export async function trackCartState(
         overrides.coupon_code,
     );
     if (!hasOverrides && body === lastSignature) return;
+    // Re-check after the cart fetch: the order can succeed while this call
+    // was awaiting /api/cart, and a snapshot read before the cart was
+    // cleared must not be written after the order exists.
+    if (trackingSuppressed()) return;
     lastSignature = body;
 
     await fetch("/api/storefront/cart-track", {
