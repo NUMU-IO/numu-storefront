@@ -97,6 +97,39 @@ function buildFetchSignal(
     : caller;
 }
 
+/**
+ * Deploy-window retry. While the API container restarts (~15-30 s per
+ * deploy) the edge nginx answers `503` with `Retry-After` (or the socket is
+ * refused → a network error). One short retry turns most of those into a
+ * served page instead of a broken storefront. Idempotent requests only.
+ */
+const DEPLOY_RETRY_DELAY_MS = 1_500;
+const DEPLOY_RETRY_MAX_WAIT_MS = 4_000;
+
+async function fetchWithDeployRetry(
+  url: string,
+  init: RequestInit,
+  idempotent: boolean,
+): Promise<Response> {
+  const attempt = () => fetch(url, init);
+  if (!idempotent) return attempt();
+  let res: Response;
+  try {
+    res = await attempt();
+  } catch (err) {
+    if (init.signal?.aborted) throw err;
+    await new Promise((r) => setTimeout(r, DEPLOY_RETRY_DELAY_MS));
+    return attempt();
+  }
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    const ra = Number(res.headers.get("Retry-After"));
+    const wait = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, DEPLOY_RETRY_MAX_WAIT_MS) : DEPLOY_RETRY_DELAY_MS;
+    await new Promise((r) => setTimeout(r, wait));
+    return attempt();
+  }
+  return res;
+}
+
 interface FetchOptions extends RequestInit {
   tags?: string[];
   revalidate?: number;
@@ -111,20 +144,28 @@ async function apiFetch<T>(
   const { tags, revalidate, timeoutMs, signal, ...fetchOptions } = options;
   const url = `${API_URL}${path}`;
 
+  const method = (fetchOptions.method || "GET").toUpperCase();
+  const idempotent = method === "GET" || method === "HEAD";
+  const headers = {
+    ...(await internalServiceHeaders()),
+    ...(fetchOptions.headers as Record<string, string> | undefined),
+  };
+
   let res: Response;
   try {
-    res = await fetch(url, {
-      ...fetchOptions,
-      headers: { ...(await internalServiceHeaders()), ...(fetchOptions.headers as Record<string, string> | undefined) },
-      // Bound every backend call so a hung upstream can't stall the render
-      // (or pin a serverless worker) indefinitely. Combined with the caller's
-      // signal when they supplied one.
-      signal: buildFetchSignal(timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
-      next: {
-        tags: tags || [],
-        revalidate: revalidate ?? 60,
+    res = await fetchWithDeployRetry(
+      url,
+      {
+        ...fetchOptions,
+        headers,
+        signal: buildFetchSignal(timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
+        next: {
+          tags: tags || [],
+          revalidate: revalidate ?? 60,
+        },
       },
-    });
+      idempotent,
+    );
   } catch (err) {
     // fetch only rejects (vs. resolving to a Response) on abort/timeout or a
     // transport-level failure — never on a 4xx/5xx. Wrap so callers can
