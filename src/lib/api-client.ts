@@ -30,6 +30,36 @@ const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 /**
+ * Identify ourselves to the API as NUMU's own server and forward the real
+ * shopper's IP.
+ *
+ * Every SSR call from this box reaches the API from ONE IP, so its per-IP
+ * rate limiter saw the whole storefront as a single abusive visitor and
+ * answered 429 in bursts (~900/day on prod). With `NUMU_INTERNAL_SERVICE_TOKEN`
+ * set (shared secret, same value as the API's `INTERNAL_SERVICE_TOKEN`) the
+ * API buckets each request under the `X-Forwarded-For` we send — the
+ * visitor's IP as Cloudflare/nginx handed it to us — instead of ours.
+ * Without the env var nothing changes.
+ */
+async function internalServiceHeaders(): Promise<Record<string, string>> {
+  const token = process.env.NUMU_INTERNAL_SERVICE_TOKEN;
+  if (!token) return {};
+  const out: Record<string, string> = { "X-Internal-Service-Token": token };
+  try {
+    const h = await headers();
+    const visitor =
+      h.get("cf-connecting-ip") ||
+      h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      h.get("x-real-ip");
+    if (visitor) out["X-Forwarded-For"] = visitor;
+  } catch {
+    // headers() throws outside a request scope (build-time prerender,
+    // tests) — the API then buckets per server, which is still fine.
+  }
+  return out;
+}
+
+/**
  * Distinguishable API-fetch failure. `kind` lets callers tell a request that
  * never produced an HTTP response ("timeout"/"network" — an upstream
  * availability problem, retry/503-worthy) apart from a real backend HTTP
@@ -85,6 +115,7 @@ async function apiFetch<T>(
   try {
     res = await fetch(url, {
       ...fetchOptions,
+      headers: { ...(await internalServiceHeaders()), ...(fetchOptions.headers as Record<string, string> | undefined) },
       // Bound every backend call so a hung upstream can't stall the render
       // (or pin a serverless worker) indefinitely. Combined with the caller's
       // signal when they supplied one.
