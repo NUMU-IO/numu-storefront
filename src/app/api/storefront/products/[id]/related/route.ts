@@ -27,7 +27,16 @@ export async function GET(
 ) {
   const { id } = await params;
   const { searchParams } = new URL(req.url);
-  const limit = searchParams.get("limit") || "4";
+  // The upstream endpoint caps `limit` at 24 and 422s above it; this route
+  // swallows non-2xx into an empty list, so an over-large limit silently
+  // rendered NO related products. Clamp instead of forwarding blindly.
+  const RELATED_LIMIT_MAX = 24;
+  const requestedLimit = Number.parseInt(searchParams.get("limit") || "", 10);
+  const limit = String(
+    Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), RELATED_LIMIT_MAX)
+      : 4,
+  );
 
   const host =
     req.headers.get("x-numu-host") ||
