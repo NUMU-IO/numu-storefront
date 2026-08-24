@@ -30,12 +30,21 @@ export async function POST(req: NextRequest) {
 
   const body = await req.text();
   const cookie = req.headers.get("cookie");
+  // The shopper's User-Agent, forwarded deliberately. This fetch is
+  // server-to-server, so none of their headers travel with it by default
+  // and the backend would read THIS SERVER's UA ("node") instead. The
+  // backend derives a traffic source from the in-app browser when the
+  // cart carries no utm_source — the only signal a TikTok visit has,
+  // since its webview sends no referrer — so dropping the header made
+  // every such cart "Direct". Mirrors the /track proxy.
+  const userAgent = req.headers.get("user-agent");
   try {
     await fetch(`${API_URL}/storefront/store/${store.id}/cart/track`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...(userAgent ? { "User-Agent": userAgent } : {}),
       },
       body,
       cache: "no-store",
