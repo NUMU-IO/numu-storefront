@@ -28,6 +28,11 @@ interface PayOrderView {
   recovery_promo: string | null;
   line_items: PayLineItem[];
   enabled_payment_methods: string[];
+  /** Manual transfer rails (instapay / vodafone_cash). Optional: older API. */
+  manual_methods?: string[];
+  subtotal?: number;
+  shipping_cost?: number;
+  discount_amount?: number;
   store_name: string;
 }
 
@@ -58,6 +63,14 @@ const T = {
 const METHOD_LABEL: Record<string, { en: string; ar: string }> = {
   paymob: { en: "Card or mobile wallet", ar: "بطاقة أو محفظة إلكترونية" },
   kashier: { en: "Card", ar: "بطاقة بنكية" },
+  instapay: { en: "InstaPay transfer", ar: "تحويل إنستاباي" },
+  vodafone_cash: { en: "Vodafone Cash", ar: "فودافون كاش" },
+};
+
+/** Where the proof-upload resume flow lives for each manual rail. */
+const MANUAL_RESUME_PATH: Record<string, string> = {
+  instapay: "instapay",
+  vodafone_cash: "vodafone-cash",
 };
 
 export function PayRecovery({ orderId }: { orderId: string }) {
@@ -93,10 +106,10 @@ export function PayRecovery({ orderId }: { orderId: string }) {
         const body = await res.json();
         const data = (body?.data || body) as PayOrderView;
         setView(data);
-        // Preselect the first enabled method for a one-tap flow.
-        if (data.enabled_payment_methods?.length) {
-          setMethod(data.enabled_payment_methods[0]);
-        }
+        // Preselect the first available method for a one-tap flow.
+        const first =
+          data.enabled_payment_methods?.[0] ?? data.manual_methods?.[0] ?? null;
+        if (first) setMethod(first);
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : String(e));
       }
@@ -134,6 +147,16 @@ export function PayRecovery({ orderId }: { orderId: string }) {
         return;
       }
       const data = body?.data || body;
+      // Manual transfer rail: the API returned transfer instructions with a
+      // reference code — hand over to the dedicated resume page, which shows
+      // the destination and takes the proof upload.
+      if (data.type === "manual" && data.reference_code) {
+        const path = MANUAL_RESUME_PATH[data.method] || "instapay";
+        window.location.assign(
+          `/${path}/${orderId}?ref=${encodeURIComponent(data.reference_code)}`,
+        );
+        return;
+      }
       if (data.payment_url) {
         window.location.assign(data.payment_url);
         return;
@@ -169,7 +192,11 @@ export function PayRecovery({ orderId }: { orderId: string }) {
     );
   }
 
-  const noMethods = !view.enabled_payment_methods?.length;
+  const allMethods = [
+    ...(view.enabled_payment_methods ?? []),
+    ...(view.manual_methods ?? []),
+  ];
+  const noMethods = allMethods.length === 0;
 
   return (
     <div className="space-y-5" dir={isAr ? "rtl" : "ltr"}>
@@ -186,6 +213,24 @@ export function PayRecovery({ orderId }: { orderId: string }) {
             </li>
           ))}
         </ul>
+        {(view.shipping_cost ?? 0) > 0 && (
+          <div className="mt-3 space-y-1 border-t pt-3 text-sm text-gray-600">
+            <div className="flex justify-between gap-3">
+              <span>{isAr ? "المنتجات" : "Items"}</span>
+              <span>{formatCents(view.subtotal ?? 0, view.currency)}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span>{isAr ? "الشحن" : "Shipping"}</span>
+              <span>{formatCents(view.shipping_cost ?? 0, view.currency)}</span>
+            </div>
+            {(view.discount_amount ?? 0) > 0 && (
+              <div className="flex justify-between gap-3">
+                <span>{isAr ? "الخصم" : "Discount"}</span>
+                <span>− {formatCents(view.discount_amount ?? 0, view.currency)}</span>
+              </div>
+            )}
+          </div>
+        )}
         <div className="mt-3 flex justify-between border-t pt-3 text-base font-semibold">
           <span>{t("amountDue")}</span>
           <span>{formatCents(view.amount_due, view.currency)}</span>
@@ -202,7 +247,7 @@ export function PayRecovery({ orderId }: { orderId: string }) {
           <p className="text-sm text-gray-500">{t("noMethods")}</p>
         ) : (
           <ul className="space-y-2.5">
-            {view.enabled_payment_methods.map((m) => {
+            {allMethods.map((m) => {
               const label = METHOD_LABEL[m]?.[locale] || m;
               return (
                 <li key={m}>
