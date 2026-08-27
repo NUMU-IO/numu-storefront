@@ -1,4 +1,5 @@
 import { fetchStoreByDomain, fetchCollectionBySlug, fetchProducts, fetchCollections, fetchThemeSettings } from "@/lib/api-client";
+import { slimProductsForTheme } from "@/lib/slim-product";
 import { resolveThemeSettings, applyTemplateOverride } from "@/lib/resolve-theme";
 import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRenderer";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
@@ -142,8 +143,12 @@ export default async function CollectionPage({ params }: PageProps) {
   // Fetch the collection's products so the bundle's grid has something to
   // render. Without this the listing falls back to an empty catalog
   // (useProducts() does NOT self-fetch) and shows "No results".
+  // Admin-only columns stripped before these rows become RSC props — this
+  // list is inlined into the document verbatim. See lib/slim-product.ts.
   const products = collection?.id
-    ? await fetchProducts(store.id, 500, collection.id).catch(() => [])
+    ? slimProductsForTheme(
+        await fetchProducts(store.id, 500, collection.id).catch(() => []),
+      )
     : [];
   // Full collections list so the header's collections dropdown renders on
   // collection pages too (not just home).
