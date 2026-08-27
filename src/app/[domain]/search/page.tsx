@@ -35,6 +35,7 @@ import {
 } from "@/components/seo/SsrContentLayer";
 import { formatMajor } from "@/lib/money";
 import type { Metadata } from "next";
+import { slimProductsForTheme } from "@/lib/slim-product";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
@@ -239,10 +240,14 @@ export default async function SearchPage({
   // 1000 matches what sitemap.ts already fetches per request. This stays a
   // client-side filter over one prefetch until a real backend search endpoint
   // exists; at that point this whole block collapses to a single search call.
-  const [products, collections] = await Promise.all([
+  const [rawProducts, collections] = await Promise.all([
     fetchProducts(store.id, 1000).catch(() => []),
     fetchCollections(store.id).catch(() => []),
   ]);
+  // Admin-only columns stripped before these rows become RSC props — this
+  // route prefetches up to a THOUSAND of them into the document.
+  // See lib/slim-product.ts.
+  const products = slimProductsForTheme(rawProducts);
 
   // ENG-3: visitor locale for the bilingual built-in search fallback.
   const hl = await headers();

@@ -11,6 +11,7 @@ import { alternatesFor, type StoreForSeo } from "@/lib/seo";
 import { SsrProductIndexContent } from "@/components/seo/SsrContentLayer";
 import { headers } from "next/headers";
 import type { Metadata } from "next";
+import { slimProductsForTheme } from "@/lib/slim-product";
 
 /**
  * Products listing page — Phase 2 of the V3 multipage roll-out.
@@ -82,10 +83,13 @@ export default async function ProductsListingPage({ params }: PageProps) {
     // catalog on stores with more products (vionne has 250+). Collections
     // ride along so header nav (collections dropdown) renders here too,
     // not just on the home route.
-    const [products, collections] = await Promise.all([
+    const [rawProducts, collections] = await Promise.all([
       fetchProducts(store.id, 500).catch(() => []),
       fetchCollections(store.id).catch(() => []),
     ]);
+    // Admin-only columns stripped before these rows become RSC props — this
+    // list is inlined into the document verbatim. See lib/slim-product.ts.
+    const products = slimProductsForTheme(rawProducts);
     const hl = await headers();
     const locale =
       hl.get("x-numu-locale") ||

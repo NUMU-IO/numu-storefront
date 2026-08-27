@@ -5,6 +5,7 @@ import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import { RuntimeImportMap } from "@/components/theme-engine/RuntimeImportMap";
+import { FONT_SWAP_SNIPPET, resolveThemeFontHrefs } from "@/lib/theme-fonts";
 
 export const metadata: Metadata = {
   title: "NUMU Store",
@@ -86,6 +87,13 @@ type ThemeStaticTemplates = {
   bundleUrl: string | null;
   /** BYOT stylesheet — preloaded alongside the bundle. */
   cssUrl: string | null;
+  /**
+   * Google-Fonts stylesheets the theme's global settings imply. Resolved HERE,
+   * on the server, because the alternative is the bundle discovering them after
+   * `sdk.js` has downloaded and run — a 4.7 s critical chain on vionne's mobile
+   * run. See lib/theme-fonts.ts.
+   */
+  fontHrefs: string[];
 };
 
 const NO_TEMPLATES: ThemeStaticTemplates = {
@@ -93,6 +101,7 @@ const NO_TEMPLATES: ThemeStaticTemplates = {
   loadingUrl: null,
   bundleUrl: null,
   cssUrl: null,
+  fontHrefs: [],
 };
 
 async function resolveThemeStaticTemplates(): Promise<ThemeStaticTemplates> {
@@ -125,6 +134,9 @@ async function resolveThemeStaticTemplates(): Promise<ThemeStaticTemplates> {
       loadingUrl: typeof ext.loading_template_url === "string" ? ext.loading_template_url : null,
       bundleUrl: typeof ext.bundle_url === "string" ? ext.bundle_url : null,
       cssUrl: typeof ext.css_url === "string" ? ext.css_url : null,
+      fontHrefs: resolveThemeFontHrefs(
+        themeSettings.global_settings as Record<string, unknown> | undefined,
+      ),
     };
   } catch {
     return NO_TEMPLATES;
@@ -147,7 +159,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const { lang, dir } = await resolveLocale();
-  const { errorUrl, loadingUrl, bundleUrl, cssUrl } =
+  const { errorUrl, loadingUrl, bundleUrl, cssUrl, fontHrefs } =
     await resolveThemeStaticTemplates();
   const cdnOrigin = originOf(bundleUrl);
   return (
@@ -200,6 +212,49 @@ export default async function RootLayout({
           />
         )}
         {cssUrl && <link rel="preload" as="style" href={cssUrl} />}
+        {/*
+          Theme webfonts, emitted from the server.
+
+          The bundle used to discover these itself — the SDK's `resolveFontStack`
+          appends a <link> to <head> when it resolves a font token — which put
+          `fonts.googleapis.com` and then the .woff2 files BEHIND the runtime
+          download. Lighthouse measured that chain at 4.729 s on mobile. The
+          server already knows which families the store picked, so it says so
+          during HTML parse instead.
+
+          `media="print"` keeps them off the critical rendering path (fetched,
+          not render-blocking); FONT_SWAP_SNIPPET flips them to `all` on load.
+          With `display=swap` in every href, text paints in the fallback stack
+          immediately either way — this only decides how soon the real face
+          arrives.
+
+          `data-numu-font` + the exact href is the contract that stops the
+          bundle from injecting a duplicate: the SDK's `injectFontLink` looks
+          for precisely that selector before adding its own.
+        */}
+        {fontHrefs.length > 0 && (
+          <>
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+            <link
+              rel="preconnect"
+              href="https://fonts.gstatic.com"
+              crossOrigin="anonymous"
+            />
+            {fontHrefs.map((href) => (
+              <link key={`p-${href}`} rel="preload" as="style" href={href} />
+            ))}
+            {fontHrefs.map((href) => (
+              <link
+                key={href}
+                rel="stylesheet"
+                href={href}
+                media="print"
+                data-numu-font=""
+              />
+            ))}
+            <script dangerouslySetInnerHTML={{ __html: FONT_SWAP_SNIPPET }} />
+          </>
+        )}
       </head>
       {/* suppressHydrationWarning: browser extensions (Grammarly,
           LastPass, etc.) inject data-* attributes onto <body> before
