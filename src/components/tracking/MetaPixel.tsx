@@ -5,9 +5,12 @@
  *
  * Mounted once in [domain]/layout.tsx (only when the store has at least one
  * enabled pixel — see resolveMetaPixelIds). It:
- *   1. Injects the Facebook Pixel base script + `fbq('init')` per pixel and
- *      fires the initial PageView. This is what sets the `_fbp` cookie that
- *      the /api/storefront/track proxy needs for CAPI match quality.
+ *   1. Installs the Facebook Pixel stub, mints the first-party `_fbp`/`_fbc`
+ *      cookies the /api/storefront/track proxy needs for CAPI match quality,
+ *      and calls `fbq('init')` per pixel plus the initial PageView. Those calls
+ *      QUEUE on the stub; `fbevents.js` itself is fetched on the shopper's
+ *      first interaction and replays them (see lib/third-party-load.ts, and
+ *      pass loadStrategy="immediate" to go back to eager loading).
  *   2. Re-fires PageView on App-Router client navigations (the base snippet
  *      only fires once; SPA route changes don't reload the page).
  *   3. Bridges any theme/SDK-dispatched `numu:analytics:event` to the browser
@@ -31,6 +34,10 @@ import {
   EVENT_NAME_TO_FUNNEL_STEP,
 } from "@/lib/meta-pixel";
 import { applyAdvancedMatching } from "@/lib/meta-identity";
+import {
+  TP_GATE_SNIPPET,
+  type PixelLoadStrategy,
+} from "@/lib/third-party-load";
 
 interface AnalyticsEventDetail {
   event?: string;
@@ -38,7 +45,14 @@ interface AnalyticsEventDetail {
   event_id?: string;
 }
 
-export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
+export function MetaPixel({
+  pixelIds,
+  loadStrategy = "interaction",
+}: {
+  pixelIds: string[];
+  /** See lib/third-party-load.ts. `"immediate"` restores eager SDK loading. */
+  loadStrategy?: PixelLoadStrategy;
+}) {
   const pathname = usePathname();
   const firstRun = useRef(true);
 
@@ -138,11 +152,19 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
         `fbq('init','${id}',window.__numu_sid?{external_id:decodeURIComponent(window.__numu_sid)}:undefined);`,
     )
     .join("");
+  // Meta's official base snippet, split at exactly one seam: the method-queue
+  // stub still installs synchronously (so `fbq(…)` calls made anywhere on the
+  // page are captured and replayed), but injecting `fbevents.js` is hoisted
+  // into `__numuLoadFbq` and handed to the interaction gate below. Meta's own
+  // stub is built for precisely this — `n.queue` exists so calls can be made
+  // before the SDK lands.
   const snippet =
     `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?` +
     `n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;` +
-    `n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;` +
-    `t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}` +
+    `n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];` +
+    `f.__numuLoadFbq=function(){if(f.__numuFbqLoaded)return;f.__numuFbqLoaded=1;` +
+    `t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];` +
+    `s.parentNode.insertBefore(t,s);}}` +
     `(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');` +
     bootstrap +
     // Mint the initial PageView's event_id and seed window.__numu_pv so
@@ -151,15 +173,24 @@ export function MetaPixel({ pixelIds }: { pixelIds: string[] }) {
     `${inits}var pvid=(self.crypto&&crypto.randomUUID)?crypto.randomUUID():Date.now()+'-'+Math.round(Math.random()*1e9);` +
     `window.__numu_pv={path:location.pathname,id:pvid};` +
     `fbq('track','PageView',{},{eventID:pvid});` +
-    `window.__numuPixelIds=${JSON.stringify(pixelIds)};`;
+    `window.__numuPixelIds=${JSON.stringify(pixelIds)};` +
+    // Hand the SDK fetch to the interaction gate (or fire it now when the
+    // merchant opted out). Everything above this line has already run.
+    (loadStrategy === "immediate"
+      ? `window.__numuLoadFbq();`
+      : `${TP_GATE_SNIPPET}window.__numuTP(window.__numuLoadFbq);`);
 
   return (
     <>
-      {/* The pixel is fetched cross-origin after hydration; opening the
-          connection early shortens the window in which `_fbp` does not yet
-          exist and trims the landing-event latency. */}
-      <link rel="preconnect" href="https://connect.facebook.net" />
+      {/* Warm the connection so the deferred fetch is a single round trip once
+          the gate opens. `dns-prefetch` is the cheap half and always worth it;
+          the full `preconnect` is kept only on the eager path, where the
+          request follows within milliseconds — holding a TLS session open for
+          a fetch that may never happen is not free on a phone. */}
       <link rel="dns-prefetch" href="https://connect.facebook.net" />
+      {loadStrategy === "immediate" && (
+        <link rel="preconnect" href="https://connect.facebook.net" />
+      )}
       <Script
         id="numu-meta-pixel"
         strategy="afterInteractive"

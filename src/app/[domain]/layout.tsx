@@ -25,6 +25,7 @@ import { PageViewTracker } from "@/components/tracking/PageViewTracker";
 import { resolveMetaPixelIds } from "@/lib/meta-pixel";
 import { TikTokPixel } from "@/components/tracking/TikTokPixel";
 import { resolveTikTokPixelIds } from "@/lib/tiktok-pixel";
+import { resolvePixelLoadStrategy } from "@/lib/third-party-load";
 import { ConsentGate } from "@/components/tracking/ConsentGate";
 import { resolveConsentPolicy } from "@/lib/consent";
 import { getActivePromotions } from "@/lib/promo-server";
@@ -348,6 +349,13 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   // merchant configured an enabled pixel; also captures `ttclid` + sets `_ttp`.
   const tiktokPixelIds = resolveTikTokPixelIds(store);
 
+  // How the two vendor SDKs are fetched. Defaults to "interaction": the stubs,
+  // the first-party cookies and the queued PageView all still run on time, only
+  // the SDK download waits for the shopper to touch the page. That is ~590 ms
+  // of main-thread work off Total Blocking Time and the sole cause of both
+  // Best-Practices failures on this store. See lib/third-party-load.ts.
+  const pixelLoadStrategy = resolvePixelLoadStrategy(store);
+
   // Promotions — server-driven announcement bar (offers-v2), rendered in the
   // shell so it shows for built-in + BYOT alike. Best-effort: null when none
   // are active. `x-numu-promo-preview-token` (bridged by proxy.ts from the
@@ -395,8 +403,12 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
           today) it renders straight through, so this changes nothing for
           them. It also publishes the policy for the /track opt_out stamp. */}
       <ConsentGate policy={consentPolicy}>
-        {metaPixelIds.length > 0 && <MetaPixel pixelIds={metaPixelIds} />}
-        {tiktokPixelIds.length > 0 && <TikTokPixel pixelIds={tiktokPixelIds} />}
+        {metaPixelIds.length > 0 && (
+          <MetaPixel pixelIds={metaPixelIds} loadStrategy={pixelLoadStrategy} />
+        )}
+        {tiktokPixelIds.length > 0 && (
+          <TikTokPixel pixelIds={tiktokPixelIds} loadStrategy={pixelLoadStrategy} />
+        )}
       </ConsentGate>
       {/* First-party page-view/session tracking — unconditional (unlike the
           pixels above, this feeds NUMU's own analytics, not an ad platform).

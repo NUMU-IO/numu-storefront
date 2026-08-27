@@ -10,6 +10,7 @@ import {
 } from "@/lib/json-ld";
 import { canonicalOriginFor, type StoreForSeo } from "@/lib/seo";
 import { SsrHomeContent } from "@/components/seo/SsrContentLayer";
+import { slimProductsForTheme } from "@/lib/slim-product";
 import { resolveThemeSsrHtml } from "@/lib/ssr-theme-request";
 import { headers } from "next/headers";
 import type { ThemeSettingsV3 } from "@/types";
@@ -40,7 +41,7 @@ const HERO_IMAGE_KEYS = [
 // candidate (e.g. 768w at ~768px/DPR1) not in the preload set, leaving the
 // <link> "unused" and double-fetching the hero.
 const PRELOAD_WIDTHS = [640, 768, 1024, 1280, 1920];
-// HeroMedia's DESKTOP_BASE_WIDTH / MOBILE_BASE_WIDTH — the width it puts on the
+// The theme hero's base widths — the width it puts on the
 // bare `src`. Only used for the <link href>, which is the no-srcset fallback.
 const BASE_WIDTH_DESKTOP = 1920;
 const BASE_WIDTH_MOBILE = 1280;
@@ -150,7 +151,7 @@ export default async function HomePage({ params }: PageProps) {
   // (was: theme serially, THEN products/collections). products/collections feed
   // the BYOT home grids; on the rare built-in path they go unused (cheap,
   // best-effort — never blocks the render).
-  const [themeRaw, products, collections] = await Promise.all([
+  const [themeRaw, rawProducts, collections] = await Promise.all([
     fetchThemeSettings(store.id),
     // 300 (was 20) so home sections pinning products by id (featured rows)
     // can reference any item in the catalog — pins outside the fetched window
@@ -158,6 +159,10 @@ export default async function HomePage({ params }: PageProps) {
     fetchProducts(store.id, 300).catch(() => []),
     fetchCollections(store.id).catch(() => []),
   ]);
+  // Strip the admin-only columns before these rows become RSC props — that
+  // payload is inlined into the document verbatim and was 489 KB of it. See
+  // lib/slim-product.ts.
+  const products = slimProductsForTheme(rawProducts);
   const themeSettings = resolveThemeSettings(themeRaw?.theme_settings || themeRaw || {});
 
   // Phase 4.6 — Organization + WebSite JSON-LD on the home page.
