@@ -76,9 +76,18 @@ export async function trackCartState(
     const items = Array.isArray(cart?.items) ? cart.items : [];
     if (!items.length) return; // empty cart — nothing to recover
 
+    // `/api/cart` returns the SDK-ADAPTED shape, not the backend's: see
+    // `adaptCart`, whose whitelist renames `unit_price` -> `price` and
+    // drops `total_price` and `sku` entirely. Reading only the backend
+    // names meant every line went out at 0, so the merchant's abandoned
+    // cart listed real products at "1 × EGP 0" while the subtotal — read
+    // from the cart root, which adaptCart does keep — showed the true
+    // value. Read both spellings so this survives either shape.
     const line_items = items.map((li) => {
       const quantity = Number(li.quantity) || 1;
-      const total_price = Number(li.total_price) || 0;
+      const unit_price = Number(li.unit_price ?? li.price) || 0;
+      const total_price =
+        Number(li.total_price) || unit_price * quantity;
       return {
         product_id: li.product_id,
         product_name: li.product_name ?? li.name,
@@ -86,8 +95,11 @@ export async function trackCartState(
         variant_name: li.variant_name ?? undefined,
         sku: li.sku ?? undefined,
         quantity,
-        unit_price: Number(li.unit_price) || Math.round(total_price / quantity),
+        unit_price: unit_price || Math.round(total_price / quantity),
         total_price,
+        // The merchant recognises a cart by its pictures long before its
+        // SKUs. adaptCart already carries this through from the backend.
+        image_url: li.image_url ?? undefined,
       };
     });
 
