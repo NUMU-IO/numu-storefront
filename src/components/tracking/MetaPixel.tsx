@@ -137,8 +137,25 @@ export function MetaPixel({
     // overrides the server's correct value on a custom domain.
     `var _sfx=_l.hostname.split('.').slice(-2).join('.');` +
     `var _si=/^(com|net|org|edu|gov|co|ac|me)\\.[a-z]{2}$/.test(_sfx)?2:1;` +
+    // A NEW `fbclid` must REPLACE the stored `_fbc` — Meta's guidance is to
+    // send the *latest* click id, and `fbevents.js` overwrites the cookie on
+    // every fresh click. Writing only when the cookie was absent meant a
+    // shopper who had ever clicked a Meta ad kept that first click id for the
+    // full 90-day cookie life: every later ad click they made was discarded,
+    // the conversion was credited to a campaign that did not earn it (or fell
+    // outside the 7-day click window entirely and was credited to nothing),
+    // and the stale value was what the server leg read back and forwarded to
+    // CAPI. The `ttclid` sibling in `lib/tiktok-pixel.ts` already overwrites
+    // unconditionally, which is the correct shape.
+    //
+    // The comparison splits off the first three dot-delimited fields
+    // (`fb.<index>.<time>.`) and treats the whole remainder as the click id,
+    // so an fbclid containing a dot still compares equal to itself instead of
+    // rewriting the cookie — and its timestamp — on every page load.
     `var _cid=new URLSearchParams(_l.search).get('fbclid');` +
-    `if(_cid&&!_ck('_fbc'))_sc('_fbc','fb.'+_si+'.'+Date.now()+'.'+_cid);` +
+    `if(_cid){var _ex=_ck('_fbc');` +
+    `if(!_ex||_ex.split('.').slice(3).join('.')!==_cid)` +
+    `_sc('_fbc','fb.'+_si+'.'+Date.now()+'.'+_cid);}` +
     `if(!_ck('_fbp'))_sc('_fbp','fb.'+_si+'.'+Date.now()+'.'+Math.floor(Math.random()*1e10));` +
     // external_id on the browser leg. Read-only: if `numu_sid` has not been
     // written yet we send nothing rather than minting a second id, because a
