@@ -317,6 +317,9 @@ export default async function ProductPage({ params }: PageProps) {
       step="product_view"
       data={{
         content_ids: [product.meta_catalog_id || product.id],
+        // The TikTok catalog feed (`tiktok_feed.py`) is keyed on the product
+        // UUID, not on the Meta catalog override — keep the two legs apart.
+        tiktok_content_ids: [product.id],
         content_name: product.name,
         content_type: "product",
         value: product.price,

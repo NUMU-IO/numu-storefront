@@ -41,7 +41,12 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { EG_GOVERNORATES, governorateLabel } from "@/lib/eg-governorates";
-import { getSessionFingerprint, trackFunnel } from "@/lib/meta-pixel";
+import {
+  getSessionFingerprint,
+  refireFunnelWithIdentity,
+  trackFunnel,
+} from "@/lib/meta-pixel";
+import { identifyShopper } from "@/lib/meta-identity";
 import { readCartFunnelData } from "@/lib/cart-funnel-data";
 import { claim } from "@/components/tracking/FunnelTracker";
 import { suppressCartTracking, trackCartState } from "@/lib/abandoned-cart";
@@ -335,6 +340,26 @@ export function CheckoutPage() {
   useEffect(() => {
     if (!hasReachableContact) return;
     const id = setTimeout(() => {
+      // The moment the shopper stops being anonymous. Attach the identity to
+      // the browser pixels (Meta Advanced Matching + TikTok `identify` — both
+      // SDKs hash on-device) and to every following /track POST. It lives in
+      // a module closure, never in storage: BYOT bundles share this origin.
+      // The multi-step checkout did this in its contact step; this page —
+      // the one COD stores actually run — never did, so no browser event
+      // ever carried a phone or email.
+      identifyShopper(
+        {
+          email: email.trim() || undefined,
+          phone: composedPhone || undefined,
+          firstName,
+          lastName,
+          city: city || stateGov,
+          state: stateGov || undefined,
+          zip: postalCode || undefined,
+          country,
+        },
+        getSessionFingerprint(),
+      );
       void trackCartState({
         email: email.trim() || undefined,
         phone: composedPhone || undefined,
@@ -349,6 +374,12 @@ export function CheckoutPage() {
           country,
           phone: composedPhone || undefined,
         },
+      }).then(() => {
+        // InitiateCheckout fired on entry, before this form had a value in
+        // it. Re-send it server-side under its original event_id now that
+        // the row it enriches from exists: the platforms dedupe it into the
+        // first delivery and pick up the new match keys.
+        refireFunnelWithIdentity("checkout_started");
       });
     }, 900);
     return () => clearTimeout(id);
@@ -740,6 +771,19 @@ export function CheckoutPage() {
     // payment — if the shopper filled the form and clicked pay faster than the
     // debounced effect fired, this guarantees the row carries their contact so
     // a failed / abandoned payment is still recoverable. Best-effort.
+    identifyShopper(
+      {
+        email: email.trim() || undefined,
+        phone: submitPhone || undefined,
+        firstName,
+        lastName,
+        city: city || stateGov,
+        state: stateGov || undefined,
+        zip: postalCode || undefined,
+        country,
+      },
+      getSessionFingerprint(),
+    );
     void trackCartState({
       email: email.trim() || undefined,
       phone: submitPhone || undefined,
