@@ -111,6 +111,19 @@ export default async function ThankYouPage({
         // purchase contained no products.
         content_ids: contentIds.length ? contentIds : undefined,
         content_type: contentIds.length ? "product" : undefined,
+        // Per-line detail: TikTok's catalog pipeline reads
+        // `contents[].content_id`, and Meta's dynamic ads use the same shape.
+        contents: contentIds.length
+          ? quantityLines
+              .filter((l) => typeof l.product_id === "string" && l.product_id)
+              .map((l) => ({
+                id: l.product_id,
+                quantity: Number(l.quantity) || 1,
+                ...(typeof l.unit_price === "number"
+                  ? { item_price: l.unit_price / 100 }
+                  : {}),
+              }))
+          : undefined,
         num_items:
           quantityLines.reduce((acc, l) => acc + (Number(l.quantity) || 0), 0) ||
           undefined,

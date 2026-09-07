@@ -124,23 +124,62 @@ export function toTikTokProps(
   props.currency = (data.currency as string) || "EGP";
   props.content_type = (data.content_type as string) || "product";
 
-  const contentIds = data.content_ids;
-  if (Array.isArray(contentIds) && contentIds.length) {
-    props.content_id = contentIds.map((c) => String(c)).join(",");
-  } else if (data.content_id) {
-    props.content_id = String(data.content_id);
+  // TikTok may carry its own ids (`tiktok_content_ids`): the Meta leg sends
+  // `meta_catalog_id || id`, but the TikTok catalog feed is keyed on the
+  // product UUID, so a Meta override must never leak into this payload.
+  const idSource: unknown[] =
+    Array.isArray(data.tiktok_content_ids) && data.tiktok_content_ids.length
+      ? data.tiktok_content_ids
+      : Array.isArray(data.content_ids)
+        ? data.content_ids
+        : data.content_id !== undefined && data.content_id !== null
+          ? [data.content_id]
+          : [];
+  const contentIds = idSource
+    .map((c) => String(c).trim())
+    .filter((c) => c.length > 0);
+  if (contentIds.length) {
+    // `content_id` is the pixel-1.x key, kept for reporting continuity;
+    // `content_ids` is the 2.0 key. Neither is what the catalog / Video
+    // Shopping Ads pipeline reads — that is `contents[].content_id`, below.
+    props.content_id = contentIds.join(",");
+    props.content_ids = contentIds;
   }
 
   const rawContents = data.contents;
-  if (Array.isArray(rawContents) && rawContents.length) {
-    props.contents = rawContents
-      .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
-      .map((c) => ({
-        content_id: String(c.id ?? c.content_id ?? ""),
-        quantity: Number(c.quantity ?? 1),
-        price: c.item_price ?? c.price ?? 0,
-      }));
+  let contents: Array<Record<string, unknown>> = Array.isArray(rawContents)
+    ? rawContents
+        .filter(
+          (c): c is Record<string, unknown> => !!c && typeof c === "object",
+        )
+        .map((c) => ({
+          content_id: String(c.id ?? c.content_id ?? "").trim(),
+          quantity: Number(c.quantity ?? 1),
+          price: c.item_price ?? c.price ?? 0,
+        }))
+        // TikTok counts a blank content_id as missing — drop the line.
+        .filter((c) => c.content_id.length > 0)
+    : [];
+  if (!contents.length && contentIds.length) {
+    // ViewContent / AddToCart / Purchase only pass `content_ids`. TikTok's
+    // "Content ID is missing" diagnostic keys on `contents[].content_id`
+    // (required for Video Shopping Ads), so synthesize one line per id.
+    // Price and name are only trustworthy for a single-product event.
+    const single = contentIds.length === 1;
+    const qty =
+      single && data.num_items !== undefined ? Number(data.num_items) || 1 : 1;
+    contents = contentIds.map((id) => ({
+      content_id: id,
+      quantity: qty,
+      ...(single && data.content_name
+        ? { content_name: data.content_name }
+        : {}),
+      ...(single && qty === 1 && typeof data.value === "number"
+        ? { price: data.value }
+        : {}),
+    }));
   }
+  if (contents.length) props.contents = contents;
   if (data.num_items !== undefined) props.quantity = data.num_items;
   if (data.query) props.query = data.query;
   if (data.order_id) props.order_id = data.order_id;

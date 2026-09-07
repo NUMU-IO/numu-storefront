@@ -30,6 +30,8 @@
  * opposite — `hash_user_data()` on the server owns that contract.
  */
 
+import { composePhone } from "@/lib/phone";
+
 export interface ShopperIdentity {
   email?: string;
   phone?: string;
@@ -142,6 +144,24 @@ function advancedMatchingObject(externalId?: string): Record<string, string> {
 }
 
 /**
+ * The `ttq.identify` payload. Raw values — TikTok's SDK hashes on-device —
+ * but the phone must already be E.164 WITH the "+": the SDK hashes exactly
+ * what it is given, so a national "010…" would be a digest of nothing.
+ * `country` is the ISO-2 the checkout collected; Egypt is the default dial.
+ */
+export function tiktokIdentifyPayload(
+  externalId?: string,
+): Record<string, string> {
+  const tt: Record<string, string> = {};
+  if (identity.email) tt.email = identity.email.toLowerCase();
+  if (identity.phone) {
+    tt.phone_number = composePhone(identity.country || "EG", identity.phone);
+  }
+  if (externalId) tt.external_id = externalId;
+  return tt;
+}
+
+/**
  * Re-initialise every configured pixel with Advanced Matching.
  *
  * Meta supports calling `fbq('init', id, userData)` again to attach matching
@@ -176,10 +196,7 @@ export function applyAdvancedMatching(externalId?: string): void {
   try {
     const identify = win.ttq?.identify;
     if (typeof identify === "function") {
-      const tt: Record<string, string> = {};
-      if (identity.email) tt.email = identity.email.toLowerCase();
-      if (identity.phone) tt.phone_number = identity.phone;
-      if (externalId) tt.external_id = externalId;
+      const tt = tiktokIdentifyPayload(externalId);
       if (Object.keys(tt).length > 0) identify(tt);
     }
   } catch {

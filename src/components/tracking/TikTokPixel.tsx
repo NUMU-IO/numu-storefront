@@ -28,7 +28,12 @@ import {
   FUNNEL_STEP_TO_TIKTOK,
   ensureTtclidCaptured,
 } from "@/lib/tiktok-pixel";
-import { EVENT_NAME_TO_FUNNEL_STEP, getEventId } from "@/lib/meta-pixel";
+import {
+  EVENT_NAME_TO_FUNNEL_STEP,
+  getEventId,
+  getSessionFingerprint,
+} from "@/lib/meta-pixel";
+import { tiktokIdentifyPayload } from "@/lib/meta-identity";
 import {
   TP_GATE_SNIPPET,
   type PixelLoadStrategy,
@@ -42,6 +47,7 @@ interface AnalyticsEventDetail {
 
 interface TtqLike {
   page?: () => void;
+  identify?: (data: Record<string, string>) => void;
 }
 
 export function TikTokPixel({
@@ -59,6 +65,18 @@ export function TikTokPixel({
   // any deep-linked entry, not just the home page).
   useEffect(() => {
     ensureTtclidCaptured();
+    // Pseudonymous `external_id` on every page — the same session id the
+    // server leg sends — plus whatever identity the checkout has already
+    // recorded in this document. Lets TikTok join a reloaded thank-you page
+    // (fresh document, identity closure gone) to the checkout session it
+    // already saw with a phone. The base-snippet stub queues `identify`
+    // until the SDK boots, exactly like `ttq.page()`.
+    try {
+      const ttq = (window as unknown as { ttq?: TtqLike }).ttq;
+      ttq?.identify?.(tiktokIdentifyPayload(getSessionFingerprint()));
+    } catch {
+      /* never break navigation */
+    }
   }, [pathname]);
 
   // Pageview on client-side route changes. Skip the first run — the base
