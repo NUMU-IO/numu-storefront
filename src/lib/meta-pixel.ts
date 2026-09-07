@@ -322,6 +322,9 @@ export function pageViewEventId(path: string): string {
 function cleanData(data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
+    // `tiktok_*` keys are addressed to the TikTok mapper only (see
+    // `toTikTokProps`); Meta and the /track proxy must never see them.
+    if (k.startsWith("tiktok_")) continue;
     if (v !== undefined && v !== null) out[k] = v;
   }
   return out;
