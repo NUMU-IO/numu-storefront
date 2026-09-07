@@ -174,7 +174,12 @@ export function toTikTokProps(
       ...(single && data.content_name
         ? { content_name: data.content_name }
         : {}),
-      ...(single && qty === 1 && typeof data.value === "number"
+      // `value` is a unit price only on browse events; a purchase payload
+      // (it carries `order_id`) totals shipping, tax and fees too.
+      ...(single &&
+      qty === 1 &&
+      !data.order_id &&
+      typeof data.value === "number"
         ? { price: data.value }
         : {}),
     }));
