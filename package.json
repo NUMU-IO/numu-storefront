@@ -13,7 +13,8 @@
     "start": "node scripts/start.mjs",
     "lint": "next lint",
     "test:e2e": "playwright test",
-    "clean": "rimraf .next .turbo node_modules/.cache public/__numu-runtime"
+    "clean": "rimraf .next .turbo node_modules/.cache public/__numu-runtime",
+    "check:seo": "node scripts/check-seo-emission.mjs"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^2.0.2",

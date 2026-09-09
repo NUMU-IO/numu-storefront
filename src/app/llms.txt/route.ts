@@ -49,6 +49,7 @@ import { canonicalizeSocialUrl } from "@/lib/json-ld";
 import {
   canonicalOriginFor,
   resolveStoreDomainFromHeaders,
+  storeAllowsAiCrawlers,
   storeBlocksIndexing,
   storeSeoDescription,
   type StoreForSeo,
@@ -254,6 +255,13 @@ export async function GET(): Promise<NextResponse> {
   // `Disallow: /` and the empty sitemap.
   if (storeBlocksIndexing(store)) return plainText("Not found\n", 404);
 
+  // Two more gates the merchant controls. Serving this file to an assistant a
+  // store has told robots.txt to keep out would contradict its own policy in
+  // the one place an assistant looks; `llms_txt_enabled` is the direct opt-out
+  // for a merchant who wants search but not a machine-readable catalogue.
+  if (!storeAllowsAiCrawlers(store)) return plainText("Not found\n", 404);
+  if (store.seo?.llms_txt_enabled === false) return plainText("Not found\n", 404);
+
   const storeId = store.id;
   const origin = canonicalOriginFor(store, domain);
   const lang = (store.default_language ?? "en").toLowerCase().startsWith("ar")
@@ -275,7 +283,9 @@ export async function GET(): Promise<NextResponse> {
   const out: string[] = [];
   out.push(`# ${name}`);
   out.push("");
-  out.push(`> ${mdText(storeSeoDescription(store))}`);
+  out.push(
+    `> ${mdText(store.seo?.short_answer?.trim() || storeSeoDescription(store))}`,
+  );
   out.push("");
   out.push(
     `Online store on NUMU. Prices are shown in ${currency}; the store ships to ${country}. ` +

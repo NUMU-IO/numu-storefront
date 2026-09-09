@@ -46,6 +46,33 @@ export interface StoreForSeo {
      *  see alternatesFor. Default false: chrome being bilingual is not the
      *  same as the products being translated. */
     arabic_content_ready?: boolean | null;
+    /** One quotable paragraph answering "what does this shop sell". Answer
+     *  engines quote a passage rather than summarise a page, so a store with
+     *  nothing quotable is skipped for one that wrote it down. Used as the
+     *  llms.txt summary line. */
+    short_answer?: string | null;
+    /** Merchant-authored Q&A, emitted as FAQPage JSON-LD on the homepage.
+     *  The only structured place to answer "do you deliver to Aswan" in the
+     *  words a shopper actually asks it. */
+    faqs?: { question: string; answer: string }[] | null;
+    /** Whether GPTBot, ClaudeBot, PerplexityBot, Google-Extended and CCBot may
+     *  crawl. Deliberately separate from `robots_indexing_enabled`: wanting
+     *  Google's index and wanting your catalogue in a training corpus are
+     *  different decisions. Default true — being cited by an assistant that
+     *  sends buyers is worth more to most stores than the copy is worth
+     *  withholding. */
+    ai_crawlers_allowed?: boolean | null;
+    /** Serve /llms.txt. Default true. */
+    llms_txt_enabled?: boolean | null;
+    /** Official profile URLs the merchant declared, merged into Organization
+     *  sameAs alongside the ones derived from the social-links map. */
+    same_as?: string[] | null;
+    contact_email?: string | null;
+    contact_phone?: string | null;
+    /** Where the store ships — feeds Organization areaServed, which is what
+     *  "shops that deliver to X" answers are built from. */
+    area_served?: string[] | null;
+    founding_year?: number | null;
   } | null;
   country?: string | null;
   settings?: Record<string, unknown> | null;
@@ -89,6 +116,19 @@ export function storeBlocksIndexing(store: StoreForSeo | null | undefined): bool
   if (status && status !== "active") return true;
   if (store.seo?.robots_indexing_enabled === false) return true;
   return false;
+}
+
+/** True when AI crawlers may read the store.
+ *
+ * Two gates, not one: a store that blocks ordinary indexing is not offering
+ * itself to answer engines either, so `robots_indexing_enabled: false` implies
+ * this. Absent/null means allowed — an unconfigured store should be findable.
+ */
+export function storeAllowsAiCrawlers(
+  store: StoreForSeo | null | undefined,
+): boolean {
+  if (!store || storeBlocksIndexing(store)) return false;
+  return store.seo?.ai_crawlers_allowed !== false;
 }
 
 export function storeRobots(
