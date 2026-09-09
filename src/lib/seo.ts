@@ -62,6 +62,13 @@ export interface StoreForSeo {
      *  sends buyers is worth more to most stores than the copy is worth
      *  withholding. */
     ai_crawlers_allowed?: boolean | null;
+    /** Whether the store's copy and photography may be used as TRAINING
+     *  data. A third decision, not a consequence of the two above: being read
+     *  to answer a shopper's question today and being absorbed into model
+     *  weights forever are different bargains. Defaults FALSE — the only
+     *  default here that does, because this is the merchant's own work and
+     *  they get nothing back for it. */
+    ai_training_allowed?: boolean | null;
     /** Serve /llms.txt. Default true. */
     llms_txt_enabled?: boolean | null;
     /** Official profile URLs the merchant declared, merged into Organization
@@ -129,6 +136,17 @@ export function storeAllowsAiCrawlers(
 ): boolean {
   if (!store || storeBlocksIndexing(store)) return false;
   return store.seo?.ai_crawlers_allowed !== false;
+}
+
+/** True when the store has opted its content into AI training.
+ *
+ * Opt-in, and independent of `storeAllowsAiCrawlers`: a store can be readable
+ * by assistants and still refuse to be trained on. Absent/null means no.
+ */
+export function storeAllowsAiTraining(
+  store: StoreForSeo | null | undefined,
+): boolean {
+  return store?.seo?.ai_training_allowed === true;
 }
 
 export function storeRobots(

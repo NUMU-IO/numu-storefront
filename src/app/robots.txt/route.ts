@@ -35,6 +35,7 @@ import {
   canonicalOriginFor,
   resolveStoreDomainFromHeaders,
   storeAllowsAiCrawlers,
+  storeAllowsAiTraining,
   storeBlocksIndexing,
   type StoreForSeo,
 } from "@/lib/seo";
@@ -45,21 +46,27 @@ export const dynamic = "force-dynamic";
  * Cloudflare's Content Signals policy, expressed per RFC 9309 as an extension
  * directive inside the `User-Agent: *` group.
  *
- *   search    = yes — this is a shop that wants to be found.
- *   ai-input  = yes — answer engines and AI shopping agents MAY read the
- *                     catalog to answer a shopper's question. For a store,
- *                     that is distribution, not leakage.
- *   ai-train  = no  — merchant product photography and copy are not training
- *                     data. This is the one signal a merchant loses by default
- *                     if we say nothing.
+ * No longer hardcoded — both halves are the store's now, which is what the
+ * note that used to sit here asked for.
  *
- * No longer hardcoded. `seo.ai_crawlers_allowed` now exists in the API, so the
- * ai-input half is the merchant's call — which is what the previous note here
- * asked for. ai-train stays `no` platform-wide: merchant product photography
- * and copy are not training data, and no merchant has asked to donate them.
+ *   search    — the store is indexable at all. Already gated by
+ *               `storeBlocksIndexing`; a store that blocks indexing never
+ *               reaches this line.
+ *   ai-input  — `seo.ai_crawlers_allowed`, default yes. Being read to answer
+ *               a shopper's question is distribution for a shop.
+ *   ai-train  — `seo.ai_training_allowed`, default NO. Kept separate from
+ *               ai-input on purpose: a merchant can rationally let an
+ *               assistant read the catalogue to recommend them, and still
+ *               refuse to have their photography absorbed into model weights.
+ *               The default stays what it was platform-wide; the difference
+ *               is that a merchant can now change it.
  */
-function contentSignal(aiAllowed: boolean): string {
-  return `search=yes, ai-input=${aiAllowed ? "yes" : "no"}, ai-train=no`;
+function contentSignal(aiAllowed: boolean, trainAllowed: boolean): string {
+  return [
+    "search=yes",
+    `ai-input=${aiAllowed ? "yes" : "no"}`,
+    `ai-train=${trainAllowed ? "yes" : "no"}`,
+  ].join(", ");
 }
 
 /**
@@ -113,7 +120,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     return textResponse(
       [
         "User-Agent: *",
-        `Content-Signal: ${contentSignal(true)}`,
+        `Content-Signal: ${contentSignal(true, false)}`,
         "Allow: /",
         "",
       ].join("\n"),
@@ -158,6 +165,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   // these read Disallow and ignore extension directives entirely, so a
   // merchant given only a Content-Signal line has opted out of nothing.
   const aiAllowed = storeAllowsAiCrawlers(store);
+  const trainAllowed = storeAllowsAiTraining(store);
   const aiGroups = aiAllowed
     ? []
     : AI_CRAWLERS.flatMap((agent) => [`User-Agent: ${agent}`, "Disallow: /", ""]);
@@ -165,7 +173,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   return textResponse(
     [
       "User-Agent: *",
-      `Content-Signal: ${contentSignal(aiAllowed)}`,
+      `Content-Signal: ${contentSignal(aiAllowed, trainAllowed)}`,
       "Allow: /",
       ...DISALLOW.map((path) => `Disallow: ${path}`),
       "",

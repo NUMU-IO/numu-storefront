@@ -42,7 +42,10 @@ const { buildFaqLd, buildOrganizationLd } = await load(
   "src/lib/json-ld.ts",
   "json-ld",
 );
-const { storeAllowsAiCrawlers } = await load("src/lib/seo.ts", "seo");
+const { storeAllowsAiCrawlers, storeAllowsAiTraining } = await load(
+  "src/lib/seo.ts",
+  "seo",
+);
 
 const BASE = "https://vionne.numueg.app";
 
@@ -115,6 +118,30 @@ assert.equal(
   }),
   false,
   "noindex wins over an ai_crawlers_allowed left at true",
+);
+
+// ── AI training gate ───────────────────────────────────────────────────────
+// The one default that says no. Every other SEO default favours being found;
+// this is the merchant's own photography and copy and they get nothing back,
+// so opting in has to be an act.
+assert.equal(
+  storeAllowsAiTraining({ status: "active" }),
+  false,
+  "training is opt-in, not opt-out",
+);
+assert.equal(storeAllowsAiTraining(null), false);
+assert.equal(
+  storeAllowsAiTraining({ status: "active", seo: { ai_training_allowed: true } }),
+  true,
+);
+// Independent of ai-input: readable by assistants, still not trainable.
+assert.equal(
+  storeAllowsAiTraining({
+    status: "active",
+    seo: { ai_crawlers_allowed: true },
+  }),
+  false,
+  "letting an assistant read the catalogue is not consent to be trained on",
 );
 
 rmSync(dir, { recursive: true, force: true });
