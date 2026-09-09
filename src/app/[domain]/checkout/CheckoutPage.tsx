@@ -224,6 +224,9 @@ const T = {
   additional: { en: "Additional details", ar: "تفاصيل إضافية" },
   loadingShip: { en: "Loading shipping options…", ar: "جارٍ تحميل خيارات الشحن…" },
   noRates: { en: "No shipping options available for this address.", ar: "لا توجد خيارات شحن متاحة لهذا العنوان." },
+  // COD is off for this governorate. The address is fine — the generic
+  // message sends the shopper to edit an address that was never wrong.
+  noRatesCod: { en: "Cash on delivery isn't available for this address. Choose another payment method to continue.", ar: "الدفع عند الاستلام مش متاح للعنوان ده. اختار طريقة دفع تانية عشان تكمّل." },
   selectGovFirst: { en: "Select your governorate to see shipping options.", ar: "اختر محافظتك لعرض خيارات الشحن." },
   free: { en: "Free", ar: "مجاناً" },
   days: { en: "business days", ar: "أيام عمل" },
@@ -400,6 +403,9 @@ export function CheckoutPage() {
 
   // Shipping
   const [rates, setRates] = useState<ShippingRateOption[] | null>(null);
+  // Why the backend returned no options. `cod_unavailable` means the
+  // merchant switched COD off for this governorate.
+  const [noRatesReason, setNoRatesReason] = useState<string | null>(null);
   const [selectedRate, setSelectedRate] = useState<string | null>(null);
   const [shippingLoading, setShippingLoading] = useState(false);
 
@@ -623,9 +629,15 @@ export function CheckoutPage() {
         });
         if (cancelled) return;
         if (!res.ok) {
+          setNoRatesReason(null);
           setRates([]);
         } else {
           const body = await res.json();
+          setNoRatesReason(
+            (body?.data?.unavailable_reason ?? body?.unavailable_reason ?? null) as
+              | string
+              | null,
+          );
           const raw = (body?.data?.options || body?.options || body?.data || []) as Array<
             Record<string, unknown>
           >;
@@ -1492,7 +1504,9 @@ export function CheckoutPage() {
             <CheckoutCard title={t("shipping")}>
               {shippingLoading && <p className="text-sm text-[var(--ck-muted)]">{t("loadingShip")}</p>}
               {!shippingLoading && rates && rates.length === 0 && (
-                <p className="text-sm text-red-700">{t("noRates")}</p>
+                <p className="text-sm text-red-700">
+                  {t(noRatesReason === "cod_unavailable" ? "noRatesCod" : "noRates")}
+                </p>
               )}
               {!shippingLoading && rates && rates.length > 0 && (
                 <ul className="space-y-2.5">

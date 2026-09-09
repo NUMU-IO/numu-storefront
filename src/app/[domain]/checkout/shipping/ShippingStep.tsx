@@ -61,6 +61,13 @@ const T = {
     en: "No shipping options available for this address.",
     ar: "لا توجد خيارات شحن متاحة لهذا العنوان.",
   },
+  // The merchant switched cash on delivery off for this governorate. The
+  // address is fine — telling the shopper otherwise sends them to edit an
+  // address that was never the problem, and they fail again and leave.
+  noRatesCod: {
+    en: "Cash on delivery isn't available for this address. Choose another payment method to continue.",
+    ar: "الدفع عند الاستلام مش متاح للعنوان ده. اختار طريقة دفع تانية عشان تكمّل.",
+  },
   editAddress: { en: "Edit address", ar: "تعديل العنوان" },
   days: { en: "business days", ar: "أيام عمل" },
   pickRate: { en: "Pick a shipping option to continue.", ar: "اختر طريقة شحن للمتابعة." },
@@ -87,6 +94,10 @@ export function ShippingStep() {
   >(null);
   const [pickupId, setPickupId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Why the backend returned no options, when it did. `cod_unavailable`
+  // means the merchant switched COD off for this governorate — the
+  // address is fine, so the generic message would be wrong.
+  const [noRatesReason, setNoRatesReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState("en");
 
@@ -179,6 +190,7 @@ export function ShippingStep() {
         const [ratesRes, pickupRes] = await Promise.all([ratesP, pickupP]);
 
         if (!ratesRes.ok) {
+          setNoRatesReason(null);
           if (ratesRes.status === 404) {
             setRates([]);
           } else {
@@ -190,6 +202,11 @@ export function ShippingStep() {
           // Backend (ShippingOptionResponse) returns rate_id/label/label_ar;
           // the component renders id/name. Normalize so the existing markup
           // and the saved selected_shipping_rate_id stay correct.
+          setNoRatesReason(
+            (body?.data?.unavailable_reason ??
+              body?.unavailable_reason ??
+              null) as string | null,
+          );
           const raw = (body?.data?.options ||
             body?.options ||
             body?.data ||
@@ -417,7 +434,7 @@ export function ShippingStep() {
             )}
             {!loading && rates && rates.length === 0 && (
               <p className="text-sm text-gray-700">
-                {t("noRates")}{" "}
+                {t(noRatesReason === "cod_unavailable" ? "noRatesCod" : "noRates")}{" "}
                 <Link
                   href={`/${params.domain}/checkout`}
                   className="font-medium text-gray-900 underline underline-offset-2"
