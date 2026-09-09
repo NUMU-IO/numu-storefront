@@ -34,6 +34,7 @@ import { fetchStoreByDomain } from "@/lib/api-client";
 import {
   canonicalOriginFor,
   resolveStoreDomainFromHeaders,
+  storeAllowsAiCrawlers,
   storeBlocksIndexing,
   type StoreForSeo,
 } from "@/lib/seo";
@@ -52,14 +53,35 @@ export const dynamic = "force-dynamic";
  *                     data. This is the one signal a merchant loses by default
  *                     if we say nothing.
  *
- * ⚠️ PLATFORM-WIDE DEFAULT, hardcoded. It applies to `rabbit` exactly as it
- * applies to `vionne`. This is defensible as a default for a commerce
- * storefront, but it is genuinely a merchant policy choice and belongs in store
- * settings (alongside the existing indexing toggle read by
- * `storeBlocksIndexing`) rather than in code. Flagged in the remediation plan;
- * not built here because the setting does not exist in the API yet.
+ * No longer hardcoded. `seo.ai_crawlers_allowed` now exists in the API, so the
+ * ai-input half is the merchant's call — which is what the previous note here
+ * asked for. ai-train stays `no` platform-wide: merchant product photography
+ * and copy are not training data, and no merchant has asked to donate them.
  */
-const CONTENT_SIGNAL = "search=yes, ai-input=yes, ai-train=no";
+function contentSignal(aiAllowed: boolean): string {
+  return `search=yes, ai-input=${aiAllowed ? "yes" : "no"}, ai-train=no`;
+}
+
+/**
+ * Crawlers that read a page to answer a question, or to train on it.
+ *
+ * Content-Signal states the policy; these groups enforce it. Several of these
+ * agents read `Disallow` and ignore extension directives entirely, so a
+ * merchant who opts out and gets only a Content-Signal line has opted out of
+ * nothing. Listing them explicitly is the half that actually binds.
+ */
+const AI_CRAWLERS = [
+  "GPTBot",
+  "OAI-SearchBot",
+  "ChatGPT-User",
+  "ClaudeBot",
+  "Claude-User",
+  "PerplexityBot",
+  "Google-Extended",
+  "CCBot",
+  "Applebot-Extended",
+  "meta-externalagent",
+];
 
 const DISALLOW = [
   "/cart",
@@ -89,9 +111,12 @@ export async function GET(req: NextRequest): Promise<Response> {
   // robots.txt as "do not crawl this site at all".
   if (!domain) {
     return textResponse(
-      ["User-Agent: *", `Content-Signal: ${CONTENT_SIGNAL}`, "Allow: /", ""].join(
-        "\n",
-      ),
+      [
+        "User-Agent: *",
+        `Content-Signal: ${contentSignal(true)}`,
+        "Allow: /",
+        "",
+      ].join("\n"),
     );
   }
 
@@ -129,13 +154,22 @@ export async function GET(req: NextRequest): Promise<Response> {
     ? `${canonicalOriginFor(store, domain)}/sitemap.xml`
     : `http://${(req.headers.get("host") || "localhost:3100").trim()}/sitemap.xml`;
 
+  // A store that opted out gets an explicit Disallow per agent. Several of
+  // these read Disallow and ignore extension directives entirely, so a
+  // merchant given only a Content-Signal line has opted out of nothing.
+  const aiAllowed = storeAllowsAiCrawlers(store);
+  const aiGroups = aiAllowed
+    ? []
+    : AI_CRAWLERS.flatMap((agent) => [`User-Agent: ${agent}`, "Disallow: /", ""]);
+
   return textResponse(
     [
       "User-Agent: *",
-      `Content-Signal: ${CONTENT_SIGNAL}`,
+      `Content-Signal: ${contentSignal(aiAllowed)}`,
       "Allow: /",
       ...DISALLOW.map((path) => `Disallow: ${path}`),
       "",
+      ...aiGroups,
       `Sitemap: ${sitemapUrl}`,
       "",
     ].join("\n"),
