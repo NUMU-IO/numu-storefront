@@ -345,6 +345,17 @@ export interface BuildOrganizationLdProps {
   /** `store.seo.business_type` — a Schema.org Organization subtype such as
    *  "ClothingStore" or "JewelryStore". Null/absent = plain "Organization". */
   businessType?: string | null;
+  /** `store.seo.same_as` — profile URLs the merchant declared explicitly.
+   *  Merged with the ones derived from the social-links map: a merchant may
+   *  list a marketplace or press page that is not a "social link" at all. */
+  declaredProfiles?: string[] | null;
+  /** Public contact. An organization with no way to reach it reads as
+   *  unverified to both search and assistants. */
+  email?: string | null;
+  telephone?: string | null;
+  /** `store.seo.area_served` — what "shops that deliver to X" is built from. */
+  areaServed?: string[] | null;
+  foundingYear?: number | null;
 }
 
 export function buildOrganizationLd({
@@ -354,6 +365,11 @@ export function buildOrganizationLd({
   description,
   socialLinks,
   businessType,
+  declaredProfiles,
+  email,
+  telephone,
+  areaServed,
+  foundingYear,
 }: BuildOrganizationLdProps): Record<string, unknown> {
   // sameAs is the schema.org canonical for "list of social profiles"
   // — Twitter / Facebook / Instagram / etc. Search engines use this
@@ -373,7 +389,29 @@ export function buildOrganizationLd({
     : [];
   // Two aliases of one profile (m.facebook.com/x and www.facebook.com/x) collapse
   // to the same string above, and listing it twice weakens rather than doubles it.
-  const sameAs = urls.length > 0 ? [...new Set(urls)] : undefined;
+  // Merchant-declared profiles get the same canonicalisation as the derived
+  // ones — the field is free text in the SEO tab, so it can carry a share
+  // link or a tracking-tagged URL just as easily.
+  const declared = (declaredProfiles ?? [])
+    .map((u) => (typeof u === "string" ? canonicalizeSocialUrl(u) : null))
+    .filter((u): u is string => u !== null);
+  const allUrls = [...urls, ...declared];
+  const sameAs = allUrls.length > 0 ? [...new Set(allUrls)] : undefined;
+
+  // Only emit what the merchant actually stated. An empty contactPoint or a
+  // guessed areaServed is a claim, and a wrong claim costs more than a
+  // missing one — the same reason sameAs is undefined rather than [].
+  const areas = (areaServed ?? []).map((a) => a.trim()).filter(Boolean);
+  const contactPoint =
+    email || telephone
+      ? {
+          "@type": "ContactPoint",
+          contactType: "customer support",
+          ...(email ? { email } : {}),
+          ...(telephone ? { telephone } : {}),
+        }
+      : undefined;
+
   return {
     "@context": "https://schema.org",
     // A merchant-declared subtype (ClothingStore, JewelryStore, …) is a direct
@@ -387,6 +425,53 @@ export function buildOrganizationLd({
     description,
     logo: logoUrl,
     sameAs,
+    ...(contactPoint ? { contactPoint } : {}),
+    ...(email ? { email } : {}),
+    ...(telephone ? { telephone } : {}),
+    ...(areas.length > 0 ? { areaServed: areas } : {}),
+    // Year only: schema.org/foundingDate takes ISO 8601, and a bare year is
+    // valid. Inventing a month would be a fact nobody gave us.
+    ...(foundingYear ? { foundingDate: String(foundingYear) } : {}),
+  };
+}
+
+export interface FaqPair {
+  question: string;
+  answer: string;
+}
+
+/**
+ * FAQPage JSON-LD from the merchant's own Q&A.
+ *
+ * The highest-leverage structured data a shop can publish: it is the only
+ * place to answer "do you deliver to Aswan" in the words a shopper types, and
+ * both rich results and answer engines read it directly.
+ *
+ * Returns null rather than an empty FAQPage when there is nothing to say —
+ * an FAQPage with zero questions is an invalid entity, and publishing one is
+ * worse than publishing none.
+ */
+export function buildFaqLd(
+  baseUrl: string,
+  faqs: FaqPair[] | null | undefined,
+): Record<string, unknown> | null {
+  const pairs = (faqs ?? [])
+    .map((f) => ({
+      question: (f?.question ?? "").trim(),
+      answer: (f?.answer ?? "").trim(),
+    }))
+    .filter((f) => f.question && f.answer);
+  if (pairs.length === 0) return null;
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "@id": `${baseUrl}#faq`,
+    mainEntity: pairs.map((f) => ({
+      "@type": "Question",
+      name: f.question,
+      acceptedAnswer: { "@type": "Answer", text: f.answer },
+    })),
   };
 }
 

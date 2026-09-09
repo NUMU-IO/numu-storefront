@@ -4,6 +4,7 @@ import { PageTemplateRenderer } from "@/components/theme-engine/PageTemplateRend
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import {
+  buildFaqLd,
   buildOrganizationLd,
   buildWebsiteLd,
   serializeLd,
@@ -187,7 +188,18 @@ export default async function HomePage({ params }: PageProps) {
     // homepage says what kind of retailer this is instead of "some
     // organization" — the classification signal crawlers actually read.
     businessType: storeForSeo.seo?.business_type ?? null,
+    // Entity signals the merchant declared in the SEO tab. These are what let
+    // an engine decide an Instagram page and this store are one business, and
+    // what "shops that deliver to X" answers are built from.
+    declaredProfiles: storeForSeo.seo?.same_as ?? null,
+    email: storeForSeo.seo?.contact_email ?? null,
+    telephone: storeForSeo.seo?.contact_phone ?? null,
+    areaServed: storeForSeo.seo?.area_served ?? null,
+    foundingYear: storeForSeo.seo?.founding_year ?? null,
   });
+  // Null when the merchant has written no FAQs — an FAQPage with no questions
+  // is an invalid entity, so it is omitted rather than emitted empty.
+  const faqLd = buildFaqLd(baseUrl, storeForSeo.seo?.faqs ?? null);
   const websiteLd = buildWebsiteLd({
     baseUrl,
     storeName: store.name || domain,
@@ -233,6 +245,12 @@ export default async function HomePage({ params }: PageProps) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeLd(websiteLd) }}
       />
+      {faqLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: serializeLd(faqLd) }}
+        />
+      )}
     </>
   );
 

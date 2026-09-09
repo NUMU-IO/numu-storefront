@@ -76,20 +76,29 @@ export function resolveTikTokPixelIds(store: unknown): string[] {
 // ── Event map ────────────────────────────────────────────────────────────────
 
 /**
- * Backend funnel-step → TikTok standard-event name. NB: TikTok's purchase
- * event is `CompletePayment` (NOT "Purchase"). `page_view` is intentionally
- * absent — bare page views fire via `ttq.page()`, not `ttq.track`.
+ * Backend funnel-step → TikTok standard-event name.
+ *
+ * TikTok renamed two of these effective 2025-05-01: `CompletePayment` →
+ * `Purchase` and `SubmitForm` → `Lead`. The legacy names still work (TikTok
+ * auto-converts them) but these are the current codes.
+ *
+ * MUST stay identical to `FUNNEL_STEP_TO_TIKTOK_EVENT` in the API's
+ * `tasks/tiktok_capi.py`: deduplication keys on the event NAME, so renaming
+ * one leg and not the other turns every conversion into two events.
+ *
+ * `page_view` is intentionally absent — bare page views fire via `ttq.page()`,
+ * not `ttq.track`.
  */
 export const FUNNEL_STEP_TO_TIKTOK: Record<string, string> = {
   product_view: "ViewContent",
   add_to_cart: "AddToCart",
   checkout_started: "InitiateCheckout",
   add_payment_info: "AddPaymentInfo",
-  order_completed: "CompletePayment",
+  order_completed: "Purchase",
   search: "Search",
   complete_registration: "CompleteRegistration",
   add_to_wishlist: "AddToWishlist",
-  lead: "SubmitForm",
+  lead: "Lead",
 };
 
 // ── Window accessor ──────────────────────────────────────────────────────────
@@ -186,7 +195,14 @@ export function toTikTokProps(
   }
   if (contents.length) props.contents = contents;
   if (data.num_items !== undefined) props.quantity = data.num_items;
-  if (data.query) props.query = data.query;
+  // Both keys on purpose — TikTok's Events API reference names `query` while
+  // its Pixel standard-events table lists `search_string`, and the host funnel
+  // builds Meta-shaped data (`search_string`). Mirrors `_to_tiktok_properties`.
+  const searchTerm = data.query ?? data.search_string;
+  if (searchTerm) {
+    props.query = searchTerm;
+    props.search_string = searchTerm;
+  }
   if (data.order_id) props.order_id = data.order_id;
   return props;
 }
@@ -224,7 +240,7 @@ const TTCLID_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 /**
  * Capture the `ttclid` URL param (present when the visitor arrives from a
  * TikTok ad) into a 30-day cookie + localStorage so the server-side proxy and
- * the order-time CompletePayment can attach it. Idempotent; safe to call on
+ * the order-time Purchase can attach it. Idempotent; safe to call on
  * every mount / navigation. Returns the current ttclid if known.
  */
 export function ensureTtclidCaptured(): string | null {
