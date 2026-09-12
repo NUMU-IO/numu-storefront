@@ -3,8 +3,8 @@
 # deploy-storefront-ec2.sh — deploy the V3 storefront on the dedicated prod EC2
 # =============================================================================
 # Runs ON the EC2 box. PULLS the prebuilt image from GHCR (built in CI), then
-# recreates the storefront + nginx and health-gates the storefront. The box
-# never builds, so it can't OOM on `next build`.
+# recreates and health-gates only the storefront. nginx, n8n, and Uptime Kuma
+# stay running. The box never builds, so it can't OOM on `next build`.
 #
 # Pre-reqs on the box (one-time):
 #   - docker logged in to ghcr.io  (the CD does this with the run's token; for a
@@ -26,6 +26,8 @@ cd "${REPO_ROOT}"
 COMPOSE_FILE="deploy/docker-compose.storefront.ec2.yml"
 ENV_FILE="deploy/.env.prod"
 STOREFRONT="numu-storefront-prod"
+NGINX="numu-storefront-nginx"
+WARMUP_HOSTS="${NUMU_STOREFRONT_WARMUP_HOSTS:-vionneeg.com ravin.numueg.app rabbit.numueg.app}"
 
 HEALTH_TIMEOUT_SEC=150
 HEALTH_POLL_INTERVAL=3
@@ -82,16 +84,23 @@ fi
 log "Pulling storefront image..."
 docker pull "${NUMU_STOREFRONT_IMAGE}"
 
-# Clear any stale/orphaned named container so --force-recreate can't collide.
-log "Clearing stale ${STOREFRONT} container(s)..."
-docker ps -aq --filter "name=${STOREFRONT}" | xargs -r docker rm -f >/dev/null 2>&1 || true
-
-log "Recreating storefront + nginx..."
-compose up -d --force-recreate
+log "Recreating storefront only; nginx, n8n, and Uptime Kuma stay online..."
+compose up -d --no-deps --force-recreate storefront
 
 if ! wait_until_healthy "${STOREFRONT}"; then
     die "deploy failed — ${STOREFRONT} unhealthy (see logs above)."
 fi
+
+log "Warming important storefronts before routing traffic..."
+read -r -a warmup_hosts <<< "${WARMUP_HOSTS}"
+for host in "${warmup_hosts[@]}"; do
+    docker exec "${STOREFRONT}" wget -qO /dev/null --header="Host: ${host}" http://127.0.0.1:3000/ \
+        || die "warm-up failed for ${host}"
+done
+
+log "Reloading nginx so it resolves the replacement container immediately..."
+docker exec "${NGINX}" nginx -t
+docker exec "${NGINX}" nginx -s reload
 
 log "Pruning dangling images..."
 docker image prune -f >/dev/null || true
