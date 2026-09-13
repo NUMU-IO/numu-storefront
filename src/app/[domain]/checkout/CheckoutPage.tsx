@@ -278,8 +278,13 @@ const T = {
   noPay: { en: "No payment methods configured for this store.", ar: "لا توجد طرق دفع مفعّلة لهذا المتجر." },
   savedCards: { en: "Saved cards", ar: "البطاقات المحفوظة" },
   newCard: { en: "Enter a new card", ar: "إدخال بطاقة جديدة" },
-  codDeposit: { en: "COD deposit gateway", ar: "بوابة عربون الدفع عند الاستلام" },
-  pickGateway: { en: "— pick gateway —", ar: "— اختر بوابة —" },
+  depositTitle: { en: "Deposit confirms this order", ar: "عربون يأكد الطلب" },
+  depositHint: {
+    en: "Pay part now to lock it in — the rest is cash on delivery.",
+    ar: "ادفع جزء دلوقتي عشان نأكد الطلب — والباقي كاش عند الاستلام.",
+  },
+  depositVia: { en: "Deposit paid via", ar: "العربون يتدفع عن طريق" },
+  depositWith: { en: "Pay the deposit with", ar: "ادفع العربون بـ" },
   payNow: { en: "Pay now", ar: "تدفع دلوقتي" },
   payOnDelivery: { en: "On delivery", ar: "عند الاستلام" },
   confirm: { en: "Confirm Order", ar: "تأكيد الطلب" },
@@ -623,6 +628,45 @@ export function CheckoutPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cart subtotal on mount, independent of shipping. The shipping effect
+  // reads the same figure, but it bails out before the shopper picks a
+  // governorate — which left the deposit threshold unknown, and an unknown
+  // total shows the deposit panel. Under-threshold orders were asked for a
+  // deposit purely because the page hadn't looked at the cart yet.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/cart", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = await res.json();
+        const cart = (body?.data || body) as {
+          subtotal?: number;
+          items?: Array<{
+            total_price?: number;
+            subtotal?: number;
+            unit_price?: number;
+            quantity: number;
+          }>;
+        };
+        const subtotal =
+          cart?.subtotal ??
+          cart?.items?.reduce(
+            (acc, l) => acc + (l.total_price ?? l.subtotal ?? (l.unit_price ?? 0) * l.quantity),
+            0,
+          ) ??
+          0;
+        if (!cancelled) setCartSubtotal(subtotal);
+      } catch {
+        // Leave it null — the deposit panel then shows regardless, which is
+        // the safe direction when we cannot size the order.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ── Shipping options: refetch on governorate / cart / COD change ──
   const codRequested = method === "cod";
   useEffect(() => {
@@ -729,6 +773,16 @@ export function CheckoutPage() {
       });
     }
   }, [selectedRate, rates]);
+
+  // A gateway list of one is not a choice. Select it up front so the shopper
+  // never opens a control to confirm the only answer — and so the submit
+  // guard, which requires a gateway whenever a deposit is due, is satisfied
+  // without them touching anything.
+  const depositGateways = payConfig?.cod.deposit_gateways ?? [];
+  const onlyGateway = depositGateways.length === 1 ? depositGateways[0] : null;
+  useEffect(() => {
+    if (onlyGateway && depositGateway !== onlyGateway) setDepositGateway(onlyGateway);
+  }, [onlyGateway, depositGateway]);
 
   function setCustom(id: string, v: unknown) {
     setCustomValues((prev) => ({ ...prev, [id]: v }));
@@ -1666,41 +1720,80 @@ export function CheckoutPage() {
             )}
 
             {showDeposit && (
-              <div className="mt-4">
-                {/* What the deposit actually costs, stated before the gateway
-                    choice. "A deposit is required" without a number is the
-                    part shoppers abandon on. */}
+              <div
+                className="mt-4 border border-[var(--ck-border)] border-s-[3px] border-s-[var(--ck-accent)] p-3.5"
+                style={{ borderRadius: "var(--ck-radius-sm)" }}
+              >
+                <p className="font-semibold text-[var(--ck-fg)]">{t("depositTitle")}</p>
+                <p className="mt-0.5 text-xs text-[var(--ck-muted)]">{t("depositHint")}</p>
+
+                {/* The amount, before the gateway. "A deposit is required"
+                    without a number is the part shoppers abandon on. */}
                 {depositDue > 0 && orderTotalCents !== null && (
-                  <dl className="mb-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
-                    <div className="flex items-baseline gap-2">
-                      <dt className="text-[var(--ck-muted)]">{t("payNow")}</dt>
-                      <dd className="font-semibold">
+                  <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 border-t border-[var(--ck-border)] pt-3">
+                    <div className="flex flex-col gap-0.5">
+                      <dt className="text-[11px] uppercase tracking-wider text-[var(--ck-muted)]">
+                        {t("payNow")}
+                      </dt>
+                      <dd className="text-base font-bold tabular-nums text-[var(--ck-accent)]">
                         {formatCents(depositDue, currencyCode)}
                       </dd>
                     </div>
-                    <div className="flex items-baseline gap-2">
-                      <dt className="text-[var(--ck-muted)]">{t("payOnDelivery")}</dt>
-                      <dd className="font-semibold">
+                    <div className="flex flex-col gap-0.5">
+                      <dt className="text-[11px] uppercase tracking-wider text-[var(--ck-muted)]">
+                        {t("payOnDelivery")}
+                      </dt>
+                      <dd className="text-base font-bold tabular-nums text-[var(--ck-fg)]">
                         {formatCents(orderTotalCents - depositDue, currencyCode)}
                       </dd>
                     </div>
                   </dl>
                 )}
-                <Field label={t("codDeposit")} htmlFor="deposit-gw">
-                  <Select
-                    id="deposit-gw"
-                    value={depositGateway || ""}
-                    onChange={(e) => setDepositGateway(e.target.value)}
-                    className="max-w-xs"
-                  >
-                    <option value="">{t("pickGateway")}</option>
-                    {(payConfig?.cod.deposit_gateways || []).map((g) => (
-                      <option key={g} value={g}>
-                        {methodLabel(g, isAr)}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+
+                {/* One gateway is a statement, not a question — it is already
+                    selected, so say which rail and move on. Two or more get
+                    the same row control as the payment methods above, rather
+                    than a second visual language for the same kind of pick. */}
+                {onlyGateway ? (
+                  <p className="mt-3 flex items-center gap-2 text-xs text-[var(--ck-muted)]">
+                    <PaymentMark code={onlyGateway} isAr={isAr} />
+                    <span>
+                      {t("depositVia")} {methodLabel(onlyGateway, isAr)}
+                    </span>
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-3 text-xs text-[var(--ck-muted)]">{t("depositWith")}</p>
+                    <ul className="mt-1.5 space-y-2.5">
+                      {depositGateways.map((g) => (
+                        <li key={g}>
+                          <OptionRow htmlFor={`dep-${g}`} selected={depositGateway === g}>
+                            <input
+                              id={`dep-${g}`}
+                              type="radio"
+                              name="deposit-gateway"
+                              checked={depositGateway === g}
+                              onChange={() => setDepositGateway(g)}
+                              className="sr-only"
+                            />
+                            <PaymentMark code={g} isAr={isAr} />
+                            <span className="flex-1">
+                              <span className="block font-medium text-[var(--ck-fg)]">
+                                {methodLabel(g, isAr)}
+                              </span>
+                              {methodSubLabel(g, isAr) && (
+                                <span className="text-xs text-[var(--ck-muted)]">
+                                  {methodSubLabel(g, isAr)}
+                                </span>
+                              )}
+                            </span>
+                            {depositGateway === g ? <SelectedDot /> : <UnselectedDot />}
+                          </OptionRow>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             )}
 
