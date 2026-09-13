@@ -19,6 +19,8 @@ import {
   readCheckoutState,
 } from "@/lib/checkout-state";
 import { getSessionFingerprint, trackFunnel } from "@/lib/meta-pixel";
+import { depositDueCents, type DepositPolicyConfig } from "@/lib/deposit";
+import { formatCents } from "@/lib/money";
 import { claim } from "@/components/tracking/FunnelTracker";
 import { readCartFunnelData } from "@/lib/cart-funnel-data";
 
@@ -49,7 +51,15 @@ interface MethodOption {
 /** Internal, normalized config the component renders from. */
 interface CheckoutConfig {
   methods: MethodOption[];
-  cod: { enabled: boolean; deposit_gateways: string[] };
+  cod: {
+    enabled: boolean;
+    deposit_gateways: string[];
+    /** Sizing rule, so we can quote the split before the order exists. */
+    policy: DepositPolicyConfig;
+    /** False when the backend predates the sizing fields — then we can't
+     *  compute an amount and must assume every COD order needs a deposit. */
+    policy_known: boolean;
+  };
   saved_cards_enabled: boolean;
 }
 
@@ -62,8 +72,24 @@ interface RawCheckoutConfig {
     enabled?: boolean;
     deposit_required?: boolean;
     deposit_gateways?: string[];
+    deposit_mode?: "fixed" | "percent";
+    deposit_amount_cents?: number;
+    deposit_percent?: number;
+    deposit_min_order_cents?: number;
   };
   saved_cards_enabled?: boolean;
+}
+
+/** The slice of the cart response the deposit estimate reads. */
+interface CartTotals {
+  items?: { total_price?: number; subtotal?: number }[];
+  subtotal?: number;
+  total?: number;
+  discount_amount?: number;
+  applied_promotions?: { amount?: number }[];
+  shipping_cost?: number;
+  tax_amount?: number;
+  currency?: string;
 }
 
 interface SavedCard {
@@ -78,7 +104,12 @@ const SAVED_CARD_GATEWAYS = new Set(["paymob", "paymob_card", "kashier"]);
 
 const FALLBACK_CONFIG: CheckoutConfig = {
   methods: [{ code: "paymob" }, { code: "cod" }],
-  cod: { enabled: false, deposit_gateways: [] },
+  cod: {
+    enabled: false,
+    deposit_gateways: [],
+    policy: { enabled: false },
+    policy_known: false,
+  },
   saved_cards_enabled: true,
 };
 
@@ -107,7 +138,24 @@ function normalizeConfig(raw: RawCheckoutConfig | null | undefined): CheckoutCon
 
   return {
     methods,
-    cod: { enabled: codEnabled, deposit_gateways: depositGateways },
+    cod: {
+      enabled: codEnabled,
+      deposit_gateways: depositGateways,
+      // Absent on an older backend. The defaults below would then size every
+      // order at zero and hide the picker, so `policy_known` keeps the
+      // pre-threshold behaviour instead: ask on every COD order.
+      policy_known:
+        raw.cod?.deposit_mode !== undefined ||
+        raw.cod?.deposit_amount_cents !== undefined ||
+        raw.cod?.deposit_min_order_cents !== undefined,
+      policy: {
+        enabled: codEnabled,
+        mode: raw.cod?.deposit_mode ?? "fixed",
+        amount_cents: raw.cod?.deposit_amount_cents ?? 0,
+        percent: raw.cod?.deposit_percent ?? 50,
+        min_order_cents: raw.cod?.deposit_min_order_cents ?? 0,
+      },
+    },
     // Default true so a backend that doesn't yet emit the flag still shows
     // saved cards when the customer has any on file.
     saved_cards_enabled: raw.saved_cards_enabled ?? true,
@@ -158,6 +206,8 @@ const T = {
     ar: "المتجر ده بيطلب عربون بسيط لطلبات الدفع عند الاستلام. اختر بوابة الدفع:",
   },
   pickGateway: { en: "— pick gateway —", ar: "— اختر بوابة —" },
+  payNow: { en: "Pay now", ar: "تدفع دلوقتي" },
+  payOnDelivery: { en: "On delivery", ar: "عند الاستلام" },
   pickMethod: { en: "Pick a payment method to continue.", ar: "اختر طريقة دفع للمتابعة." },
   pickDeposit: {
     en: "Pick a gateway for the COD deposit payment.",
@@ -178,6 +228,8 @@ export function PaymentStep() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState("en");
+  const [orderTotal, setOrderTotal] = useState<number | null>(null);
+  const [currency, setCurrency] = useState("EGP");
   // Apple Pay only exists in Safari on Apple devices — false until detected on
   // mount, so the dedicated Apple Pay options stay hidden everywhere else.
   const [canApplePay, setCanApplePay] = useState(false);
@@ -239,6 +291,47 @@ export function PaymentStep() {
         setLoading(false);
       }
 
+      // Order total, needed to decide whether this basket crosses the
+      // merchant's deposit threshold and to quote the split. Mirrors the
+      // Breakdown in OrderSummary.
+      // ponytail: duplicated total math; extract a shared cartTotalCents if a
+      // third caller appears.
+      try {
+        const res = await fetch("/api/cart", { cache: "no-store" });
+        if (res.ok) {
+          const body = await res.json();
+          const cart = (body?.data || body) as CartTotals;
+          const subtotal =
+            cart.subtotal ??
+            (cart.items || []).reduce(
+              (sum, l) => sum + (l.total_price ?? l.subtotal ?? 0),
+              0,
+            );
+          const offers = (cart.applied_promotions || []).reduce(
+            (sum, pr) => sum + (pr.amount || 0),
+            0,
+          );
+          const shipping =
+            cart.shipping_cost ?? readCheckoutState().shipping_cost_cents ?? 0;
+          setOrderTotal(
+            cart.total ??
+              Math.max(
+                0,
+                subtotal -
+                  (cart.discount_amount ?? 0) -
+                  offers +
+                  shipping +
+                  (cart.tax_amount ?? 0),
+              ),
+          );
+          if (cart.currency) setCurrency(cart.currency);
+        }
+      } catch {
+        // Leave orderTotal null — the picker then shows regardless, which is
+        // the safe direction: the alternative is hiding it on an order the
+        // server does require a deposit for, which 400s at submit.
+      }
+
       // Saved cards are only fetched when the store enables them.
       if (!savedCardsEnabled) {
         setSavedCards([]);
@@ -279,7 +372,7 @@ export function PaymentStep() {
       return;
     }
     const codSelected = method === "cod";
-    const depositRequired = codSelected && Boolean(config?.cod.enabled);
+    const depositRequired = codSelected && depositApplies;
     if (depositRequired && !depositGateway) {
       setError(t("pickDeposit"));
       return;
@@ -319,7 +412,15 @@ export function PaymentStep() {
   const methods = (config?.methods || []).filter(
     (m) => canApplePay || !m.code.endsWith("_applepay"),
   );
-  const showDepositPicker = method === "cod" && Boolean(config?.cod.enabled);
+  // Sized from the same policy the server enforces with. A null total means we
+  // could not read the cart — treat the deposit as applying so the buyer is
+  // never silently skipped past a gateway the order needs.
+  const depositDue =
+    orderTotal === null ? 0 : depositDueCents(config?.cod.policy, orderTotal);
+  const depositApplies =
+    Boolean(config?.cod.enabled) &&
+    (!config?.cod.policy_known || orderTotal === null || depositDue > 0);
+  const showDepositPicker = method === "cod" && depositApplies;
   const savedCardsForMethod = (savedCards || []).filter(
     (c) =>
       method &&
@@ -406,6 +507,22 @@ export function PaymentStep() {
 
         {showDepositPicker && (
           <CheckoutCard title={t("codTitle")} description={t("codHint")}>
+            {depositDue > 0 && orderTotal !== null && (
+              <dl className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                <div className="flex gap-2">
+                  <dt className="text-gray-500">{t("payNow")}</dt>
+                  <dd className="font-semibold">
+                    {formatCents(depositDue, currency)}
+                  </dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="text-gray-500">{t("payOnDelivery")}</dt>
+                  <dd className="font-semibold">
+                    {formatCents(orderTotal - depositDue, currency)}
+                  </dd>
+                </div>
+              </dl>
+            )}
             <Select
               required
               value={depositGateway || ""}
