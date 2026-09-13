@@ -628,6 +628,45 @@ export function CheckoutPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cart subtotal on mount, independent of shipping. The shipping effect
+  // reads the same figure, but it bails out before the shopper picks a
+  // governorate — which left the deposit threshold unknown, and an unknown
+  // total shows the deposit panel. Under-threshold orders were asked for a
+  // deposit purely because the page hadn't looked at the cart yet.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/cart", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = await res.json();
+        const cart = (body?.data || body) as {
+          subtotal?: number;
+          items?: Array<{
+            total_price?: number;
+            subtotal?: number;
+            unit_price?: number;
+            quantity: number;
+          }>;
+        };
+        const subtotal =
+          cart?.subtotal ??
+          cart?.items?.reduce(
+            (acc, l) => acc + (l.total_price ?? l.subtotal ?? (l.unit_price ?? 0) * l.quantity),
+            0,
+          ) ??
+          0;
+        if (!cancelled) setCartSubtotal(subtotal);
+      } catch {
+        // Leave it null — the deposit panel then shows regardless, which is
+        // the safe direction when we cannot size the order.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ── Shipping options: refetch on governorate / cart / COD change ──
   const codRequested = method === "cod";
   useEffect(() => {
