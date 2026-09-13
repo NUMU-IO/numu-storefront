@@ -50,6 +50,7 @@ import { identifyShopper } from "@/lib/meta-identity";
 import { readCartFunnelData } from "@/lib/cart-funnel-data";
 import { claim } from "@/components/tracking/FunnelTracker";
 import { suppressCartTracking, trackCartState } from "@/lib/abandoned-cart";
+import { depositDueCents, type DepositPolicyConfig } from "@/lib/deposit";
 import {
   IdentityDialog,
   type IdentityVerifiedResult,
@@ -85,15 +86,34 @@ interface MethodOption {
 }
 interface PaymentConfig {
   methods: MethodOption[];
-  cod: { enabled: boolean; deposit_gateways: string[] };
+  cod: {
+    enabled: boolean;
+    deposit_gateways: string[];
+    /** Sizing rule, so the split can be quoted before the order exists. */
+    policy: DepositPolicyConfig;
+    /** False when the backend predates the sizing fields — then we can't
+     *  compute an amount and must assume every COD order needs a deposit. */
+    policy_known: boolean;
+  };
   saved_cards_enabled: boolean;
+  /** Presentment currency, for the deposit split. */
+  currency: string;
 }
 interface RawPaymentConfig {
   enabled_payment_methods?: string[];
   payment_methods?: MethodOption[];
   cod_deposit_policy?: { enabled?: boolean; allowed_gateways?: string[] };
-  cod?: { enabled?: boolean; deposit_required?: boolean; deposit_gateways?: string[] };
+  cod?: {
+    enabled?: boolean;
+    deposit_required?: boolean;
+    deposit_gateways?: string[];
+    deposit_mode?: "fixed" | "percent";
+    deposit_amount_cents?: number;
+    deposit_percent?: number;
+    deposit_min_order_cents?: number;
+  };
   saved_cards_enabled?: boolean;
+  currency?: string;
 }
 interface SavedCard {
   id: string;
@@ -105,8 +125,14 @@ interface SavedCard {
 const SAVED_CARD_GATEWAYS = new Set(["paymob", "paymob_card", "kashier"]);
 const FALLBACK_PAYMENT: PaymentConfig = {
   methods: [{ code: "paymob" }, { code: "cod" }],
-  cod: { enabled: false, deposit_gateways: [] },
+  cod: {
+    enabled: false,
+    deposit_gateways: [],
+    policy: { enabled: false },
+    policy_known: false,
+  },
   saved_cards_enabled: true,
+  currency: "EGP",
 };
 /**
  * Collapse the gateway-centric method list into CUSTOMER-facing choices.
@@ -158,8 +184,26 @@ function normalizePayment(raw: RawPaymentConfig | null | undefined): PaymentConf
     raw.cod?.deposit_gateways ?? raw.cod_deposit_policy?.allowed_gateways ?? [];
   return {
     methods,
-    cod: { enabled: codEnabled, deposit_gateways: depositGateways },
+    cod: {
+      enabled: codEnabled,
+      deposit_gateways: depositGateways,
+      // Absent on an older backend. The defaults below would size every order
+      // at zero and hide the picker, so `policy_known` keeps the pre-threshold
+      // behaviour instead: ask on every COD order.
+      policy_known:
+        raw.cod?.deposit_mode !== undefined ||
+        raw.cod?.deposit_amount_cents !== undefined ||
+        raw.cod?.deposit_min_order_cents !== undefined,
+      policy: {
+        enabled: codEnabled,
+        mode: raw.cod?.deposit_mode ?? "fixed",
+        amount_cents: raw.cod?.deposit_amount_cents ?? 0,
+        percent: raw.cod?.deposit_percent ?? 50,
+        min_order_cents: raw.cod?.deposit_min_order_cents ?? 0,
+      },
+    },
     saved_cards_enabled: raw.saved_cards_enabled ?? true,
+    currency: raw.currency || "EGP",
   };
 }
 function methodLabel(opt: MethodOption | string, isAr: boolean): string {
@@ -236,6 +280,8 @@ const T = {
   newCard: { en: "Enter a new card", ar: "إدخال بطاقة جديدة" },
   codDeposit: { en: "COD deposit gateway", ar: "بوابة عربون الدفع عند الاستلام" },
   pickGateway: { en: "— pick gateway —", ar: "— اختر بوابة —" },
+  payNow: { en: "Pay now", ar: "تدفع دلوقتي" },
+  payOnDelivery: { en: "On delivery", ar: "عند الاستلام" },
   confirm: { en: "Confirm Order", ar: "تأكيد الطلب" },
   placing: { en: "Placing order…", ar: "جارٍ تأكيد الطلب…" },
   pinTitle: { en: "Pin your location on the map", ar: "حدد موقعك على الخريطة" },
@@ -407,6 +453,7 @@ export function CheckoutPage() {
   // merchant switched COD off for this governorate.
   const [noRatesReason, setNoRatesReason] = useState<string | null>(null);
   const [selectedRate, setSelectedRate] = useState<string | null>(null);
+  const [cartSubtotal, setCartSubtotal] = useState<number | null>(null);
   const [shippingLoading, setShippingLoading] = useState(false);
 
   // Payment
@@ -602,6 +649,8 @@ export function CheckoutPage() {
               0,
             ) ??
             0;
+          // Also drives the COD deposit threshold — same figure, one fetch.
+          setCartSubtotal(cartSubtotalCents);
         }
       } catch {
         /* free/flat rates still resolve */
@@ -766,7 +815,7 @@ export function CheckoutPage() {
       return;
     }
     const codSelected = method === "cod";
-    const depositRequired = codSelected && Boolean(payConfig?.cod.enabled);
+    const depositRequired = codSelected && depositApplies;
     if (depositRequired && !depositGateway) {
       setError(t("pickGatewayErr"));
       return;
@@ -1171,7 +1220,26 @@ export function CheckoutPage() {
   }
 
   const payMethods = payConfig?.methods || [];
-  const showDeposit = method === "cod" && Boolean(payConfig?.cod.enabled);
+  // Deposit sizing. The order total is the cart subtotal plus the chosen
+  // shipping rate — the same two figures the server adds up, and both are
+  // already on screen by the time the customer can submit. Tax is inclusive
+  // in the markets this runs in, so it is already inside the subtotal.
+  const currencyCode = payConfig?.currency || "EGP";
+  const selectedRateCents =
+    rates?.find((r) => r.id === selectedRate)?.amount_cents ?? null;
+  const orderTotalCents =
+    cartSubtotal === null ? null : cartSubtotal + (selectedRateCents ?? 0);
+  const depositDue =
+    orderTotalCents === null
+      ? 0
+      : depositDueCents(payConfig?.cod.policy, orderTotalCents);
+  // A null total means the cart read failed. Treat the deposit as applying —
+  // hiding the picker on an order the server does require one for fails at
+  // submit, while showing it unnecessarily costs one extra choice.
+  const depositApplies =
+    Boolean(payConfig?.cod.enabled) &&
+    (!payConfig?.cod.policy_known || orderTotalCents === null || depositDue > 0);
+  const showDeposit = method === "cod" && depositApplies;
   const savedForMethod = savedCards.filter(
     (c) =>
       method &&
@@ -1599,6 +1667,25 @@ export function CheckoutPage() {
 
             {showDeposit && (
               <div className="mt-4">
+                {/* What the deposit actually costs, stated before the gateway
+                    choice. "A deposit is required" without a number is the
+                    part shoppers abandon on. */}
+                {depositDue > 0 && orderTotalCents !== null && (
+                  <dl className="mb-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
+                    <div className="flex items-baseline gap-2">
+                      <dt className="text-[var(--ck-muted)]">{t("payNow")}</dt>
+                      <dd className="font-semibold">
+                        {formatCents(depositDue, currencyCode)}
+                      </dd>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <dt className="text-[var(--ck-muted)]">{t("payOnDelivery")}</dt>
+                      <dd className="font-semibold">
+                        {formatCents(orderTotalCents - depositDue, currencyCode)}
+                      </dd>
+                    </div>
+                  </dl>
+                )}
                 <Field label={t("codDeposit")} htmlFor="deposit-gw">
                   <Select
                     id="deposit-gw"
