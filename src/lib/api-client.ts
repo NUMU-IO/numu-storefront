@@ -985,6 +985,8 @@ export interface StorefrontPage {
   body: Record<string, string>;
   seo: Record<string, unknown>;
   template: string;
+  /** Alternate template variant (`page.<suffix>`); null = the base `page` template. */
+  template_suffix?: string | null;
   /** Public merchant-defined typed fields (private ones never leave the API). */
   metafields?: { namespace: string; key: string; type: string; value: unknown }[];
 }

@@ -31,7 +31,7 @@
  */
 
 import { pathToFileURL } from "node:url";
-import { renderToString } from "react-dom/server";
+import { prerenderToNodeStream } from "react-dom/static";
 
 // Mirror the flag the browser gets inlined by RuntimeImportMap. The SDK's
 // `focalSrc` reads it off globalThis to decide whether an image URL carries
@@ -89,7 +89,23 @@ process.on("message", async (msg) => {
     if (typeof createApp !== "function") {
       throw new Error("bundle exports no createApp(ctx)");
     }
-    const html = renderToString(createApp(msg.ctx));
+    // Not renderToString: it cannot wait for lazy components, and SDK library
+    // sections (lib-*) are lazy chunks, so they would render empty. prerender
+    // waits for every Suspense boundary; for a tree with nothing lazy the HTML
+    // is byte-identical (checked on vionne, bazar, genova and boutique:
+    // theme-section-base PHASE-7 Wave 0). A render error still rejects here,
+    // and the parent's per-request timeout still bounds a slow chunk.
+    //
+    // progressiveChunkSize at its maximum keeps every Suspense boundary INLINE.
+    // With the default, a boundary that suspended (a lazy section whose chunk
+    // was not loaded yet) is written at the end as a hidden segment plus an
+    // inline `$RC(...)` script that swaps it into place. This HTML is inserted
+    // without executing scripts, so those sections would stay hidden.
+    const { prelude } = await prerenderToNodeStream(createApp(msg.ctx), {
+      progressiveChunkSize: Number.MAX_SAFE_INTEGER,
+    });
+    let html = "";
+    for await (const chunk of prelude) html += chunk;
     reply({ id, ok: true, html });
   } catch (err) {
     reply({

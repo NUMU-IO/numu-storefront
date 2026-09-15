@@ -17,6 +17,7 @@ import { loadExternalTheme, loadExternalCSS } from "@/lib/external-loader";
 import { isAllowedBundleUrl } from "@/lib/bundle-allowlist";
 import StorefrontSkeleton from "@/components/theme-engine/StorefrontSkeleton";
 import { useThemeDataOptional } from "@/components/layout/ThemeDataProvider";
+import { applyTemplateOverride } from "@/lib/resolve-theme";
 import {
   resolveThemeSettingsDynamicSources,
   type DynamicResolveContext,
@@ -809,8 +810,19 @@ export default function ByotThemeBoundary({
         // the RAW draft (it keeps the `{ __numu_source }` ref so its inputs can
         // show "bound to store.name"); without this, binding a field would
         // crash the preview the instant the merchant picks a source.
+        // The page routes swap `page.<suffix>` into `page` server-side. The
+        // editor posts the raw draft, so re-apply the page's variant or the
+        // preview of a variant snaps back to the base template on every edit.
+        const suffix =
+          page?.type === "page"
+            ? ((page.data?.page as { template_suffix?: string | null } | undefined)
+                ?.template_suffix ?? null)
+            : null;
         tryUpdate(handleRef.current, {
-          themeSettings: resolveThemeSettingsDynamicSources(next, resolveCtx),
+          themeSettings: resolveThemeSettingsDynamicSources(
+            applyTemplateOverride(next, "page", suffix),
+            resolveCtx,
+          ),
           storeData,
           page,
           locale: effectiveLocale,

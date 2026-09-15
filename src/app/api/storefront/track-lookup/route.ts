@@ -20,44 +20,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { fetchStoreByHost } from "@/lib/api-client";
+import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
-/**
- * The `X-Forwarded-For` chain to hand upstream.
- *
- * The backend rate-limits guest lookups per client IP. Server-to-server
- * `fetch` sends none of the shopper's headers, so without this every shopper
- * arrives as this server's address and they all share ONE bucket: the 11th
- * distinct guest in a minute — across every store on the instance — gets a
- * 429, which the form renders as "Something went wrong". One attacker at
- * 10 req/min would take guest tracking down platform-wide.
- *
- * We APPEND to the incoming chain rather than replacing it, so the hops that
- * already handled this request stay visible to the backend. `cf-connecting-ip`
- * is the edge's own view of the shopper and is preferred as the value to
- * contribute; it is normally already the head of the chain, hence the
- * duplicate check. When there is no chain at all (direct hit, local dev) the
- * single value becomes the whole header.
- *
- * This is a fairness fix, not an authentication one — the leftmost entry is
- * still whatever the shopper's own client claimed. The backend's per-order and
- * per-store lookup budgets are what actually bound brute force.
- */
-function upstreamForwardedFor(req: NextRequest): string | null {
-  const chain = (req.headers.get("x-forwarded-for") || "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  const edgeClientIp =
-    req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip");
-  if (edgeClientIp && !chain.includes(edgeClientIp)) {
-    chain.push(edgeClientIp);
-  }
-
-  return chain.length > 0 ? chain.join(", ") : null;
-}
+// The backend rate-limits guest lookups per client IP (10/min), so the
+// shopper's IP must travel upstream — see upstreamForwardedFor. The backend's
+// per-order and per-store lookup budgets are what actually bound brute force.
 
 export async function POST(req: NextRequest) {
   const host =
