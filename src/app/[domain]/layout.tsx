@@ -32,7 +32,8 @@ import { getActivePromotions } from "@/lib/promo-server";
 import { resolveBrandTokens } from "@/lib/brand-tokens";
 import { AnnouncementBar } from "@/components/promo/AnnouncementBar";
 import { PromoMounts } from "@/components/promo/PromoMounts";
-import { WhatsAppFloat } from "@/components/storefront/WhatsAppFloat";
+import { InstagramFloat } from "@/components/storefront/InstagramFloat";
+import { toWhatsAppHref, WhatsAppFloat } from "@/components/storefront/WhatsAppFloat";
 import {
   alternatesFor,
   canonicalFor,
@@ -484,6 +485,22 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             raised={Boolean(promotions?.floating_widgets?.length)}
           />
         )}
+        {/* Instagram button: off unless the theme editor turns it on and the
+            store has an Instagram entry in Social Links; stacks above
+            WhatsApp when both show. */}
+        {(themeSettings.global_settings as Record<string, unknown> | undefined)
+          ?.show_instagram_float === true &&
+          store.social_links?.instagram && (
+            <InstagramFloat
+              instagram={store.social_links.instagram}
+              locale={visitorLocale === "ar" ? "ar" : "en"}
+              raised={Boolean(promotions?.floating_widgets?.length)}
+              aboveWhatsApp={Boolean(
+                store.social_links?.whatsapp &&
+                  toWhatsAppHref(store.social_links.whatsapp, "", store.country),
+              )}
+            />
+          )}
         {!isByot && themeSettings.section_groups?.header && (
           <SectionGroupRenderer
             group={themeSettings.section_groups.header}
