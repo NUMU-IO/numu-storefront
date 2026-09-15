@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { fetchStoreByHost } from "@/lib/api-client";
+import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
 /**
  * POST /api/storefront/track — funnel event ingestion proxy.
@@ -28,38 +29,6 @@ import { fetchStoreByHost } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
-/**
- * The visitor's `X-Forwarded-For` chain to hand upstream.
- *
- * `fetch` from this route is server-to-server, so NONE of the shopper's
- * request headers travel with it. The backend derives the CAPI
- * `client_ip_address` from `x-forwarded-for` (falling back to the socket
- * peer), so without this header every event Meta and TikTok received
- * carried THIS SERVER's address — one IP shared by every shopper on the
- * instance. That is worse than sending no IP: a real value that is
- * uniformly wrong actively degrades match quality rather than merely
- * failing to help it.
- *
- * We append to the incoming chain rather than replace it, so the hops that
- * already handled the request stay visible. `cf-connecting-ip` is the
- * edge's own view of the shopper and is preferred as the contributed value;
- * it is normally already the head of the chain, hence the duplicate check.
- * Mirrors `upstreamForwardedFor` in the sibling track-lookup proxy.
- */
-function upstreamForwardedFor(req: NextRequest): string | null {
-  const chain = (req.headers.get("x-forwarded-for") || "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  const edgeClientIp =
-    req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip");
-  if (edgeClientIp && !chain.includes(edgeClientIp)) {
-    chain.push(edgeClientIp);
-  }
-
-  return chain.length > 0 ? chain.join(", ") : null;
-}
 // Upstream call budget. Set conservatively because /track is fire-
 // and-forget — the SDK has already moved on by the time we reach
 // this proxy, so there's no human waiting on the answer. A hung
