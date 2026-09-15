@@ -25,7 +25,15 @@ const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 const PREDICTIVE_LIMIT_MAX = 20;
 const FULL_LIMIT_MAX = 100;
 
-const EMPTY = { products: [], collections: [], pages: [], articles: [], total: 0 };
+const EMPTY = {
+  products: [],
+  collections: [],
+  pages: [],
+  articles: [],
+  authors: [],
+  series: [],
+  total: 0,
+};
 
 function clampInt(raw: string | null, fallback: number, max: number): string {
   const n = Number.parseInt(raw || "", 10);
