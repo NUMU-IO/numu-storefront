@@ -138,7 +138,7 @@ export default async function CmsPage({ params }: PageProps) {
   const effectiveTheme = applyTemplateOverride(
     themeSettings,
     "page",
-    (page as { template_suffix?: string | null } | null)?.template_suffix ?? null,
+    page?.template_suffix ?? null,
   );
 
   if (
@@ -166,6 +166,8 @@ export default async function CmsPage({ params }: PageProps) {
               title_i18n: page?.title ?? null,
               body_i18n: page?.body ?? null,
               seo: page?.seo ?? null,
+              // Read by the editor preview to re-apply the variant to live drafts.
+              template_suffix: page?.template_suffix ?? null,
               // Public merchant-defined fields — read by the SDK's
               // useMetafield("page", ns, key). The backend only ever
               // sends public ones, so passing through is safe.

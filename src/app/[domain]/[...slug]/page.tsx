@@ -32,7 +32,8 @@ import {
   fetchThemeSettings,
   fetchStorePage,
 } from "@/lib/api-client";
-import { resolveThemeSettings } from "@/lib/resolve-theme";
+import { applyTemplateOverride, resolveThemeSettings } from "@/lib/resolve-theme";
+import { SsrArticleContent } from "@/components/seo/SsrContentLayer";
 import { sanitizeHtml } from "@/lib/sanitize-html";
 import {
   KNOWN_PAGE_HANDLES,
@@ -225,6 +226,14 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
   const resolvedBody = pick(cmsPage?.body, lang) || null;
   // Merchant-authored HTML → sanitize before any dangerouslySetInnerHTML.
   const safeBody = resolvedBody ? sanitizeHtml(resolvedBody) : null;
+  // A generic page handle (`/refund-policy`) renders the SAME variant as
+  // `/pages/refund-policy`: honour the page's template_suffix here too, or the
+  // well-known alias shows the base template while the merchant's variant sits
+  // unused. Dedicated types (about, contact, faq) keep their own template.
+  const effectiveTheme =
+    pageType === "page"
+      ? applyTemplateOverride(themeSettings, "page", cmsPage?.template_suffix ?? null)
+      : themeSettings;
 
   const ar = ((store as { default_language?: string })?.default_language || "")
     .toLowerCase()
@@ -263,7 +272,7 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
         bundleUrl={themeSettings.external_theme.bundle_url}
         bundleChecksum={themeSettings.external_theme.checksum}
         cssUrl={themeSettings.external_theme.css_url}
-        themeSettings={themeSettings}
+        themeSettings={effectiveTheme}
         storeData={store}
         page={{
           type: pageType,
@@ -279,6 +288,7 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
               title_i18n: cmsPage?.title ?? null,
               body_i18n: cmsPage?.body ?? null,
               seo: cmsPage?.seo ?? null,
+              template_suffix: cmsPage?.template_suffix ?? null,
             },
             // Surfaced for the order-confirmation/track templates' useOrder().
             ...(orderId ? { order_id: orderId } : {}),
@@ -288,11 +298,24 @@ export default async function CatchAllPage({ params, searchParams }: PageProps) 
         // show the CMS body or the branded NUMU placeholder (same as the
         // built-in branch below) so e.g. /about is never a blank screen.
         routeFallback={routeFallback}
+        // This URL is the canonical one once a CMS body backs the handle, but
+        // the theme paints client-side: without this layer the crawler read the
+        // page text only inside script payloads. Same layer as `/pages/[handle]`.
+        seoContent={
+          resolvedBody ? (
+            <SsrArticleContent
+              title={resolvedTitle}
+              body={resolvedBody}
+              storeName={store?.name}
+              locale={lang}
+            />
+          ) : undefined
+        }
       />
     );
   }
 
-  const pageTemplate = themeSettings.templates?.page;
+  const pageTemplate = effectiveTheme.templates?.page;
   if (pageTemplate) {
     return (
       <PageTemplateRenderer
