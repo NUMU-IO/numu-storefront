@@ -34,7 +34,7 @@ import {
   type ManualTransferPayload,
 } from "@/components/checkout/ManualTransferInstructions";
 
-type Method = "instapay" | "vodafone_cash";
+type Method = "instapay" | "vodafone_cash" | "we_pay" | "orange_cash";
 
 interface CustomerRequirements {
   note_must_contain_reference: boolean;

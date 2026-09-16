@@ -36,6 +36,9 @@ export function markKey(code: string, label?: string): string {
   if (k.includes("instapay") || k.includes("انستاباي") || k.includes("إنستاباي"))
     return "instapay";
   if (k.includes("vodafone") || k.includes("فودافون")) return "vodafone";
+  if (k.includes("wepay") || k.includes("ويباي")) return "wepay";
+  if (k.includes("orangecash") || k.includes("أورنجكاش") || k.includes("اورنجكاش"))
+    return "orangecash";
   if (k.includes("applepay")) return "applepay";
   if (k.includes("fawaterak") || k.includes("فواتيرك")) return "fawaterak";
   if (k.includes("fawry") || k.includes("فوري")) return "fawry";
@@ -169,6 +172,16 @@ export function PaymentMark({
       // wordmark in the lockup is ~2px tall and unreadable, while the red O
       // is recognised instantly.
       return <LogoTile src="/vodafone-mark.png" />;
+
+    case "wepay":
+      // WE's own app icon: the grey "we" over the purple Pay card. Both
+      // halves survive the tile because the lockup is square, unlike
+      // Vodafone's wide one.
+      return <LogoTile src="/we-pay-mark.png" />;
+
+    case "orangecash":
+      // The Orange arrows mark plus the Arabic wordmark, as Orange ships it.
+      return <LogoTile src="/orange-cash-mark.png" />;
 
     case "fawry":
       // The asset carries its own yellow field, so no tile chrome behind it.

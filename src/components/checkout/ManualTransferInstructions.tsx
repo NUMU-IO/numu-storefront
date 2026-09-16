@@ -10,7 +10,7 @@ import QRCode from "qrcode";
  * can branch on them without optional-chaining guesswork.
  */
 export interface ManualTransferPayload {
-  provider: "instapay" | "vodafone_cash";
+  provider: "instapay" | "vodafone_cash" | "we_pay" | "orange_cash";
   type?: string;
   reference_code: string;
   /** Rail-neutral: the string the customer sends money to. */
@@ -103,12 +103,47 @@ export function manualResumePath(
   orderId: string,
   referenceCode: string,
 ): string {
-  const segment = provider === "vodafone_cash" ? "vodafone-cash" : "instapay";
+  // The rail's own segment, hyphenated the way the route is named.
+  const segment = provider === "instapay" ? "instapay" : provider.replace("_", "-");
   return `/${domain}/${segment}/${orderId}?ref=${encodeURIComponent(referenceCode)}`;
 }
 
 /** Per-rail copy + presentation. Everything that differs lives here. */
 function railCopy(provider: ManualTransferPayload["provider"], isAr: boolean) {
+  if (provider === "we_pay") {
+    return {
+      brand: "WE Pay",
+      brandAr: "وي باي",
+      logo: "/we-pay-mark.png",
+      logoClass: "h-10",
+      title: isAr ? "أكمل الدفع عبر وي باي" : "Complete your WE Pay payment",
+      toDestination: isAr ? "إلى رقم محفظة وي باي" : "to this WE Pay wallet number",
+      copyLabel: "Copy wallet number",
+      howTo: isAr
+        ? "افتح تطبيق WE Pay ← تحويل الأموال"
+        : "Open the WE Pay app → Transfer money",
+      dialHref: null as string | null,
+      dialLabel: null as string | null,
+    };
+  }
+  if (provider === "orange_cash") {
+    return {
+      brand: "Orange Cash",
+      brandAr: "أورنج كاش",
+      logo: "/orange-cash-mark.png",
+      logoClass: "h-10",
+      title: isAr ? "أكمل الدفع عبر أورنج كاش" : "Complete your Orange Cash payment",
+      toDestination: isAr
+        ? "إلى رقم محفظة أورنج كاش"
+        : "to this Orange Cash wallet number",
+      copyLabel: "Copy wallet number",
+      howTo: isAr
+        ? "اطلب ‎#100#‎ أو افتح تطبيق Orange Cash ← تحويل الأموال"
+        : "Dial #100# or open the Orange Cash app → Transfer money",
+      dialHref: "tel:%23100%23",
+      dialLabel: isAr ? "اطلب ‎#100#‎" : "Dial #100#",
+    };
+  }
   if (provider === "vodafone_cash") {
     return {
       brand: "Vodafone Cash",
