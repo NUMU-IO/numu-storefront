@@ -79,6 +79,8 @@ const T = {
 const MANUAL_TRANSFER_PROVIDERS: ReadonlySet<string | undefined> = new Set([
   "instapay",
   "vodafone_cash",
+  "we_pay",
+  "orange_cash",
 ]);
 
 export function ReviewStep() {
