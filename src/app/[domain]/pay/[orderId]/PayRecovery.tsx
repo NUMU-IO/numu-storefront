@@ -65,12 +65,16 @@ const METHOD_LABEL: Record<string, { en: string; ar: string }> = {
   kashier: { en: "Card", ar: "بطاقة بنكية" },
   instapay: { en: "InstaPay transfer", ar: "تحويل إنستاباي" },
   vodafone_cash: { en: "Vodafone Cash", ar: "فودافون كاش" },
+  we_pay: { en: "WE Pay", ar: "وي باي" },
+  orange_cash: { en: "Orange Cash", ar: "أورنج كاش" },
 };
 
 /** Where the proof-upload resume flow lives for each manual rail. */
 const MANUAL_RESUME_PATH: Record<string, string> = {
   instapay: "instapay",
   vodafone_cash: "vodafone-cash",
+  we_pay: "we-pay",
+  orange_cash: "orange-cash",
 };
 
 export function PayRecovery({ orderId }: { orderId: string }) {

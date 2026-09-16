@@ -221,6 +221,8 @@ function methodLabel(opt: MethodOption | string, isAr: boolean): string {
     fawaterak: ["Fawaterak", "فواتيرك"],
     instapay: ["InstaPay", "انستاباي"],
     vodafone_cash: ["Vodafone Cash", "فودافون كاش"],
+    we_pay: ["WE Pay", "وي باي"],
+    orange_cash: ["Orange Cash", "أورنج كاش"],
     cod: ["Cash on delivery", "الدفع عند الاستلام"],
   };
   const entry = labels[code];
@@ -229,6 +231,8 @@ function methodLabel(opt: MethodOption | string, isAr: boolean): string {
 const MANUAL_TRANSFER_PROVIDERS: ReadonlySet<string | undefined> = new Set([
   "instapay",
   "vodafone_cash",
+  "we_pay",
+  "orange_cash",
 ]);
 
 function methodSubLabel(code: string, isAr: boolean): string {
@@ -241,6 +245,11 @@ function methodSubLabel(code: string, isAr: boolean): string {
     vodafone_cash: [
       "Transfer from your Vodafone wallet",
       "حوّل من محفظة فودافون كاش",
+    ],
+    we_pay: ["Transfer from your WE Pay wallet", "حوّل من محفظة وي باي"],
+    orange_cash: [
+      "Transfer from your Orange Cash wallet",
+      "حوّل من محفظة أورنج كاش",
     ],
     fawry: ["Pay at any Fawry outlet", "ادفع في أي منفذ فوري"],
   };
