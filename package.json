@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^2.0.2",
-    "@numueg/theme-sdk": "^0.14.0",
+    "@numueg/theme-sdk": "^0.15.0",
     "@types/qrcode": "^1.5.6",
     "next": "^16.2.11",
     "qrcode": "^1.5.4",
