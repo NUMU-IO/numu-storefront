@@ -41,40 +41,53 @@ export type ByotForkResult =
   | { kind: "builtin"; store: StoreData; theme: ThemeSettingsV3 | null };
 
 /**
- * Whether the active external theme has EXPLICITLY taken ownership of the
- * checkout document.
+ * Whether the active external theme has EXPLICITLY taken ownership of a
+ * platform-owned document (the checkout flow, or the password gate).
  *
- * Checkout is platform-owned by default (the Shopify model): payment
- * gateways, server-priced shipping, PII handling and order placement all
- * live in the host, so every store — including BYOT — gets a complete,
- * secure, V2-parity checkout for free. Themes generally do NOT (and must
- * not be forced to) re-implement payment integrations, so handing them an
- * empty `checkout_*` page type just renders a blank page. That was the
- * "checkout has no sections" bug: bon-younes (and every current theme)
- * ships no checkout section, so the bundle drew nothing.
+ * Both are platform-owned by default (the Shopify model): payment gateways,
+ * server-priced shipping, PII handling, order placement and the unlock
+ * credential all live in the host, so every store — including BYOT — gets a
+ * complete, secure version for free. Themes generally do NOT (and must not be
+ * forced to) re-implement them, so handing them one of these page types just
+ * renders a blank page. That was the "checkout has no sections" bug:
+ * bon-younes (and every current theme) ships no checkout section, so the
+ * bundle drew nothing. The password gate had the same hole — no V3 theme
+ * renders `password` either, so a locked store served its header and footer
+ * around an empty middle, with no way to enter the password.
  *
  * Ownership is signalled ONLY by an explicit manifest opt-in:
- *   `external_theme.capabilities.checkout === true`.
+ *   `external_theme.capabilities.<capability> === true`.
  *
- * We deliberately do NOT infer ownership from the presence of a `checkout`
+ * We deliberately do NOT infer ownership from the presence of a matching
  * template: EVERY theme ships a `checkout` template carrying the
  * header/footer CHROME (its page content empty), so a "non-empty template"
- * heuristic false-positives and hands the blank bundle the checkout — the
- * exact bug this fix removes. Explicit opt-in is the contract; no current
- * theme sets it, so the built-in checkout always renders.
+ * heuristic false-positives and hands the blank bundle the page — the exact
+ * bug this removes. Explicit opt-in is the contract; no current theme sets
+ * either flag, so the built-in pages always render.
  */
-function themeClaimsCheckout(theme: ThemeSettingsV3): boolean {
+function themeClaims(
+  theme: ThemeSettingsV3,
+  capability: "checkout" | "password",
+): boolean {
   const ext = theme.external_theme as
     | (NonNullable<ThemeSettingsV3["external_theme"]> & {
-        capabilities?: { checkout?: boolean } | null;
+        capabilities?: Record<string, boolean | undefined> | null;
       })
     | undefined;
-  return ext?.capabilities?.checkout === true;
+  return ext?.capabilities?.[capability] === true;
 }
 
-/** A checkout fork point (vs. password / error / other future forks). */
-function isCheckoutPageType(type: string | undefined): boolean {
-  return typeof type === "string" && type.startsWith("checkout");
+/**
+ * The capability a fork point needs the theme to claim, or null when the
+ * theme owns the page by default (home, PDP, PLP, error, …).
+ */
+function requiredCapability(
+  type: string | undefined,
+): "checkout" | "password" | null {
+  if (typeof type !== "string") return null;
+  if (type.startsWith("checkout")) return "checkout";
+  if (type === "password") return "password";
+  return null;
 }
 
 export async function resolveByotFork(
@@ -97,14 +110,15 @@ export async function resolveByotFork(
     themeRaw?.theme_settings || themeRaw || {},
   );
 
+  const capability = requiredCapability(page.type);
+
   if (
     themeSettings.external_theme?.bundle_url &&
     !isBuiltInTheme(themeSettings.theme_id) &&
-    // Checkout is platform-owned unless the theme explicitly claims it
-    // (see themeClaimsCheckout). Non-checkout fork points (e.g. the
-    // storefront password gate) keep the original "any BYOT theme owns
-    // the page" behaviour.
-    (!isCheckoutPageType(page.type) || themeClaimsCheckout(themeSettings))
+    // Checkout and the password gate are platform-owned unless the theme
+    // explicitly claims them (see themeClaims). Every other fork point is
+    // the theme's page by default.
+    (capability === null || themeClaims(themeSettings, capability))
   ) {
     return {
       kind: "byot",
@@ -168,7 +182,7 @@ export async function themeOwnsCheckout(domain: string): Promise<boolean> {
     return Boolean(
       themeSettings.external_theme?.bundle_url &&
         !isBuiltInTheme(themeSettings.theme_id) &&
-        themeClaimsCheckout(themeSettings),
+        themeClaims(themeSettings, "checkout"),
     );
   } catch {
     return false;
