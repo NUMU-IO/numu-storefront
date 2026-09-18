@@ -824,6 +824,16 @@ export const fetchProductBySlug = cache(
   },
 );
 
+export const fetchSeriesBySlug = cache(async (storeId: string, slug: string) => {
+  const wrapped = await apiFetch<Record<string, any>>(
+    `/storefront/store/${storeId}/series/${encodeURIComponent(slug)}`,
+    { tags: [`series:${storeId}:${slug}`], revalidate: 60 },
+  );
+  return wrapped && typeof wrapped === "object" && "data" in wrapped
+    ? (wrapped as { data?: Record<string, any> }).data ?? null
+    : wrapped;
+});
+
 // ── Collections / Categories ──────────────────────────────────────────────────
 
 export const fetchCollections = cache(async (storeId: string) => {
