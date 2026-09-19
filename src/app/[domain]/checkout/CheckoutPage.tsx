@@ -279,6 +279,8 @@ const T = {
   noRates: { en: "No shipping options available for this address.", ar: "لا توجد خيارات شحن متاحة لهذا العنوان." },
   // COD is off for this governorate. The address is fine — the generic
   // message sends the shopper to edit an address that was never wrong.
+  freeShipMore: { en: "more and shipping is free", ar: "كمان والشحن يبقى مجاني" },
+  freeShipAdd: { en: "Add", ar: "ضيف بـ" },
   noRatesCod: { en: "Cash on delivery isn't available for this address. Choose another payment method to continue.", ar: "الدفع عند الاستلام مش متاح للعنوان ده. اختار طريقة دفع تانية عشان تكمّل." },
   selectGovFirst: { en: "Select your governorate to see shipping options.", ar: "اختر محافظتك لعرض خيارات الشحن." },
   free: { en: "Free", ar: "مجاناً" },
@@ -466,8 +468,17 @@ export function CheckoutPage() {
   // Why the backend returned no options. `cod_unavailable` means the
   // merchant switched COD off for this governorate.
   const [noRatesReason, setNoRatesReason] = useState<string | null>(null);
+  // Cents short of the store's free-shipping threshold (null = none / reached).
+  const [freeShipRemaining, setFreeShipRemaining] = useState<number | null>(null);
   const [selectedRate, setSelectedRate] = useState<string | null>(null);
   const [cartSubtotal, setCartSubtotal] = useState<number | null>(null);
+  // Payable total from OrderSummary (after offers + coupon, incl. shipping).
+  const [summaryTotal, setSummaryTotal] = useState<number | null>(null);
+  useEffect(() => {
+    const onTotal = (e: Event) => setSummaryTotal((e as CustomEvent<number>).detail);
+    window.addEventListener("numu:checkout:total", onTotal);
+    return () => window.removeEventListener("numu:checkout:total", onTotal);
+  }, []);
   const [shippingLoading, setShippingLoading] = useState(false);
 
   // Payment
@@ -735,6 +746,15 @@ export function CheckoutPage() {
           setRates([]);
         } else {
           const body = await res.json();
+          const progress = (body?.data ?? body)?.free_shipping_progress as
+            | { remaining_cents?: number; qualified?: boolean }
+            | null
+            | undefined;
+          setFreeShipRemaining(
+            progress && !progress.qualified && (progress.remaining_cents ?? 0) > 0
+              ? (progress.remaining_cents as number)
+              : null,
+          );
           setNoRatesReason(
             (body?.data?.unavailable_reason ?? body?.unavailable_reason ?? null) as
               | string
@@ -1283,15 +1303,16 @@ export function CheckoutPage() {
   }
 
   const payMethods = payConfig?.methods || [];
-  // Deposit sizing. The order total is the cart subtotal plus the chosen
-  // shipping rate — the same two figures the server adds up, and both are
-  // already on screen by the time the customer can submit. Tax is inclusive
-  // in the markets this runs in, so it is already inside the subtotal.
+  // Deposit sizing. The server charges it on order.total — subtotal minus
+  // offers and coupon, plus shipping — which is exactly the total the
+  // OrderSummary shows. Until that lands, fall back to subtotal + rate (an
+  // over-estimate when an offer applies). Tax is inclusive in these markets.
   const currencyCode = payConfig?.currency || "EGP";
   const selectedRateCents =
     rates?.find((r) => r.id === selectedRate)?.amount_cents ?? null;
   const orderTotalCents =
-    cartSubtotal === null ? null : cartSubtotal + (selectedRateCents ?? 0);
+    summaryTotal ??
+    (cartSubtotal === null ? null : cartSubtotal + (selectedRateCents ?? 0));
   const depositDue =
     orderTotalCents === null
       ? 0
@@ -1683,6 +1704,15 @@ export function CheckoutPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+              {!shippingLoading && freeShipRemaining !== null && (
+                <p className="mt-3 text-sm text-[var(--ck-muted)]">
+                  {t("freeShipAdd")}{" "}
+                  <bdi dir="ltr" className="font-semibold text-[var(--ck-fg)]">
+                    {formatCents(freeShipRemaining, currencyCode)}
+                  </bdi>{" "}
+                  {t("freeShipMore")}
+                </p>
               )}
             </CheckoutCard>
           )}
