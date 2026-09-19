@@ -340,6 +340,14 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
   // language while the host <html dir> already flipped.
   const localeHeaders = await headers();
   const visitorLocale = localeHeaders.get("x-numu-locale") || undefined;
+  // Path-segment routing (`localhost:3100/<store>/…`) is the only mode whose
+  // URLs carry the store as a path prefix. On a store's own host the prefix
+  // does not exist, so a `<base>` there sent every relative href ("#main",
+  // theme "#reviews" jumps) to `/<store>/#…` — a 404 on vionneeg.com.
+  const requestHost = (localeHeaders.get("host") || "").split(":")[0];
+  const pathSegmentRouting = ["localhost", "127.0.0.1", "numueg.app", "www.numueg.app"].includes(
+    requestHost,
+  );
 
   // Meta Pixel — fires for built-in AND BYOT themes since the host shell wraps
   // every page. Only mounted when the merchant configured an enabled pixel;
@@ -397,8 +405,8 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
           relative anchors like `/collections/all` would otherwise hit
           the apex 404. `<base>` rebases all relative links against the
           subdomain prefix. Hoisted into <head> by Next.js automatically.
-          Production (subdomain hosting) doesn't need this. */}
-      <base href={`/${domain}/`} />
+          Store hosts (subdomain / custom domain) must not get it. */}
+      {pathSegmentRouting && <base href={`/${domain}/`} />}
       {/* Consent gate: withholds the browser pixels until the visitor accepts
           WHEN the merchant has consent_required on. Off (every live store
           today) it renders straight through, so this changes nothing for

@@ -541,8 +541,8 @@ function Breakdown({
       {shipping == null && (
         <p className="pt-1 text-xs text-[var(--ck-muted)]">
           {isAr
-            ? "تُحسب الشحن والضرائب في الخطوات التالية."
-            : "Shipping & taxes calculated at the next steps."}
+            ? "الشحن بيتحسب أول ما تختار المحافظة."
+            : "Shipping is added once you pick your governorate."}
         </p>
       )}
     </div>
@@ -706,7 +706,19 @@ export function OrderSummary() {
   // `applied_promotions`, so at 390px — where it is the ONLY figure shown
   // until the summary is expanded — it under-reported the total by the whole
   // offer amount.
-  const collapsedTotal = cart ? computeTotals(cart, shippingCents).total : 0;
+  const collapsedTotal = cart ? computeTotals(cart, shippingCents).total : null;
+
+  // Publish the payable total so the COD deposit is quoted on the same figure
+  // the server charges it on (order.total: after offers + coupon, incl.
+  // shipping). CheckoutPage used the pre-discount subtotal, so with the
+  // "3 for 650" offer it quoted a bigger deposit than the order owed, and
+  // demanded one on carts the server lets through without any.
+  useEffect(() => {
+    if (collapsedTotal === null) return;
+    window.dispatchEvent(
+      new CustomEvent("numu:checkout:total", { detail: collapsedTotal }),
+    );
+  }, [collapsedTotal]);
 
   const heading = isAr ? "ملخص الطلب" : "Order summary";
 
@@ -788,7 +800,7 @@ export function OrderSummary() {
               <ChevronIcon open={openMobile} />
             </span>
             <span className="text-sm font-semibold text-[var(--ck-fg)]">
-              {formatCents(collapsedTotal, currency)}
+              {collapsedTotal === null ? "…" : formatCents(collapsedTotal, currency)}
             </span>
           </button>
           {openMobile && (
