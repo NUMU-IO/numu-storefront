@@ -45,11 +45,23 @@ interface CartResponse {
   total_quantity: number;
   subtotal: number;
   currency: string;
-  applied_promotion?: {
-    code?: string;
-    label?: string;
+  /**
+   * Offers-v2 fields, exactly as `_build_cart_response` emits them. This
+   * component used to read a singular `applied_promotion` that the API has
+   * never sent, so an automatic offer showed no line and the Total stayed at
+   * the pre-discount subtotal — the cart said one number and checkout charged
+   * another.
+   */
+  discount_code?: string | null;
+  automatic_discount_cents?: number;
+  discount_amount?: number;
+  total?: number;
+  applied_promotions?: {
+    id: string;
+    title: string;
+    title_ar?: string | null;
     amount: number;
-  } | null;
+  }[];
 }
 
 interface Props {
@@ -85,6 +97,9 @@ export default function BuiltInCart({
   const [cart, setCart] = useState<CartResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [codeInput, setCodeInput] = useState("");
+  const [codeBusy, setCodeBusy] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -135,6 +150,40 @@ export default function BuiltInCart({
     window.dispatchEvent(new CustomEvent("numu:cart:updated"));
   }
 
+  /** Apply or remove the cart's discount code. The backend validates it
+   *  against the promotion engine, so an invalid or ineligible code is
+   *  refused here rather than silently at checkout. */
+  async function submitCode(method: "POST" | "DELETE", code?: string) {
+    const csrf = readCsrf();
+    setCodeBusy(true);
+    setCodeError(null);
+    try {
+      const res = await fetch("/api/cart/discount", {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrf ? { "x-numu-csrf": csrf } : {}),
+        },
+        credentials: "include",
+        ...(method === "POST" ? { body: JSON.stringify({ code }) } : {}),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setCodeError(
+          (body?.detail as string) ||
+            T("This code can't be used.", "الكود ده مش صالح."),
+        );
+        return;
+      }
+      if (method === "DELETE") setCodeInput("");
+      window.dispatchEvent(new CustomEvent("numu:cart:updated"));
+    } catch {
+      setCodeError(T("Something went wrong.", "حصل خطأ، جرب تاني."));
+    } finally {
+      setCodeBusy(false);
+    }
+  }
+
   async function removeItem(itemId: string) {
     const csrf = readCsrf();
     await fetch("/api/cart/remove", {
@@ -150,6 +199,15 @@ export default function BuiltInCart({
   }
 
   const currency = cart?.currency || storeCurrency;
+  // `discount_amount` is the WHOLE discount (automatic + code); the named
+  // promotion lines below cover only the automatic part, so the code's own
+  // share is what's left over.
+  const totalDiscount = cart?.discount_amount ?? 0;
+  const autoDiscount = (cart?.applied_promotions ?? []).reduce(
+    (sum, promo) => sum + (promo.amount || 0),
+    0,
+  );
+  const codeDiscount = Math.max(0, totalDiscount - autoDiscount);
 
   if (loading && !cart) {
     return (
@@ -268,32 +326,86 @@ export default function BuiltInCart({
         locale={locale}
       />
 
+      {/* Discount code. A store's codes are otherwise only enterable at
+          checkout, which reads as "the code doesn't work" to a shopper who
+          is holding one in the cart. */}
+      <div className="mt-6 border-t border-[var(--numu-border)] pt-4">
+        {cart.discount_code ? (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium">
+              {T("Code", "الكود")}:{" "}
+              <span className="font-mono">{cart.discount_code}</span>
+            </span>
+            <button
+              type="button"
+              disabled={codeBusy}
+              onClick={() => void submitCode("DELETE")}
+              className="text-[var(--numu-ink-soft)] underline disabled:opacity-50"
+            >
+              {T("Remove", "إزالة")}
+            </button>
+          </div>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const code = codeInput.trim();
+              if (code) void submitCode("POST", code);
+            }}
+            className="flex gap-2"
+          >
+            <input
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+              placeholder={T("Discount code", "كود الخصم")}
+              aria-label={T("Discount code", "كود الخصم")}
+              className="min-w-0 flex-1 rounded-full border border-[var(--numu-border)] bg-transparent px-4 py-2 font-mono text-sm"
+            />
+            <button
+              type="submit"
+              disabled={codeBusy || !codeInput.trim()}
+              className="numu-btn-navy rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              {T("Apply", "تطبيق")}
+            </button>
+          </form>
+        )}
+        {codeError && (
+          <p className="mt-2 text-xs text-red-700">{codeError}</p>
+        )}
+      </div>
+
       <div className="mt-6 border-t border-[var(--numu-border)] pt-4 space-y-2">
         <div className="flex justify-between text-sm">
           <span>{T("Subtotal", "الإجمالي الفرعي")}</span>
           <span>{fmtCents(cart.subtotal, currency)}</span>
         </div>
-        {cart.applied_promotion && (
+        {/* One line per automatic offer that fired, named as the merchant
+            named it, then the code's own share as the remainder. */}
+        {(cart.applied_promotions ?? []).map((promo) => (
+          <div
+            key={promo.id}
+            className="flex justify-between text-sm text-green-700"
+          >
+            <span>{(ar && promo.title_ar) || promo.title}</span>
+            <span>−{fmtCents(promo.amount, currency)}</span>
+          </div>
+        ))}
+        {codeDiscount > 0 && (
           <div className="flex justify-between text-sm text-green-700">
-            <span>
-              {cart.applied_promotion.label ||
-                cart.applied_promotion.code ||
-                "Discount"}
-            </span>
-            <span>−{fmtCents(cart.applied_promotion.amount, currency)}</span>
+            <span>{cart.discount_code || T("Discount", "خصم")}</span>
+            <span>−{fmtCents(codeDiscount, currency)}</span>
           </div>
         )}
         <div className="flex justify-between text-base font-semibold pt-2 border-t border-[var(--numu-border)]">
           <span>{T("Total", "الإجمالي")}</span>
-          {/* Total must net off any applied promotion — it previously
-              mirrored the subtotal, so a discounted cart showed the
-              pre-discount amount as the Total. */}
+          {/* The engine's own post-discount total when it sent one, so this
+              line can never disagree with what checkout charges. */}
           <span>
             {fmtCents(
-              Math.max(
-                0,
-                cart.subtotal - (cart.applied_promotion?.amount ?? 0),
-              ),
+              typeof cart.total === "number" && cart.total > 0
+                ? cart.total
+                : Math.max(0, cart.subtotal - totalDiscount),
               currency,
             )}
           </span>
