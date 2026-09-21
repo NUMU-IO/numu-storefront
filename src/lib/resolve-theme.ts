@@ -130,6 +130,13 @@ function normalizeRaw(raw: Record<string, any>): ThemeSettingsV3 {
             prev?.theme_id ??
             null,
           checksum: checksum || null,
+          // Same inheritance rule as `checksum`: a digest only describes the
+          // bundle it was built from, so it is dropped when the URL moves.
+          server_checksum:
+            (typeof raw.server_checksum === "string" && raw.server_checksum) ||
+            (prev?.bundle_url === outerBundleUrl
+              ? (prev?.server_checksum ?? null)
+              : null),
         },
       };
     }
@@ -235,6 +242,7 @@ function normalizeRaw(raw: Record<string, any>): ThemeSettingsV3 {
 
 function extractExternalTheme(raw: Record<string, any>): ExternalThemeMetadata {
   const checksum = raw.checksum ?? raw.bundle_checksum ?? null;
+  const serverChecksum = raw.server_checksum ?? null;
   return {
     bundle_url: String(raw.bundle_url),
     css_url: raw.css_url ?? null,
@@ -243,6 +251,7 @@ function extractExternalTheme(raw: Record<string, any>): ExternalThemeMetadata {
     section_schemas: raw.section_schemas ?? null,
     presets: raw.presets ?? null,
     theme_id: typeof raw.theme_id === "string" ? raw.theme_id : null,
+    server_checksum: typeof serverChecksum === "string" ? serverChecksum : null,
     checksum: typeof checksum === "string" && checksum ? checksum : null,
   };
 }
