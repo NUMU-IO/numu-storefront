@@ -41,6 +41,8 @@ function contentPolicyHeader(): Array<{ key: string; value: string }> {
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       // Theme bundles.
       "https://cdn.numueg.app",
+      // Cloudflare Web Analytics: Cloudflare injects its beacon into every page.
+      "https://static.cloudflareinsights.com",
       // Merchant-configured marketing tags (see components/tracking).
       "https://connect.facebook.net https://analytics.tiktok.com",
       // Paymob's hosted checkout pixel, and Google Maps for address pickers.
@@ -51,8 +53,11 @@ function contentPolicyHeader(): Array<{ key: string; value: string }> {
       .join(" "),
     // Google Fonts and the Paymob pixel's stylesheets; inline styles are how
     // themes apply merchant colour settings.
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
-    "font-src 'self' data: https://fonts.gstatic.com",
+    // The theme's own stylesheet (theme.css) is served from cdn.numueg.app:
+    // missing it would unstyle every store (found by auditing live vionne).
+    "style-src 'self' 'unsafe-inline' https://cdn.numueg.app https://fonts.googleapis.com https://cdn.jsdelivr.net",
+    // theme.css may reference fonts shipped next to it on the CDN.
+    "font-src 'self' data: https://cdn.numueg.app https://fonts.gstatic.com",
     // Merchant product images come from wherever the merchant imported them.
     "img-src 'self' data: blob: https:",
     "media-src 'self' data: blob: https:",
@@ -60,6 +65,9 @@ function contentPolicyHeader(): Array<{ key: string; value: string }> {
       "connect-src 'self'",
       "https://api.numueg.app https://*.numueg.app",
       "https://connect.facebook.net https://analytics.tiktok.com",
+      // The TikTok pixel also reports over IPv6 (analytics-ipv6.tiktokw.us),
+      // and the Cloudflare beacon posts to cloudflareinsights.com.
+      "https://*.tiktokw.us https://cloudflareinsights.com",
       "https://maps.googleapis.com",
       dev ? "https://*.r2.dev http://localhost:* http://127.0.0.1:* ws://localhost:*" : "",
     ]
