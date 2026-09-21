@@ -465,6 +465,30 @@ export default async function StoreLayout({ children, params }: LayoutProps) {
             self-suppresses on /checkout (the gate owns that surface), for
             verified sessions, and for 7 days after a dismissal. */}
         <SaveCartNudge />
+        {/* A partner's development store (apps plan, Phase 2): the API marks it
+            noindex with this reason and refuses its checkout, so say so on the
+            page too. Host-rendered, so it shows over every theme; inert for
+            every other store. */}
+        {(store as { seo?: { blocked_reason?: string | null } }).seo?.blocked_reason ===
+          "development_store" && (
+          <div
+            role="status"
+            dir={visitorLocale === "ar" ? "rtl" : "ltr"}
+            style={{
+              background: "#1f2937",
+              color: "#f9fafb",
+              fontSize: 13,
+              lineHeight: 1.5,
+              paddingBlock: 8,
+              paddingInline: 16,
+              textAlign: "center",
+            }}
+          >
+            {visitorLocale === "ar"
+              ? "ده متجر تجريبي لمطوّر، ومش بيستقبل طلبات حقيقية."
+              : "Development store for testing apps. It doesn't take real orders."}
+          </div>
+        )}
         {announcementBar && (
           <AnnouncementBar
             promotion={announcementBar}
