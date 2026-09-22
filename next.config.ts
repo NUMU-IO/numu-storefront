@@ -3,6 +3,94 @@ import type { NextConfig } from "next";
 
 const isProd = process.env.NEXT_PUBLIC_NUMU_ENV === "production";
 
+/**
+ * Content-Security-Policy for the storefront (apps plan, Phase 8 item 8.2).
+ *
+ * A theme bundle is third-party-shaped code running on the merchant's own
+ * origin, next to the cart, checkout and account pages. Until now the only
+ * thing deciding what code may run was the host allowlist in
+ * `lib/bundle-allowlist.ts` — an application-level check the browser knows
+ * nothing about. This adds the browser-level one: a bundle that tries to
+ * pull more code from a host NUMU never approved is refused by the browser,
+ * whoever put the URL there.
+ *
+ * SHIPS AS REPORT-ONLY. There is no staging environment and two live
+ * stores, so a policy that is a directive short does not break a checkout —
+ * it prints the violation in the browser console and nowhere else. Set
+ * `NUMU_CSP=enforce` once those consoles are quiet on a real store.
+ * `NUMU_CSP=off` removes the header entirely.
+ *
+ * Known weaknesses, both deliberate and both removable later:
+ *   * `'unsafe-inline'` — Next inlines its own bootstrap scripts and the
+ *     BYOT import map, so dropping it needs a per-request nonce threaded
+ *     from `proxy.ts` through `RuntimeImportMap`. Worth doing; it is a
+ *     separate change with its own way of blanking a store.
+ *   * `'unsafe-eval'` — `external-loader.ts` imports a theme bundle through
+ *     `new Function("u", "return import(u)")`, which is eval-class. That
+ *     shim exists because the bundler rewrites a literal `import(url)` even
+ *     with magic comments. Dropping this directive means first replacing
+ *     that shim and proving a real theme still mounts in a browser.
+ */
+function contentPolicyHeader(): Array<{ key: string; value: string }> {
+  const mode = (process.env.NUMU_CSP || "report").toLowerCase();
+  if (mode === "off") return [];
+  const dev = !isProd;
+  const policy = [
+    "default-src 'self'",
+    [
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      // Theme bundles.
+      "https://cdn.numueg.app",
+      // Cloudflare Web Analytics: Cloudflare injects its beacon into every page.
+      "https://static.cloudflareinsights.com",
+      // Merchant-configured marketing tags (see components/tracking).
+      "https://connect.facebook.net https://analytics.tiktok.com",
+      // Paymob's hosted checkout pixel, and Google Maps for address pickers.
+      "https://cdn.jsdelivr.net https://maps.googleapis.com",
+      dev ? "https://*.r2.dev http://localhost:* http://127.0.0.1:*" : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    // Google Fonts and the Paymob pixel's stylesheets; inline styles are how
+    // themes apply merchant colour settings.
+    // The theme's own stylesheet (theme.css) is served from cdn.numueg.app:
+    // missing it would unstyle every store (found by auditing live vionne).
+    "style-src 'self' 'unsafe-inline' https://cdn.numueg.app https://fonts.googleapis.com https://cdn.jsdelivr.net",
+    // theme.css may reference fonts shipped next to it on the CDN.
+    "font-src 'self' data: https://cdn.numueg.app https://fonts.gstatic.com",
+    // Merchant product images come from wherever the merchant imported them.
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' data: blob: https:",
+    [
+      "connect-src 'self'",
+      "https://api.numueg.app https://*.numueg.app",
+      "https://connect.facebook.net https://analytics.tiktok.com",
+      // The TikTok pixel also reports over IPv6 (analytics-ipv6.tiktokw.us),
+      // and the Cloudflare beacon posts to cloudflareinsights.com.
+      "https://*.tiktokw.us https://cloudflareinsights.com",
+      "https://maps.googleapis.com",
+      dev ? "https://*.r2.dev http://localhost:* http://127.0.0.1:* ws://localhost:*" : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    // Payment gateways redirect into iframes (Paymob, Kashier, Moyasar) and
+    // each merchant may use a different one — narrowing this needs the real
+    // list per gateway, and getting it wrong breaks paying.
+    "frame-src https: blob:",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    // Checkout posts to the gateway's own domain.
+    "form-action 'self' https:",
+  ].join("; ");
+
+  return [
+    mode === "enforce"
+      ? { key: "Content-Security-Policy", value: policy }
+      : { key: "Content-Security-Policy-Report-Only", value: policy },
+  ];
+}
+
 const nextConfig: NextConfig = {
   // Produce a self-contained server bundle (`.next/standalone/server.js`
   // + a minimal node_modules) so the Docker runner image stays lean —
@@ -159,6 +247,7 @@ const nextConfig: NextConfig = {
             value:
               "frame-ancestors 'self' https://numueg.app https://*.numueg.app http://localhost:* http://127.0.0.1:*",
           },
+          ...contentPolicyHeader(),
         ],
       },
       {
