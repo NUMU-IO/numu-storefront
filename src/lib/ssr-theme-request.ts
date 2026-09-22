@@ -147,6 +147,7 @@ export async function resolveThemeSsrHtml({
 
     return await renderThemeSsr({
       bundleUrl,
+      serverChecksum: themeSettings.external_theme?.server_checksum ?? null,
       themeSettings: resolved,
       storeData: store,
       page,

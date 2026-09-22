@@ -20,11 +20,15 @@
  * and a per-render deadline. Its worst outcome is a killed process and a
  * fallback to today's client mount — never a page, never a leak.
  *
- * Honest limit: Node's permission model does NOT gate outbound network. The
- * mitigations for that are the build-time AST scan (bundles that reach the
- * network are refused at publication) and the empty env (nothing worth
- * exfiltrating is reachable from inside). Do not read `--permission` as a
- * network sandbox.
+ * Honest limit: Node's permission model does NOT gate outbound network, and
+ * the build-time AST scan does NOT refuse bundles that reach the network —
+ * it bans `eval`, the `Function` constructor, `document.cookie/write`,
+ * `innerHTML` assignment and Node builtins, and 7 of the 19 first-party
+ * themes call `fetch` legitimately, so banning it would block them. The real
+ * mitigations are the scrubbed env (nothing worth exfiltrating is reachable
+ * from inside) and the integrity gate below, which is what keeps the bytes
+ * the ones that were reviewed. Do not read `--permission` as a network
+ * sandbox.
  *
  * ── Parity, which is the thing that actually breaks ─────────────────────────
  * Server HTML and the client's first render must be the same React tree or
@@ -247,8 +251,14 @@ async function fetchWithTimeout(url: string): Promise<Response | null> {
   }
 }
 
-async function acquireBundle(bundleUrl: string): Promise<BundleRecord | null> {
-  const cached = bundleCache.get(bundleUrl);
+async function acquireBundle(
+  bundleUrl: string,
+  pinnedChecksum: string | null,
+): Promise<BundleRecord | null> {
+  // Keyed by the pin as well as the URL: a row whose pin changed must not be
+  // served a bundle admitted under the old one.
+  const cacheKey = `${bundleUrl}::${pinnedChecksum ?? ""}`;
+  const cached = bundleCache.get(cacheKey);
   if (cached) return cached;
 
   const task = (async (): Promise<BundleRecord | null> => {
@@ -280,9 +290,28 @@ async function acquireBundle(bundleUrl: string): Promise<BundleRecord | null> {
     // Gate 3 — integrity. Unlike the client path (whose enforcement is still
     // flagged off because a mismatch there blanks a live store), verification
     // here is ALWAYS on: the downside of refusing is losing a crawler-facing
-    // nicety, so there is no reason to trust unverified bytes.
+    // nicety, so there is no reason to trust unverified bytes. These bytes are
+    // `import()`ed inside our own Node worker, so an unverified one is
+    // server-side code execution, not a bad render.
+    //
+    // Two sources, and both must agree when both exist:
+    //   * `pinnedChecksum` — from the database row (apps plan, Phase 8).
+    //   * the manifest — same CDN prefix as the bytes it describes, so it is
+    //     only a self-declaration: whoever can rewrite `theme.server.js` can
+    //     rewrite `manifest.json` in the same breath, or simply drop the
+    //     field, which used to skip this gate entirely.
+    // Neither present means nothing vouches for the bytes: refuse.
     const digest = await sha256Hex(bytes);
-    if (ssr.server_bundle_checksum && ssr.server_bundle_checksum !== digest) {
+    const declared = ssr.server_bundle_checksum ?? null;
+    if (!pinnedChecksum && !declared) {
+      warn("ssr_bundle_checksum_absent", { bundleUrl });
+      return null;
+    }
+    if (pinnedChecksum && declared && pinnedChecksum !== declared) {
+      warn("ssr_bundle_checksum_disagreement", { bundleUrl });
+      return null;
+    }
+    if (digest !== (pinnedChecksum ?? declared)) {
       warn("ssr_bundle_checksum_mismatch", { bundleUrl });
       return null;
     }
@@ -321,12 +350,12 @@ async function acquireBundle(bundleUrl: string): Promise<BundleRecord | null> {
     return { filePath };
   })();
 
-  bundleCache.set(bundleUrl, task);
+  bundleCache.set(cacheKey, task);
   const result = await task;
   // Don't cache a negative forever — a theme may gain SSR on its next
   // publish, and a transient CDN failure shouldn't bench it for the process
   // lifetime.
-  if (!result) setTimeout(() => bundleCache.delete(bundleUrl), 60_000).unref?.();
+  if (!result) setTimeout(() => bundleCache.delete(cacheKey), 60_000).unref?.();
   return result;
 }
 
@@ -534,6 +563,9 @@ export interface ThemeSsrInput {
   /** Marketplace preview: never server-rendered (the client computes `demo`
    *  from the URL, so a server render would disagree and mismatch). */
   isPreview?: boolean;
+  /** `external_theme.server_checksum` — the database's pin for the SSR
+   *  bundle. Null on rows seeded before the column existed. */
+  serverChecksum?: string | null;
 }
 
 /**
@@ -552,7 +584,7 @@ export async function renderThemeSsr(
   if (benched(bundleUrl)) return null;
 
   try {
-    const bundle = await acquireBundle(bundleUrl);
+    const bundle = await acquireBundle(bundleUrl, input.serverChecksum ?? null);
     if (!bundle) {
       // Not capable / not allowed is a permanent-ish "no", not a fault:
       // record it so we stop re-fetching a manifest that says `capable:false`.

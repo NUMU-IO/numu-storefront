@@ -48,6 +48,22 @@ export interface ExternalThemeMetadata {
    */
   checksum?: string | null;
   /**
+   * SHA-256 hex digest of the theme's SSR bundle (`theme.server.js`), set at
+   * activation from `marketplace_theme_versions.server_checksum`.
+   *
+   * The SSR worker used to take this digest from the bundle's own sibling
+   * `manifest.json` — the same CDN prefix as the bytes it describes, so
+   * anything able to rewrite `theme.server.js` could rewrite its checksum
+   * too, or drop the field and be imported unverified. That bundle is
+   * `import()`ed inside NUMU's Node worker, so this is a server-side code
+   * path, not a rendering nicety. Pinning it here means the CDN and the
+   * database must BOTH be compromised, not either one.
+   *
+   * Null on rows seeded before the column existed; the worker then falls
+   * back to the manifest digest, and refuses when neither exists.
+   */
+  server_checksum?: string | null;
+  /**
    * Absolute URLs to the theme's static error / loading fragments, injected by
    * `[domain]/error.tsx` instead of the platform's generic chrome.
    *
