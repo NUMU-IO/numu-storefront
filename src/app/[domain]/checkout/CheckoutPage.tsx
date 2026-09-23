@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { trackingOptOut } from "@/lib/consent";
 import { useParams, useRouter } from "next/navigation";
 import {
   CheckoutCard,
@@ -1068,7 +1069,9 @@ export function CheckoutPage() {
           "Content-Type": "application/json",
           "Idempotency-Key": idempotencyKeyRef.current,
         },
-        body: JSON.stringify(payload),
+        // Carried onto the order so the server Purchase honours the
+        // shopper's cookie-banner choice, like every browser event does.
+        body: JSON.stringify({ ...payload, opt_out: trackingOptOut() }),
       });
       const body = await res.json();
       if (!res.ok) {
