@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { fetchStoreByHost } from "@/lib/api-client";
+import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -30,6 +31,13 @@ function backendHeaders(req: NextRequest): HeadersInit {
   if (csrf) (headers as Record<string, string>)["x-numu-csrf"] = csrf;
   const idem = req.headers.get("idempotency-key");
   if (idem) (headers as Record<string, string>)["idempotency-key"] = idem;
+  // The order snapshots the shopper's IP and user agent for the Meta and
+  // TikTok Purchase. Without these, every order recorded this server's IP
+  // and Node's fetch user agent.
+  const forwardedFor = upstreamForwardedFor(req);
+  if (forwardedFor) (headers as Record<string, string>)["X-Forwarded-For"] = forwardedFor;
+  const userAgent = req.headers.get("user-agent");
+  if (userAgent) (headers as Record<string, string>)["User-Agent"] = userAgent;
   return headers;
 }
 
