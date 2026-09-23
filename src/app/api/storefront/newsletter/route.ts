@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { fetchStoreByHost } from "@/lib/api-client";
+import { readSessionId } from "@/lib/server-capi";
 import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
@@ -41,6 +42,10 @@ export async function POST(req: NextRequest) {
   // shares this server's bucket.
   const forwardedFor = upstreamForwardedFor(req);
   if (forwardedFor) headers["X-Forwarded-For"] = forwardedFor;
+  // Lets the API attach this email to the shopper's later Meta / TikTok
+  // events as a match key.
+  const sessionId = readSessionId(req.headers.get("cookie"));
+  if (sessionId) headers["X-Numu-Session"] = sessionId;
 
   try {
     const res = await fetch(

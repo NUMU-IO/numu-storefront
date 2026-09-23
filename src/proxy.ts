@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { keepTrackingCookies } from "@/lib/durable-tracking-cookies";
 import { resolveImageTransform } from "@/lib/image-transform";
 
 // Port-stripped, because every comparison below is against a port-stripped
@@ -414,6 +415,8 @@ export function proxy(request: NextRequest) {
       (request.headers.get("accept") || "").includes("text/html");
 
     if (isDocumentNav) {
+      keepTrackingCookies(request, res, hostname);
+
       // WP4 — restore back/forward cache.
       //
       // Chrome refuses to bf-cache any page whose MAIN RESOURCE was served
