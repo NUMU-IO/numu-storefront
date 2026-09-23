@@ -152,7 +152,11 @@ export function TikTokPixel({
     `}(window,document,'ttq');` +
     (loadStrategy === "immediate"
       ? `window.__numuLoadTtq();`
-      : `${TP_GATE_SNIPPET}window.__numuTP(window.__numuLoadTtq);`);
+      : // A TikTok-ad visitor (click id in the URL or cookie) loads the SDK now:
+        // `_ttp` only exists once it runs, and for these sessions it is a match
+        // key on the landing event itself. Everyone else waits for the gate.
+        `if(/[?&]ttclid=/.test(location.search)||/(?:^|; )ttclid=/.test(document.cookie))` +
+        `window.__numuLoadTtq();else{${TP_GATE_SNIPPET}window.__numuTP(window.__numuLoadTtq);}`);
 
   return (
     <>

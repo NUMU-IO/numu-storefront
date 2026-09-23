@@ -81,7 +81,7 @@ async function resolveCustomerId(
   }
 }
 
-function readSessionId(cookieHeader: string | null): string | undefined {
+export function readSessionId(cookieHeader: string | null): string | undefined {
   const raw = readCookie(cookieHeader, "numu_attribution");
   if (raw) {
     try {

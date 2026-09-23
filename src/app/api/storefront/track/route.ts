@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
   if (visitorUserAgent) headers["User-Agent"] = visitorUserAgent;
 
   try {
-    await fetch(upstream, {
+    const res = await fetch(upstream, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -159,6 +159,13 @@ export async function POST(req: NextRequest) {
       cache: "no-store",
       signal: controller.signal,
     });
+    // The browser still gets 204, but a rejected event must leave a trace:
+    // a silent 422 on long TikTok click ids once dropped every event from
+    // TikTok-ad visitors for weeks. The body names the failing field.
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).slice(0, 300);
+      console.warn(`[/api/storefront/track] upstream ${res.status}: ${detail}`);
+    }
   } catch (err) {
     // Distinguish timeout from other failures in the server log so
     // we have a chance of noticing if the backend slows down. The
