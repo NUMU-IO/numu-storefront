@@ -287,6 +287,18 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // App proxy pages are a partner's HTML on the store's origin: an
+        // opaque-origin sandbox keeps their scripts away from the store's
+        // cookies and APIs. Last, so it replaces the wildcard's policy.
+        source: "/apps/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "sandbox allow-scripts allow-forms allow-popups; frame-ancestors 'self'",
+          },
+        ],
+      },
     ];
   },
 };
