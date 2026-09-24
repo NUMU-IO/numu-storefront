@@ -171,6 +171,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (!isApexHost(hostname) && pathname.startsWith("/apps/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/api/app-proxy/${pathname.slice("/apps/".length)}`;
+    return NextResponse.rewrite(url);
+  }
+
   // ── Agent-discovery documents ─────────────────────────────────────────────
   //
   // `/.well-known/*` and `/openapi.json` used to fall through to the
