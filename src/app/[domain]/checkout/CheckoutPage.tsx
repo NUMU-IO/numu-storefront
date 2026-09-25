@@ -85,9 +85,21 @@ interface MethodOption {
   label_ar?: string;
   requires_deposit?: boolean;
 }
+/** What paying online saves (COD Shield). The server applies it; the
+ *  storefront only says so. */
+interface PrepaidIncentive {
+  enabled: boolean;
+  kind: "percent" | "fixed" | "free_shipping";
+  percent: number;
+  amount_cents: number;
+  min_order_cents: number;
+}
 interface PaymentConfig {
   methods: MethodOption[];
+  prepaid: PrepaidIncentive | null;
   cod: {
+    /** Only some COD orders take the deposit; checkout decides. */
+    deposit_conditional: boolean;
     enabled: boolean;
     deposit_gateways: string[];
     /** Sizing rule, so the split can be quoted before the order exists. */
@@ -112,7 +124,9 @@ interface RawPaymentConfig {
     deposit_amount_cents?: number;
     deposit_percent?: number;
     deposit_min_order_cents?: number;
+    deposit_conditional?: boolean;
   };
+  prepaid_incentive?: PrepaidIncentive | null;
   saved_cards_enabled?: boolean;
   currency?: string;
 }
@@ -126,7 +140,9 @@ interface SavedCard {
 const SAVED_CARD_GATEWAYS = new Set(["paymob", "paymob_card", "kashier"]);
 const FALLBACK_PAYMENT: PaymentConfig = {
   methods: [{ code: "paymob" }, { code: "cod" }],
+  prepaid: null,
   cod: {
+    deposit_conditional: false,
     enabled: false,
     deposit_gateways: [],
     policy: { enabled: false },
@@ -185,7 +201,9 @@ function normalizePayment(raw: RawPaymentConfig | null | undefined): PaymentConf
     raw.cod?.deposit_gateways ?? raw.cod_deposit_policy?.allowed_gateways ?? [];
   return {
     methods,
+    prepaid: raw.prepaid_incentive?.enabled ? raw.prepaid_incentive : null,
     cod: {
+      deposit_conditional: Boolean(raw.cod?.deposit_conditional),
       enabled: codEnabled,
       deposit_gateways: depositGateways,
       // Absent on an older backend. The defaults below would size every order
@@ -296,6 +314,14 @@ const T = {
     ar: "ادفع جزء دلوقتي عشان نأكد الطلب — والباقي كاش عند الاستلام.",
   },
   depositVia: { en: "Deposit paid via", ar: "العربون يتدفع عن طريق" },
+  depositMaybe: {
+    en: "Some orders need a small deposit. You only pay it if yours does.",
+    ar: "بعض الطلبات بتحتاج عربون صغير، وهتدفعه بس لو طلبك منهم.",
+  },
+  prepaidSave: { en: "You save", ar: "هتوفّر" },
+  prepaidFreeShip: { en: "Free shipping when you pay online", ar: "شحن مجاني لما تدفع أونلاين" },
+  prepaidBadgeFree: { en: "Free shipping", ar: "شحن مجاني" },
+  prepaidBadgeOff: { en: "off", ar: "خصم" },
   depositWith: { en: "Pay the deposit with", ar: "ادفع العربون بـ" },
   payNow: { en: "Pay now", ar: "تدفع دلوقتي" },
   payOnDelivery: { en: "On delivery", ar: "عند الاستلام" },
@@ -1327,6 +1353,17 @@ export function CheckoutPage() {
     Boolean(payConfig?.cod.enabled) &&
     (!payConfig?.cod.policy_known || orderTotalCents === null || depositDue > 0);
   const showDeposit = method === "cod" && depositApplies;
+  // Prepaid incentive (COD Shield), estimated on the order total the summary
+  // shows; checkout computes the real figure from the subtotal.
+  const prepaid = payConfig?.prepaid ?? null;
+  const prepaidEligible =
+    prepaid !== null && (cartSubtotal ?? 0) >= prepaid.min_order_cents;
+  const prepaidSaving =
+    !prepaidEligible || prepaid.kind === "free_shipping" || cartSubtotal === null
+      ? 0
+      : prepaid.kind === "percent"
+        ? Math.floor((cartSubtotal * prepaid.percent) / 100)
+        : Math.min(prepaid.amount_cents, cartSubtotal);
   const savedForMethod = savedCards.filter(
     (c) =>
       method &&
@@ -1754,11 +1791,28 @@ export function CheckoutPage() {
                           </span>
                         )}
                       </span>
+                      {prepaidEligible && m.code !== "cod" && (
+                        <span className="rounded-full bg-[var(--ck-accent)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--ck-accent)]">
+                          {prepaid.kind === "free_shipping"
+                            ? t("prepaidBadgeFree")
+                            : prepaid.kind === "percent"
+                              ? `${prepaid.percent}% ${t("prepaidBadgeOff")}`
+                              : `${formatCents(prepaid.amount_cents, currencyCode)} ${t("prepaidBadgeOff")}`}
+                        </span>
+                      )}
                       {method === m.code ? <SelectedDot /> : <UnselectedDot />}
                     </OptionRow>
                   </li>
                 ))}
               </ul>
+            )}
+
+            {prepaidEligible && method && method !== "cod" && (
+              <p className="mt-3 text-sm font-medium text-[var(--ck-accent)]">
+                {prepaid.kind === "free_shipping"
+                  ? t("prepaidFreeShip")
+                  : `${t("prepaidSave")} ${formatCents(prepaidSaving, currencyCode)}`}
+              </p>
             )}
 
             {showDeposit && (
@@ -1767,7 +1821,9 @@ export function CheckoutPage() {
                 style={{ borderRadius: "var(--ck-radius-sm)" }}
               >
                 <p className="font-semibold text-[var(--ck-fg)]">{t("depositTitle")}</p>
-                <p className="mt-0.5 text-xs text-[var(--ck-muted)]">{t("depositHint")}</p>
+                <p className="mt-0.5 text-xs text-[var(--ck-muted)]">
+                  {payConfig?.cod.deposit_conditional ? t("depositMaybe") : t("depositHint")}
+                </p>
 
                 {/* The amount, before the gateway. "A deposit is required"
                     without a number is the part shoppers abandon on. */}
