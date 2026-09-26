@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { fetchStoreByHost } from "@/lib/api-client";
+import { internalServiceHeaders } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
         ...(userAgent ? { "User-Agent": userAgent } : {}),
+        ...(await internalServiceHeaders()),
       },
       body,
       cache: "no-store",

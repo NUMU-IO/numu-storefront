@@ -41,7 +41,7 @@ const DEFAULT_TIMEOUT_MS = 5_000;
  * visitor's IP as Cloudflare/nginx handed it to us — instead of ours.
  * Without the env var nothing changes.
  */
-async function internalServiceHeaders(): Promise<Record<string, string>> {
+export async function internalServiceHeaders(): Promise<Record<string, string>> {
   const token = process.env.NUMU_INTERNAL_SERVICE_TOKEN;
   if (!token) return {};
   const out: Record<string, string> = { "X-Internal-Service-Token": token };
@@ -476,7 +476,7 @@ export async function fetchCurrentCustomer(
   try {
     const res = await fetch(`${API_URL}/storefront/me/profile`, {
       method: "GET",
-      headers: { cookie: cookieHeader },
+      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
@@ -500,7 +500,7 @@ export async function fetchCustomerOrders(
   try {
     const res = await fetch(`${API_URL}/storefront/me/orders`, {
       method: "GET",
-      headers: { cookie: cookieHeader },
+      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
@@ -587,7 +587,7 @@ export async function fetchCustomerAddresses(
   try {
     const res = await fetch(`${API_URL}/storefront/me/addresses`, {
       method: "GET",
-      headers: { cookie: cookieHeader },
+      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });

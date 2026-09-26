@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adaptCart } from "@/lib/adapt-cart";
 import { verifyCsrf } from "@/lib/csrf";
+import { internalServiceHeaders } from "@/lib/api-client";
 
 // Match the rest of the storefront's defaults — the API runs on 8021
 // in this dev setup. Override with NUMU_API_URL in env for staging/prod.
@@ -54,6 +55,7 @@ export async function proxyCartMutation(
   if (cookie) headers.cookie = cookie;
   const idempotency = req.headers.get("x-numu-idempotency-key");
   if (idempotency) headers["x-numu-idempotency-key"] = idempotency;
+  Object.assign(headers, await internalServiceHeaders());
   // Fall back to the request's own Host when the proxy didn't stamp
   // `x-numu-host` — otherwise guest cart writes 400 on store resolution.
   const subdomain =

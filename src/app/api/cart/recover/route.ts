@@ -16,6 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { internalServiceHeaders } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 const RECOVER_TIMEOUT_MS = 8_000;
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const res = await fetch(`${API_URL}/storefront/cart/recover`, {
       method: "POST",
-      headers,
+      headers: { ...headers, ...(await internalServiceHeaders()) },
       body: JSON.stringify({ recover_id: recoverId }),
       cache: "no-store",
       signal: AbortSignal.timeout(RECOVER_TIMEOUT_MS),
