@@ -40,11 +40,18 @@ const DEFAULT_TIMEOUT_MS = 5_000;
  * API buckets each request under the `X-Forwarded-For` we send — the
  * visitor's IP as Cloudflare/nginx handed it to us — instead of ours.
  * Without the env var nothing changes.
+ *
+ * `withVisitor: false` leaves the shopper's IP out, for fetches served from
+ * Next's data cache: its cache key includes every request header, so a
+ * per-shopper `X-Forwarded-For` made each cached read a miss.
  */
-async function internalServiceHeaders(): Promise<Record<string, string>> {
+export async function internalServiceHeaders(
+  { withVisitor = true }: { withVisitor?: boolean } = {},
+): Promise<Record<string, string>> {
   const token = process.env.NUMU_INTERNAL_SERVICE_TOKEN;
   if (!token) return {};
   const out: Record<string, string> = { "X-Internal-Service-Token": token };
+  if (!withVisitor) return out;
   try {
     const h = await headers();
     const visitor =
@@ -146,8 +153,13 @@ async function apiFetch<T>(
 
   const method = (fetchOptions.method || "GET").toUpperCase();
   const idempotent = method === "GET" || method === "HEAD";
+  // Served from Next's data cache (shared by every shopper): keep headers
+  // constant so the cache key is too. The API then buckets the fill under
+  // this server, which it exempts from the per-visitor limit.
+  const dataCached =
+    idempotent && fetchOptions.cache !== "no-store" && (revalidate ?? 60) > 0;
   const headers = {
-    ...(await internalServiceHeaders()),
+    ...(await internalServiceHeaders({ withVisitor: !dataCached })),
     ...(fetchOptions.headers as Record<string, string> | undefined),
   };
 
@@ -476,7 +488,7 @@ export async function fetchCurrentCustomer(
   try {
     const res = await fetch(`${API_URL}/storefront/me/profile`, {
       method: "GET",
-      headers: { cookie: cookieHeader },
+      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
@@ -500,7 +512,7 @@ export async function fetchCustomerOrders(
   try {
     const res = await fetch(`${API_URL}/storefront/me/orders`, {
       method: "GET",
-      headers: { cookie: cookieHeader },
+      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
@@ -587,7 +599,7 @@ export async function fetchCustomerAddresses(
   try {
     const res = await fetch(`${API_URL}/storefront/me/addresses`, {
       method: "GET",
-      headers: { cookie: cookieHeader },
+      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });

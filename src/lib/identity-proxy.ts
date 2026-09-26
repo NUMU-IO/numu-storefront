@@ -21,6 +21,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCsrf } from "@/lib/csrf";
+import { internalServiceHeaders } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -106,7 +107,7 @@ export async function proxyIdentity(
   try {
     upstream = await fetch(`${API_URL}${path}`, {
       method,
-      headers,
+      headers: { ...headers, ...(await internalServiceHeaders()) },
       body,
       cache: "no-store",
       signal: AbortSignal.timeout(IDENTITY_TIMEOUT_MS),

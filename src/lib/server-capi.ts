@@ -17,6 +17,7 @@
 
 import type { NextRequest } from "next/server";
 import { fetchStoreByHost } from "@/lib/api-client";
+import { internalServiceHeaders } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 const TIMEOUT_MS = 3_000;
@@ -68,7 +69,7 @@ async function resolveCustomerId(
   }
   try {
     const res = await fetch(`${API_URL}/storefront/me/profile`, {
-      headers: { cookie: cookieHeader },
+      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
       cache: "no-store",
       signal: AbortSignal.timeout(2_000),
     });
@@ -185,7 +186,7 @@ export async function fireServerCapi(
     try {
       await fetch(`${API_URL}/storefront/store/${store.id}/track`, {
         method: "POST",
-        headers,
+        headers: { ...headers, ...(await internalServiceHeaders()) },
         body: JSON.stringify(body),
         cache: "no-store",
         signal: controller.signal,

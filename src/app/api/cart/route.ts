@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adaptCart } from "@/lib/adapt-cart";
 import { ensureCsrfCookie } from "@/lib/csrf";
+import { internalServiceHeaders } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -34,7 +35,7 @@ function backendHeaders(req: NextRequest): HeadersInit {
 export async function GET(req: NextRequest) {
   const res = await fetch(`${API_URL}/storefront/cart`, {
     method: "GET",
-    headers: backendHeaders(req),
+    headers: { ...backendHeaders(req), ...(await internalServiceHeaders()) },
     cache: "no-store",
   });
   let body = await res.text();
