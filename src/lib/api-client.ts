@@ -234,6 +234,33 @@ function normalizeStore(raw: StoreData & { default_currency?: string }): StoreDa
   };
 }
 
+// Hosts that are not a store. apiFetch throws on 404, so Next's data cache
+// never kept these and every request for them hit the API again (one
+// scanner burst: 27 lookups of the same missing subdomain in a minute).
+// ponytail: per-process Map, cleared at 5,000 entries; move to Redis if the
+// storefront ever runs more than one instance.
+const MISSING_HOST_TTL_MS = 60_000;
+const missingHosts = new Map<string, number>();
+// Scanners probe paths like /env.json or /swagger.json that end up here as a
+// "domain"; no store can live on a file-extension TLD.
+const FILE_LIKE_HOST = /\.(json|js|mjs|map|php|env|ya?ml|xml|txt|ini|conf|config|bak|old|sql|log|aspx?|jsp|cgi|git|gz|tar)$/;
+
+function missingStore(host: string): ApiFetchError {
+  return new ApiFetchError(`API error: 404 Not Found — store ${host}`, "http", 404);
+}
+
+async function rememberMissing<T>(host: string, lookup: Promise<T>): Promise<T> {
+  try {
+    return await lookup;
+  } catch (err) {
+    if (err instanceof ApiFetchError && err.status === 404) {
+      if (missingHosts.size >= 5_000) missingHosts.clear();
+      missingHosts.set(host, Date.now() + MISSING_HOST_TTL_MS);
+    }
+    throw err;
+  }
+}
+
 export const fetchStoreByHost = cache(async (rawHost: string) => {
   // Compare host vs platform domain with the port stripped from BOTH. The
   // proxy stamps `x-numu-host` without a port (e.g. `testlocal.localhost`)
@@ -243,6 +270,9 @@ export const fetchStoreByHost = cache(async (rawHost: string) => {
   // generic one on localhost). Port-insensitive matching fixes dev and is a
   // no-op in prod (subdomain.numueg.app vs numueg.app, no ports).
   const host = rawHost.toLowerCase().split(":")[0];
+  if (FILE_LIKE_HOST.test(host) || (missingHosts.get(host) ?? 0) > Date.now()) {
+    throw missingStore(host);
+  }
   const platformDomain = (process.env.NUMU_PLATFORM_DOMAIN || "numueg.app")
     .toLowerCase()
     .split(":")[0];
@@ -264,20 +294,20 @@ export const fetchStoreByHost = cache(async (rawHost: string) => {
   if (underPlatform || underApex) {
     const subdomain = host.split(".")[0];
     return normalizeStore(
-      await apiFetch<StoreData>(
+      await rememberMissing(host, apiFetch<StoreData>(
         `/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
         // Publish busts `store-{subdomain}` immediately (NUMU-api
         // revalidate_on_customization_publish); this 60s window is only the
         // safety-net floor for a missed bust — was 300s (a 5-min stale tail).
         { tags: [`store-${subdomain}`], revalidate: 60 },
-      ),
+      )),
     );
   }
   return normalizeStore(
-    await apiFetch<StoreData>(
+    await rememberMissing(host, apiFetch<StoreData>(
       `/storefront/store-by-domain/${encodeURIComponent(host)}`,
       { tags: [`store-${host}`], revalidate: 60 },
-    ),
+    )),
   );
 });
 
