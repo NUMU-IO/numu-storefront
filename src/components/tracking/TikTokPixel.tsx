@@ -129,7 +129,11 @@ export function TikTokPixel({
   // the stub exactly as TikTok designed it to, so `ttq.page()` and any funnel
   // event fired before that point are replayed, not lost.
   // See lib/third-party-load.ts for why.
+  //
+  // Skipped when the page is framed, same as <MetaPixel>: a framed store page
+  // is a merchant preview in the hub, never a shopper.
   const snippet =
+    `if(self===top){` +
     `!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];` +
     `ttq.methods=["page","track","identify","instances","debug","on","off","once",` +
     `"ready","alias","group","enableCookie","disableCookie","holdConsent",` +
@@ -156,7 +160,8 @@ export function TikTokPixel({
         // `_ttp` only exists once it runs, and for these sessions it is a match
         // key on the landing event itself. Everyone else waits for the gate.
         `if(/[?&]ttclid=/.test(location.search)||/(?:^|; )ttclid=/.test(document.cookie))` +
-        `window.__numuLoadTtq();else{${TP_GATE_SNIPPET}window.__numuTP(window.__numuLoadTtq);}`);
+        `window.__numuLoadTtq();else{${TP_GATE_SNIPPET}window.__numuTP(window.__numuLoadTtq);}`) +
+    `}`;
 
   return (
     <>
