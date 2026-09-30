@@ -175,7 +175,12 @@ export function MetaPixel({
   // into `__numuLoadFbq` and handed to the interaction gate below. Meta's own
   // stub is built for precisely this — `n.queue` exists so calls can be made
   // before the SDK lands.
+  //
+  // Skipped when framed: `frame-ancestors` (next.config.ts) lets only NUMU's
+  // own sites frame a store, so a framed page is a merchant preview, never a
+  // shopper. With no stub, every later `fbq` call is a no-op.
   const snippet =
+    `if(self===top){` +
     `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?` +
     `n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;` +
     `n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];` +
@@ -195,7 +200,8 @@ export function MetaPixel({
     // merchant opted out). Everything above this line has already run.
     (loadStrategy === "immediate"
       ? `window.__numuLoadFbq();`
-      : `${TP_GATE_SNIPPET}window.__numuTP(window.__numuLoadFbq);`);
+      : `${TP_GATE_SNIPPET}window.__numuTP(window.__numuLoadFbq);`) +
+    `}`;
 
   return (
     <>

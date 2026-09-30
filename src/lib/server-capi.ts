@@ -121,18 +121,10 @@ export async function fireServerCapi(
     }
     const body = {
       path,
-      // Absolute URL, so the CAPI event carries a real `event_source_url`.
-      // Without it the backend fell back to the store origin, so every
-      // server-fired AddToCart claimed to have happened on the homepage —
-      // and that field drives Meta's URL-based audience rules and the
-      // Events Manager breakdowns a merchant reads.
-      page_url: (() => {
-        try {
-          return new URL(req.url).href;
-        } catch {
-          return undefined;
-        }
-      })(),
+      // No `page_url`: the API then uses the store's public URL. `req.url` is
+      // this route, built from the bind address (Meta listed `0.0.0.0` as a
+      // store website), and the Referer names the numueg.app subdomain when
+      // a merchant adds to cart inside a hub preview.
       step,
       step_data: stepData,
       event_id:
