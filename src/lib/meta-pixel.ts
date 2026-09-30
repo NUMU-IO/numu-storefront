@@ -410,7 +410,8 @@ function reportTrackingDefect(
 /** POST the CAPI/funnel event to the host proxy (which enriches _fbp/_fbc). */
 function postTrack(extra: Record<string, unknown>): void {
   const win = w();
-  if (!win) return;
+  // A framed page is a merchant preview, not a shopper (see <MetaPixel>).
+  if (!win || window.self !== window.top) return;
   const body = {
     path: window.location.pathname,
     page_url: window.location.href,
