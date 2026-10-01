@@ -147,6 +147,12 @@ export async function POST(req: NextRequest) {
   if (forwardedFor) headers["X-Forwarded-For"] = forwardedFor;
   const visitorUserAgent = req.headers.get("user-agent");
   if (visitorUserAgent) headers["User-Agent"] = visitorUserAgent;
+  // The merchant-hub session cookie is scoped to .numueg.app, so it arrives
+  // here when a merchant opens their own store on its subdomain. Forwarded
+  // only to this endpoint, which drops the event when the token belongs to
+  // the store's owner or staff: their own visits are not visitors.
+  const viewer = req.cookies.get("access_token")?.value;
+  if (viewer) headers["X-Numu-Viewer"] = viewer;
 
   try {
     const res = await fetch(upstream, {
