@@ -293,7 +293,9 @@ export function resolveBrandTokens(
 /**
  * Motion that ships alongside the tokens, because it animates them.
  *
- * One rule only: confirming a choice. Picking a payment method is the moment
+ * Two rules. The missing-info sheet slides up, so a shopper whose Confirm did
+ * nothing visible sees that something answered (the field shake is WAAPI in
+ * CheckoutPage, gated on the same media query). And confirming a choice. Picking a payment method is the moment
  * the shopper commits, and a marker that simply blinks into existence gives
  * them nothing to confirm against — the eye misses it and they re-check. A
  * 160ms settle is long enough to be seen and short enough that nobody in a
@@ -304,8 +306,11 @@ export function resolveBrandTokens(
 const CHECKOUT_MOTION = `
 .ck-selected-dot{animation:ck-pop 160ms cubic-bezier(.22,1,.36,1)}
 @keyframes ck-pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+.ck-nudge{animation:ck-nudge-in 240ms cubic-bezier(.22,1,.36,1)}
+@keyframes ck-nudge-in{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion: reduce){
 .ck-selected-dot{animation:none}
+.ck-nudge{animation:none}
 .ck-option{transition-duration:1ms}
 }`;
 
