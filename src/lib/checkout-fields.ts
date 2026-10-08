@@ -113,18 +113,17 @@ export function validateCustomFieldValues(
     const raw = values[f.id];
     const present = raw !== undefined && raw !== null && String(raw).trim() !== "";
     const label = isAr && f.label_ar ? f.label_ar : f.label;
+    // Egyptian Arabic (DESIGN.md), phrased so it fits any label's gender.
     if (f.required && f.type === "checkbox" && raw !== true) {
-      errors[f.id] = isAr ? `${label} مطلوب` : `${label} is required`;
+      errors[f.id] = isAr ? `لازم توافق على «${label}»` : `${label} is required`;
       continue;
     }
     if (f.required && f.type !== "checkbox" && !present) {
-      errors[f.id] = isAr ? `${label} مطلوب` : `${label} is required`;
+      errors[f.id] = isAr ? `اكتب «${label}»` : `${label} is required`;
       continue;
     }
     if (present && f.type === "number" && Number.isNaN(Number(raw))) {
-      errors[f.id] = isAr
-        ? `${label} يجب أن يكون رقمًا`
-        : `${label} must be a number`;
+      errors[f.id] = isAr ? `اكتب رقم في «${label}»` : `${label} must be a number`;
     }
   }
   return errors;
