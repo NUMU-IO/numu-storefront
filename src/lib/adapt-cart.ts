@@ -57,5 +57,8 @@ export function adaptCart(raw: unknown): unknown {
     ...(Array.isArray(c.applied_promotions)
       ? { applied_promotions: c.applied_promotions }
       : {}),
+    // The shopper's cart note. Themes read it back before writing (empire keeps
+    // one "size" line per product in it), and checkout copies it onto the order.
+    ...(typeof c.note === "string" ? { note: c.note } : {}),
   };
 }
