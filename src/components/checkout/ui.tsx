@@ -32,12 +32,15 @@ export function cn(...parts: Array<string | false | null | undefined>) {
  * while a neutral store keeps the soft rounded-2xl shadowed card.
  */
 export function CheckoutCard({
+  id,
   title,
   description,
   children,
   className,
   "aria-labelledby": ariaLabelledBy,
 }: {
+  /** Anchor the checkout's missing-info sheet scrolls to. */
+  id?: string;
   title?: ReactNode;
   description?: ReactNode;
   children: ReactNode;
@@ -46,6 +49,7 @@ export function CheckoutCard({
 }) {
   return (
     <section
+      id={id}
       aria-labelledby={ariaLabelledBy}
       className={cn(
         "rounded-[var(--ck-radius)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] p-5 [box-shadow:var(--ck-shadow)] sm:p-6",

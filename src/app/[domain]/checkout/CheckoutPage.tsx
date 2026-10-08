@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { trackingOptOut } from "@/lib/consent";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -282,7 +283,7 @@ const T = {
   payment: { en: "Payment method", ar: "طريقة الدفع" },
   shipping: { en: "Shipping method", ar: "طريقة الشحن" },
   email: { en: "Email", ar: "البريد الإلكتروني" },
-  phone: { en: "Phone Number", ar: "رقم الهاتف" },
+  phone: { en: "Phone Number", ar: "رقم الموبايل" },
   firstName: { en: "First Name", ar: "الاسم الأول" },
   lastName: { en: "Last Name", ar: "اسم العائلة" },
   address: { en: "Detailed Address", ar: "العنوان بالتفصيل" },
@@ -295,13 +296,13 @@ const T = {
   country: { en: "Country", ar: "الدولة" },
   additional: { en: "Additional details", ar: "تفاصيل إضافية" },
   loadingShip: { en: "Loading shipping options…", ar: "جارٍ تحميل خيارات الشحن…" },
-  noRates: { en: "No shipping options available for this address.", ar: "لا توجد خيارات شحن متاحة لهذا العنوان." },
+  noRates: { en: "No shipping options available for this address.", ar: "مفيش طرق شحن متاحة للعنوان ده." },
   // COD is off for this governorate. The address is fine — the generic
   // message sends the shopper to edit an address that was never wrong.
   freeShipMore: { en: "more and shipping is free", ar: "كمان والشحن يبقى مجاني" },
   freeShipAdd: { en: "Add", ar: "ضيف بـ" },
   noRatesCod: { en: "Cash on delivery isn't available for this address. Choose another payment method to continue.", ar: "الدفع عند الاستلام مش متاح للعنوان ده. اختار طريقة دفع تانية عشان تكمّل." },
-  selectGovFirst: { en: "Select your governorate to see shipping options.", ar: "اختر محافظتك لعرض خيارات الشحن." },
+  selectGovFirst: { en: "Select your governorate to see shipping options.", ar: "اختار محافظتك عشان تشوف طرق الشحن." },
   free: { en: "Free", ar: "مجاناً" },
   days: { en: "business days", ar: "أيام عمل" },
   loadingPay: { en: "Loading payment options…", ar: "جارٍ تحميل خيارات الدفع…" },
@@ -330,17 +331,38 @@ const T = {
   pinTitle: { en: "Pin your location on the map", ar: "حدد موقعك على الخريطة" },
   pinDesc: { en: "So we reach you fast and accurately", ar: "علشان نوصلك بسرعة وبدقة" },
   pinCta: { en: "Pin", ar: "تحديد" },
-  reqField: { en: "This field is required", ar: "هذا الحقل مطلوب" },
-  phoneReq: { en: "Phone number is required", ar: "رقم الهاتف مطلوب" },
-  nameShort: { en: "Too short", ar: "قصير جداً" },
-  addrShort: {
-    en: "Address must be at least 10 characters",
-    ar: "العنوان يجب ألا يقل عن ١٠ أحرف",
+  // Field errors. Each one says which field and what to do, in Egyptian
+  // Arabic (DESIGN.md); "Too short" / "This field is required" named nothing.
+  emailReq: { en: "Enter your email", ar: "اكتب الإيميل" },
+  emailBad: { en: "Enter a valid email", ar: "الإيميل مش مكتوب صح" },
+  phoneReq: { en: "Enter your phone number", ar: "اكتب رقم الموبايل" },
+  phoneBad: {
+    en: "Enter a valid phone number (8–15 digits)",
+    ar: "رقم الموبايل مش مظبوط، لازم يكون من ٨ لـ ١٥ رقم",
   },
-  govReq: { en: "Governorate is required", ar: "المحافظة مطلوبة" },
-  pickMethod: { en: "Pick a payment method.", ar: "اختر طريقة دفع." },
-  pickGatewayErr: { en: "Pick a gateway for the COD deposit.", ar: "اختر بوابة دفع للعربون." },
-  noShip: { en: "No shipping available for this address.", ar: "لا يوجد شحن متاح لهذا العنوان." },
+  nameShort: { en: "Enter your first name", ar: "اكتب اسمك الأول" },
+  lastReq: { en: "Enter your last name", ar: "اكتب اسم العيلة" },
+  addrShort: {
+    en: "Add your full address: street, building and floor",
+    ar: "اكتب العنوان كامل: الشارع ورقم العمارة والدور",
+  },
+  cityReq: { en: "Enter your city", ar: "اكتب المدينة" },
+  landmarkReq: { en: "Add your apartment or a landmark", ar: "اكتب رقم الشقة أو علامة مميزة" },
+  govReq: { en: "Choose your governorate", ar: "اختار المحافظة" },
+  countryReq: { en: "Choose your country", ar: "اختار الدولة" },
+  pickMethod: { en: "Pick a payment method.", ar: "اختار طريقة الدفع." },
+  pickGatewayErr: { en: "Pick how you'll pay the deposit.", ar: "اختار هتدفع العربون بإيه." },
+  noShip: { en: "No shipping is available for this address.", ar: "مفيش شحن متاح للعنوان ده." },
+  // Missing-info sheet. English-only for now (owner, 2026-10-05): it reads
+  // these through `sheetT`. The Arabic is kept for when it is approved.
+  landmark: { en: "Apartment or landmark", ar: "رقم الشقة أو العلامة المميزة" },
+  nudgeTitle: { en: "Almost done", ar: "فاضل كام حاجة" },
+  nudgeCheck: { en: "Please check:", ar: "راجع:" },
+  nudgeErrTitle: { en: "Your order isn't placed yet", ar: "الطلب لسه ماتأكدش" },
+  nudgeErrSee: { en: "Tap Show me to see why.", ar: "دوس «وريني» عشان تعرف السبب." },
+  showMe: { en: "Show me", ar: "وريني" },
+  ok: { en: "OK", ar: "تمام" },
+  close: { en: "Close", ar: "اقفل" },
   waConsent: {
     en: "Send me WhatsApp updates (offers, restocks). Reply STOP anytime.",
     ar: "ابعتلي تحديثات واتساب (عروض ووصول منتجات). ابعت STOP في أي وقت.",
@@ -533,6 +555,30 @@ export function CheckoutPage() {
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [codBlocked, setCodBlocked] = useState(false);
+  // Missing-info sheet. On a phone, Confirm sits under the order summary, far
+  // below the form, so a blocked submit put its red messages off-screen and the
+  // button looked dead. The sheet says what is wrong and takes the shopper
+  // there. `target` is the element id "Show me" scrolls to; none = just "OK".
+  const [nudge, setNudge] = useState<{ title: string; text: string; target?: string } | null>(null);
+  // ponytail: the sheet is English-only for now (owner, 2026-10-05); swap
+  // `sheetT` for `t` once the Arabic copy in T is approved.
+  const sheetT = (k: keyof typeof T) => T[k].en;
+  // Errors that arrive after the request (server, payment) open it too: their
+  // inline banner sits above Confirm, off-screen on a phone. On an Arabic page
+  // the error text is Arabic, so the English sheet points to it instead.
+  useEffect(() => {
+    if (error && !identityOpen)
+      setNudge(
+        (n) =>
+          n ??
+          (isAr
+            ? { title: T.nudgeErrTitle.en, text: T.nudgeErrSee.en, target: "ck-error" }
+            : { title: T.nudgeErrTitle.en, text: error }),
+      );
+  }, [error, identityOpen, isAr]);
+  useEffect(() => {
+    if (nudge?.target) shakeInvalid();
+  }, [nudge]);
   const [pixelData, setPixelData] = useState<{
     clientSecret: string;
     publicKey: string;
@@ -858,22 +904,83 @@ export function CheckoutPage() {
     if (loc.area && !line2) setLine2(loc.area);
   }
 
+  // ── Missing-info sheet ───────────────────────────────────────────
+  const fieldDomId = (key: string) => (key.startsWith("cf:") ? `cf-${key.slice(3)}` : key);
+  function fieldName(key: string): string {
+    if (key.startsWith("cf:")) {
+      const f = fieldsConfig?.custom_fields?.find((c) => c.id === key.slice(3));
+      return f?.label || key;
+    }
+    const names: Record<string, keyof typeof T> = {
+      email: "email",
+      phone: "phone",
+      first_name: "firstName",
+      last_name: "lastName",
+      line1: "address",
+      line2: "landmark",
+      state: "governorate",
+      city: "city",
+      country: "country",
+    };
+    return names[key] ? sheetT(names[key]) : key;
+  }
+  function nudgeFields(errs: Record<string, string>) {
+    // List and jump in the order the shopper sees the fields.
+    const ids = Array.from(document.querySelectorAll("#checkout-form [id]"), (el) => el.id);
+    const pos = (k: string) => {
+      const i = ids.indexOf(fieldDomId(k));
+      return i < 0 ? ids.length : i;
+    };
+    const keys = Object.keys(errs).sort((a, b) => pos(a) - pos(b));
+    setNudge({
+      title: sheetT("nudgeTitle"),
+      text: `${sheetT("nudgeCheck")} ${keys.map(fieldName).join(", ")}.`,
+      target: fieldDomId(keys[0]),
+    });
+  }
+  // A short shake on each invalid field so the eye finds it; none for
+  // shoppers whose phone asks for reduced motion.
+  function shakeInvalid() {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    document.querySelectorAll<HTMLElement>('#checkout-form [aria-invalid="true"]').forEach((el) =>
+      el.animate(
+        [
+          { transform: "translateX(0)" },
+          { transform: "translateX(-6px)" },
+          { transform: "translateX(6px)" },
+          { transform: "translateX(-3px)" },
+          { transform: "translateX(0)" },
+        ],
+        { duration: 360, easing: "ease-in-out" },
+      ),
+    );
+  }
+  function goToNudge() {
+    const el = nudge?.target ? document.getElementById(nudge.target) : null;
+    setNudge(null);
+    if (!el) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
+    el.focus({ preventScroll: true });
+    window.setTimeout(shakeInvalid, still ? 0 : 400);
+  }
+
   // ── Place order ──────────────────────────────────────────────────
   async function placeOrder(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setCodBlocked(false);
+    setNudge(null);
 
     // Delivery validation (config-driven; phone is our identity source-of-truth).
     const errs: Record<string, string> = {};
-    const reqMsg = t("reqField");
     const emailCfg = stdField(fieldsConfig, "email");
     const lastCfg = stdField(fieldsConfig, "last_name");
     const areaCfg = stdField(fieldsConfig, "area");
     const landmarkCfg = stdField(fieldsConfig, "landmark");
-    if (emailCfg.enabled && emailCfg.required && !email.trim()) errs.email = reqMsg;
+    if (emailCfg.enabled && emailCfg.required && !email.trim()) errs.email = t("emailReq");
     else if (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()))
-      errs.email = isAr ? "بريد إلكتروني غير صحيح" : "Enter a valid email";
+      errs.email = t("emailBad");
     if (stdField(fieldsConfig, "phone").required && !phone.trim()) errs.phone = t("phoneReq");
     else if (
       phone.trim() &&
@@ -882,20 +989,18 @@ export function CheckoutPage() {
       // 422 "Request validation failed" from the order API.
       !/^\+?\d{8,15}$/.test(phone.trim().replace(/[\s()-]/g, ""))
     )
-      errs.phone = isAr
-        ? "رقم هاتف غير صحيح (٨–١٥ رقمًا)"
-        : "Enter a valid phone number (8–15 digits)";
+      errs.phone = t("phoneBad");
     // Name: a required first name must be a real name, not a single letter.
     if (stdField(fieldsConfig, "first_name").required && firstName.trim().length < 2)
       errs.first_name = t("nameShort");
-    if (lastCfg.enabled && lastCfg.required && !lastName.trim()) errs.last_name = reqMsg;
+    if (lastCfg.enabled && lastCfg.required && !lastName.trim()) errs.last_name = t("lastReq");
     // Address: a required detailed address needs enough to route a courier.
     if (stdField(fieldsConfig, "address").required && line1.trim().length < 10)
       errs.line1 = t("addrShort");
-    if (areaCfg.enabled && areaCfg.required && !city.trim()) errs.city = reqMsg;
-    if (landmarkCfg.enabled && landmarkCfg.required && !line2.trim()) errs.line2 = reqMsg;
+    if (areaCfg.enabled && areaCfg.required && !city.trim()) errs.city = t("cityReq");
+    if (landmarkCfg.enabled && landmarkCfg.required && !line2.trim()) errs.line2 = t("landmarkReq");
     if (stdField(fieldsConfig, "governorate").required && !stateGov.trim()) errs.state = t("govReq");
-    if (!country) errs.country = reqMsg;
+    if (!country) errs.country = t("countryReq");
     const customErrors = validateCustomFieldValues(
       fieldsConfig?.custom_fields || [],
       customValues,
@@ -904,6 +1009,7 @@ export function CheckoutPage() {
     for (const [id, msg] of Object.entries(customErrors)) errs[`cf:${id}`] = msg;
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
+      nudgeFields(errs);
       return;
     }
     setFieldErrors({});
@@ -916,18 +1022,21 @@ export function CheckoutPage() {
     // Shipping must resolve to a rate.
     if (!selectedRate) {
       setError(t("noShip"));
+      setNudge({ title: sheetT("nudgeTitle"), text: sheetT("noShip"), target: governorate ? "ck-shipping" : "state" });
       return;
     }
 
     // Payment validation.
     if (!method) {
       setError(t("pickMethod"));
+      setNudge({ title: sheetT("nudgeTitle"), text: sheetT("pickMethod"), target: "ck-payment" });
       return;
     }
     const codSelected = method === "cod";
     const depositRequired = codSelected && depositApplies;
     if (depositRequired && !depositGateway) {
       setError(t("pickGatewayErr"));
+      setNudge({ title: sheetT("nudgeTitle"), text: sheetT("pickGatewayErr"), target: "ck-payment" });
       return;
     }
     const savedForMethod = savedCards.find(
@@ -1165,13 +1274,16 @@ export function CheckoutPage() {
             const key = FIELD_MAP[seg];
             if (key && d.message) fe[key] = d.message;
           }
-          if (Object.keys(fe).length) setFieldErrors((prev) => ({ ...prev, ...fe }));
+          if (Object.keys(fe).length) {
+            setFieldErrors((prev) => ({ ...prev, ...fe }));
+            nudgeFields(fe);
+          }
           msg =
             (fb.details[0] as { message?: string })?.message ||
-            (isAr ? "تأكد من صحة البيانات المُدخلة." : "Please check your details.");
+            (isAr ? "راجع البيانات اللي كتبتها." : "Please check your details.");
         } else if (fb && typeof fb === "object" && fb.code === "VALIDATION_ERROR") {
           msg = isAr
-            ? "تأكد من صحة البيانات المُدخلة (الهاتف، العنوان…) وحاول مرة أخرى."
+            ? "راجع البيانات اللي كتبتها (الموبايل، العنوان…) وجرّب تاني."
             : "Please check your details (phone, address…) and try again.";
         } else if (fb && typeof fb === "object" && typeof fb.message === "string") {
           msg = fb.message;
@@ -1274,13 +1386,13 @@ export function CheckoutPage() {
                 `/${params.domain}/checkout/processing?order=${encodeURIComponent(pixelData.orderId)}`,
               );
             } else {
-              setError(isAr ? "فشل الدفع. حاول مجددًا." : "Payment failed. Please try again.");
+              setError(isAr ? "الدفع ماتمّش. جرّب تاني." : "Payment failed. Please try again.");
               setPixelData(null);
               setSubmitting(false);
             }
           }}
           onCancel={() => {
-            setError(isAr ? "تم إلغاء الدفع." : "Payment cancelled.");
+            setError(isAr ? "الدفع اتلغى." : "Payment cancelled.");
             setPixelData(null);
             setSubmitting(false);
           }}
@@ -1298,7 +1410,7 @@ export function CheckoutPage() {
           orderNumber={kashierData.orderNumber}
           locale={locale}
           onCancel={() => {
-            setError(isAr ? "تم إلغاء الدفع." : "Payment cancelled.");
+            setError(isAr ? "الدفع اتلغى." : "Payment cancelled.");
             setKashierData(null);
             setSubmitting(false);
           }}
@@ -1418,7 +1530,7 @@ export function CheckoutPage() {
             </PrimaryButton>
             {codBlocked && (
               <p className="mt-2 text-center text-xs text-[var(--ck-muted)]">
-                {isAr ? "اختر الدفع الأونلاين بالأعلى." : "Choose an online payment method above."}
+                {isAr ? "اختار الدفع أونلاين من فوق." : "Choose an online payment method above."}
               </p>
             )}
           </div>
@@ -1430,6 +1542,8 @@ export function CheckoutPage() {
           onSubmit={placeOrder}
           className="order-1 space-y-5 lg:order-2"
           noValidate
+          // The shopper is fixing things: get the sheet out of the way.
+          onFocusCapture={() => setNudge(null)}
         >
           <CheckoutCard title={t("delivery")}>
             {/* Map pin */}
@@ -1693,7 +1807,7 @@ export function CheckoutPage() {
 
           {/* Shipping method */}
           {governorate && (
-            <CheckoutCard title={t("shipping")}>
+            <CheckoutCard id="ck-shipping" title={t("shipping")}>
               {shippingLoading && <p className="text-sm text-[var(--ck-muted)]">{t("loadingShip")}</p>}
               {!shippingLoading && rates && rates.length === 0 && (
                 <p className="text-sm text-red-700">
@@ -1758,7 +1872,7 @@ export function CheckoutPage() {
           )}
 
           {/* Payment method */}
-          <CheckoutCard title={t("payment")}>
+          <CheckoutCard id="ck-payment" title={t("payment")}>
             {!payConfig && <p className="text-sm text-[var(--ck-muted)]">{t("loadingPay")}</p>}
             {payConfig && payMethods.length === 0 && (
               <p className="text-sm text-red-700">{t("noPay")}</p>
@@ -1933,9 +2047,62 @@ export function CheckoutPage() {
             )}
           </CheckoutCard>
 
-          {error && <ErrorBanner>{error}</ErrorBanner>}
+          {error && (
+            <div id="ck-error">
+              <ErrorBanner>{error}</ErrorBanner>
+            </div>
+          )}
         </form>
       </div>
+
+      {/* Portaled to <body>: the checkout's own <main id="main"> sits inside the
+          host's #main, so the globals.css theme-root rules (#main > div …)
+          would turn this sheet into a column. z-[210]: above the
+          cookie-consent bar (z-[200]), which also sits at the bottom for any
+          shopper who has not answered it yet. */}
+      {nudge && createPortal(
+        <div
+          role="alert"
+          dir="ltr"
+          className="ck-nudge fixed inset-x-0 bottom-0 z-[210] mx-auto max-w-md px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:bottom-6"
+          onKeyDown={(e) => e.key === "Escape" && setNudge(null)}
+        >
+          <div className="flex items-start gap-3 rounded-[var(--ck-radius)] border-[length:var(--ck-frame-width)] border-[var(--ck-frame)] bg-[var(--ck-surface)] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
+            <span
+              aria-hidden
+              className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-red-50 text-red-600"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9.5" />
+                <path d="M12 7.5v5.5M12 16.5h.01" />
+              </svg>
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-[var(--ck-fg)]">{nudge.title}</p>
+              <p className="mt-0.5 text-sm text-[var(--ck-muted)]">{nudge.text}</p>
+              <PrimaryButton
+                type="button"
+                autoFocus
+                onClick={nudge.target ? goToNudge : () => setNudge(null)}
+                className="mt-3 min-h-9 px-5 py-1.5 text-xs"
+              >
+                {nudge.target ? sheetT("showMe") : sheetT("ok")}
+              </PrimaryButton>
+            </div>
+            <button
+              type="button"
+              onClick={() => setNudge(null)}
+              aria-label={sheetT("close")}
+              className="-me-1 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full text-[var(--ck-muted)] hover:text-[var(--ck-fg)]"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {(mapsEnabled || locationOpen) && (
         <LocationDialog

@@ -155,8 +155,11 @@ export default async function CheckoutLayout({ children, params }: LayoutProps) 
         </div>
       </header>
 
+      {/* No id="main" here: the host layout already wraps the page in
+          <div id="main"> (the skip-link target), and a second #main matched
+          the theme-root rules in globals.css (#main > div …), which turned
+          the checkout's two-column grid into one column on desktop. */}
       <main
-        id="main"
         className="mx-auto max-w-6xl px-4 py-6 sm:py-10"
         aria-label="Checkout"
       >
