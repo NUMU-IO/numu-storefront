@@ -177,6 +177,16 @@ export function proxy(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  // The shared unsubscribe page (`/unsubscribe/<app>/<token>`) is a page for a
+  // GET; its no-script form and a mail client's one-click List-Unsubscribe
+  // POST to the same URL, and the app relay answers those.
+  if (!isApexHost(hostname) && request.method === "POST" && pathname.startsWith("/unsubscribe/")) {
+    const [, , app = "", token = ""] = pathname.split("/");
+    const url = request.nextUrl.clone();
+    url.pathname = `/api/apps/${app}/unsubscribe/${token}`;
+    return NextResponse.rewrite(url);
+  }
+
   // ── Agent-discovery documents ─────────────────────────────────────────────
   //
   // `/.well-known/*` and `/openapi.json` used to fall through to the
