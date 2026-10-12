@@ -42,13 +42,7 @@ export default async function UnsubscribePage({ params, searchParams }: PageProp
   const store = await fetchStoreByDomain(domain).catch(() => null);
   if (!store?.id) notFound();
 
-  const locale =
-    (await headers()).get("x-numu-locale") ||
-    (store as { default_language?: string }).default_language ||
-    "en";
-  const t = (en: string, ar: string) => (isArabicLocale(locale) ? ar : en);
-
-  let info: { store_name?: string; contact?: string | null } | null = null;
+  let info: { store_name?: string; contact?: string | null; locale?: string } | null = null;
   const path = relayPath(store.id, app, ["unsubscribe", token]);
   if (path) {
     try {
@@ -63,6 +57,16 @@ export default async function UnsubscribePage({ params, searchParams }: PageProp
     }
   }
 
+  // The shopper's language from sign-up first: an alert link opened in a
+  // fresh browser carries no locale cookie.
+  const locale =
+    info?.locale ||
+    (await headers()).get("x-numu-locale") ||
+    (store as { default_language?: string }).default_language ||
+    "en";
+  const ar = isArabicLocale(locale);
+  const t = (en: string, arText: string) => (ar ? arText : en);
+
   const themeRaw = await fetchThemeSettings(store.id).catch(() => null);
   const brandGlobals = themeRaw
     ? (resolveThemeSettings(
@@ -75,6 +79,8 @@ export default async function UnsubscribePage({ params, searchParams }: PageProp
 
   return (
     <div
+      lang={ar ? "ar" : "en"}
+      dir={ar ? "rtl" : "ltr"}
       className="min-h-screen bg-[var(--ck-bg)] text-[var(--ck-fg)] [font-family:var(--ck-body-font)]"
       style={brandVars as CSSProperties}
     >
