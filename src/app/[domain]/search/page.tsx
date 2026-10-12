@@ -36,17 +36,11 @@ import {
 import { formatMajor } from "@/lib/money";
 import type { Metadata } from "next";
 import { slimProductsForTheme } from "@/lib/slim-product";
+import { matchesQuery } from "@/lib/search-match";
 
 interface PageProps {
   params: Promise<{ domain: string }>;
   searchParams: Promise<{ q?: string }>;
-}
-
-/** Same name+description match BuiltInSearchResults applies client-side. */
-function matchesQuery(p: SsrProductLike, q: string): boolean {
-  if (!q) return true;
-  const hay = `${p.name ?? p.title ?? ""} ${p.description ?? ""}`.toLowerCase();
-  return hay.includes(q.toLowerCase());
 }
 
 /**
@@ -200,15 +194,6 @@ export default async function SearchPage({
   const { domain } = await params;
   const { q = "" } = await searchParams;
 
-  // Meta Search — fires once per query per session. Rendered in every branch.
-  const searchTracker = q ? (
-    <FunnelTracker
-      step="search"
-      data={{ search_string: q }}
-      dedupeKey={`search_${q}`}
-    />
-  ) : null;
-
   let store;
   try {
     store = await fetchStoreByDomain(domain);
@@ -248,6 +233,21 @@ export default async function SearchPage({
   // route prefetches up to a THOUSAND of them into the document.
   // See lib/slim-product.ts.
   const products = slimProductsForTheme(rawProducts);
+
+  // Meta Search — fires once per query per session. Rendered in every branch
+  // below. `results_count` feeds the hub's "searches with no results"; it is
+  // stored by NUMU and dropped from the server-side Meta/TikTok events by the
+  // API's custom-data allowlist. See lib/search-match.ts for its limit.
+  const searchTracker = q ? (
+    <FunnelTracker
+      step="search"
+      data={{
+        search_string: q,
+        results_count: products.filter((p) => matchesQuery(p, q)).length,
+      }}
+      dedupeKey={`search_${q}`}
+    />
+  ) : null;
 
   // ENG-3: visitor locale for the bilingual built-in search fallback.
   const hl = await headers();

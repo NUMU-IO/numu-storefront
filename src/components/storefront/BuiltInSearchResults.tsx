@@ -7,14 +7,15 @@
  * SDK context — same shape as BuiltInCart / BuiltInProductDetail.
  *
  * The /search route already pre-fetches the store's product slice and passes
- * it here, so filtering is free (no extra request): we match the query against
- * product name + description client-side, exactly the contract the route's
- * doc-comment describes for theme search sections. A live search box lets the
- * shopper refine without a round-trip.
+ * it here, so filtering is free (no extra request): we match the query
+ * client-side with the route's own matcher (`lib/search-match.ts`), so this
+ * list, the no-JS layer and the reported `results_count` agree. A live search
+ * box lets the shopper refine without a round-trip.
  */
 
 import { useMemo, useState } from "react";
 import { formatMajor } from "@/lib/money";
+import { matchesQuery } from "@/lib/search-match";
 
 interface ProductLike {
   id?: string;
@@ -48,12 +49,6 @@ function productHref(p: ProductLike): string {
   return `/products/${encodeURIComponent(p.slug || p.handle || p.id || "")}`;
 }
 
-function matches(p: ProductLike, q: string): boolean {
-  if (!q) return true;
-  const hay = `${p.name ?? p.title ?? ""} ${p.description ?? ""}`.toLowerCase();
-  return hay.includes(q.toLowerCase());
-}
-
 export default function BuiltInSearchResults({
   products,
   query = "",
@@ -64,7 +59,14 @@ export default function BuiltInSearchResults({
   const [q, setQ] = useState(query);
 
   const results = useMemo(
-    () => (Array.isArray(products) ? products.filter((p) => matches(p, q.trim())) : []),
+    // An empty box lists every product, as before; the shared matcher itself
+    // matches nothing on an empty query.
+    () =>
+      Array.isArray(products)
+        ? q.trim()
+          ? products.filter((p) => matchesQuery(p, q))
+          : products
+        : [],
     [products, q],
   );
 

@@ -106,9 +106,11 @@ export function ThankYou({
   const T = (en: string, ar: string) => (isAr ? ar : en);
 
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      setLocale(document.documentElement.lang === "ar" ? "ar" : "en");
-    }
+    const docAr = document.documentElement.lang === "ar";
+    setLocale(docAr ? "ar" : "en");
+    // The render's T still sees the first render's "en" here, so the
+    // messages set below would reach an Arabic page in English.
+    const T = (en: string, ar: string) => (docAr ? ar : en);
     (async () => {
       try {
         // Correct customer-scoped path is /api/customer/me/orders/{id}
