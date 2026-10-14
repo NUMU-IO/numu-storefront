@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { fetchStoreByHost, internalServiceHeaders } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 import { formReturnTo, relayPath } from "@/lib/app-relay";
 
 /**
@@ -41,12 +41,11 @@ async function handle(
   const json = (contentType ?? "").startsWith("application/json");
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${upstream}`, {
+    res = await internalFetch(`${API_URL}${upstream}`, {
       method: req.method,
       headers: {
         Accept: "application/json",
         ...(json ? { "Content-Type": "application/json" } : {}),
-        ...(await internalServiceHeaders()),
       },
       body: req.method === "POST" && json ? body : undefined,
       cache: "no-store",

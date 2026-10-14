@@ -21,7 +21,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCsrf } from "@/lib/csrf";
-import { internalServiceHeaders } from "@/lib/api-client";
+import { internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -50,7 +50,7 @@ async function resolveStoreId(req: NextRequest): Promise<string | null> {
   if (!subdomain) return null;
 
   try {
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/storefront/store-by-subdomain/${encodeURIComponent(subdomain)}`,
       { cache: "no-store", signal: AbortSignal.timeout(STORE_LOOKUP_TIMEOUT_MS) },
     );
@@ -105,9 +105,9 @@ export async function proxyIdentity(
 
   let upstream: Response;
   try {
-    upstream = await fetch(`${API_URL}${path}`, {
+    upstream = await internalFetch(`${API_URL}${path}`, {
       method,
-      headers: { ...headers, ...(await internalServiceHeaders()) },
+      headers,
       body,
       cache: "no-store",
       signal: AbortSignal.timeout(IDENTITY_TIMEOUT_MS),

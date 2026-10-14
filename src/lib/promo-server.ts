@@ -13,6 +13,7 @@
  */
 
 import { cache } from "react";
+import { internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -78,7 +79,7 @@ export const getActivePromotions = cache(
       // Promise.race (not AbortController) so we don't disturb Next's fetch
       // cache; on timeout the in-flight fetch may still warm the cache.
       const res = await Promise.race([
-        fetch(url, init),
+        internalFetch(url, init),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
       ]);
       if (!res || !res.ok) return null; // null = timeout, 404 = flag off

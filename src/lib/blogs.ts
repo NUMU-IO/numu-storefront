@@ -19,6 +19,8 @@
  * is the CURRENT one, and the article route 301s to the canonical URL.
  */
 
+import { internalFetch } from "@/lib/api-client";
+
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
 /** Bilingual text map ({en, ar}) as stored by the merchant hub. */
@@ -78,7 +80,7 @@ export function pickText(
 
 async function safeFetch<T>(path: string, storeId: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API_URL}${path}`, {
+    const res = await internalFetch(`${API_URL}${path}`, {
       next: { tags: ["blogs", `blogs-${storeId}`], revalidate: 300 },
     });
     if (!res.ok) return null;

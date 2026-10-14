@@ -10,7 +10,7 @@
  * Same store-by-host resolution as the sibling `related` route.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -43,7 +43,7 @@ export async function GET(
   const page = searchParams.get("page") || "1";
   const limit = searchParams.get("limit") || "20";
   try {
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/storefront/store/${storeId}/products/${encodeURIComponent(id)}/reviews?page=${page}&limit=${limit}`,
       { cache: "no-store" },
     );
@@ -72,7 +72,7 @@ export async function POST(
   const cookie = req.headers.get("cookie");
   if (cookie) headers.cookie = cookie;
   try {
-    const upstream = await fetch(
+    const upstream = await internalFetch(
       `${API_URL}/storefront/store/${storeId}/products/${encodeURIComponent(id)}/reviews`,
       { method: "POST", headers, body, cache: "no-store" },
     );

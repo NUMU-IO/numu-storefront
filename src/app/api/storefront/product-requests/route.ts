@@ -14,7 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   if (forwardedFor) headers["X-Forwarded-For"] = forwardedFor;
 
   try {
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/storefront/store/${store.id}/product-requests`,
       { method: "POST", headers, body, cache: "no-store" },
     );

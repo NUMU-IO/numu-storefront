@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { ApiFetchError } from "@/lib/api-client";
+import { ApiFetchError, internalFetch } from "@/lib/api-client";
 
 /**
  * Lean catalogue feed for sitemap generation.
@@ -100,7 +100,7 @@ async function fetchFeed<T>(
 
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await internalFetch(url, {
       signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
       next: { tags: params.tags, revalidate: params.revalidate },
     });

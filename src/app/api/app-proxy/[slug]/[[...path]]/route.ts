@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 import { pickHeaders, REQUEST_HEADERS, RESPONSE_HEADERS } from "@/lib/app-proxy";
 
 /**
@@ -32,7 +32,7 @@ async function handle(
     req.nextUrl.search;
   let res: Response;
   try {
-    res = await fetch(upstream, {
+    res = await internalFetch(upstream, {
       method: req.method,
       headers: pickHeaders(req.headers, REQUEST_HEADERS),
       body: req.method === "POST" ? await req.arrayBuffer() : undefined,
