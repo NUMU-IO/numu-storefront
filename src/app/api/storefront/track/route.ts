@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
 /**
@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
   if (viewer) headers["X-Numu-Viewer"] = viewer;
 
   try {
-    const res = await fetch(upstream, {
+    const res = await internalFetch(upstream, {
       method: "POST",
       headers,
       body: JSON.stringify(body),

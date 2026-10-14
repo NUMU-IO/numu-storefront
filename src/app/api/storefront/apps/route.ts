@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 /**
  * GET /api/storefront/apps — list installed apps for the current store.
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   }
 
   const upstream = `${API_URL}/storefront/store/${store.id}/apps`;
-  const res = await fetch(upstream, {
+  const res = await internalFetch(upstream, {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });

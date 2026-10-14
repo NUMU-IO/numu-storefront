@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -17,7 +18,7 @@ export async function GET(
 ) {
   const { orderId } = await params;
   const upstream = `${API_URL}/storefront/track/${encodeURIComponent(orderId)}`;
-  const res = await fetch(upstream, { cache: "no-store" });
+  const res = await internalFetch(upstream, { cache: "no-store" });
   return new NextResponse(await res.text(), {
     status: res.status,
     headers: { "Content-Type": "application/json" },

@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { headers } from "next/headers";
-import { fetchStoreByDomain } from "@/lib/api-client";
+import { fetchStoreByDomain, internalFetch } from "@/lib/api-client";
 import { fetchBlogsList, fetchArticlesList } from "@/lib/blogs";
 import {
   fetchSitemapCollections,
@@ -343,7 +343,7 @@ interface PublishedPage {
 async function fetchPublishedPages(storeId: string): Promise<PublishedPage[]> {
   const apiUrl = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
   try {
-    const res = await fetch(`${apiUrl}/storefront/store/${storeId}/pages`, {
+    const res = await internalFetch(`${apiUrl}/storefront/store/${storeId}/pages`, {
       next: { tags: [`pages-${storeId}`], revalidate: 120 },
       signal: AbortSignal.timeout(5_000),
     });

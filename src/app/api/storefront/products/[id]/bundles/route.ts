@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 /**
  * GET /api/storefront/products/{id}/bundles
@@ -49,7 +49,7 @@ export async function GET(
     `${API_URL}/storefront/store/${store.id}/products/${encodeURIComponent(id)}/bundles`;
 
   try {
-    const res = await fetch(upstream, {
+    const res = await internalFetch(upstream, {
       headers: { Accept: "application/json" },
       // Bundles are merchant-curated and change rarely; a short revalidate
       // keeps a burst of Quick Preview opens off the API without going stale.

@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 import { readSessionId } from "@/lib/server-capi";
 import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   if (sessionId) headers["X-Numu-Session"] = sessionId;
 
   try {
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/storefront/store/${store.id}/newsletter/subscribe`,
       { method: "POST", headers, body, cache: "no-store" },
     );

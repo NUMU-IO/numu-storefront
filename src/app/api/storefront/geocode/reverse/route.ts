@@ -17,7 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
   headers["x-numu-host"] = host;
 
   try {
-    const res = await fetch(upstream, { headers, cache: "no-store" });
+    const res = await internalFetch(upstream, { headers, cache: "no-store" });
     // Pass status + body through unchanged. 503/400 are meaningful to the
     // client (degrade-to-manual / out-of-bounds) — don't reshape them.
     return new NextResponse(await res.text(), {

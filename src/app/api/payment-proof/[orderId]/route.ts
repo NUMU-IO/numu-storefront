@@ -30,7 +30,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -93,7 +93,7 @@ export async function GET(
     `${encodeURIComponent(orderId)}/instapay-status` +
     `?reference=${encodeURIComponent(reference)}`;
   try {
-    const res = await fetch(upstream, {
+    const res = await internalFetch(upstream, {
       cache: "no-store",
       signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
     });
@@ -150,7 +150,7 @@ export async function POST(
     `${API_URL}/storefront/store/${storeId}/orders/` +
     `${encodeURIComponent(orderId)}/payment-proof`;
   try {
-    const res = await fetch(upstream, {
+    const res = await internalFetch(upstream, {
       method: "POST",
       body: outbound,
       cache: "no-store",

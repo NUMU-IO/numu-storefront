@@ -41,11 +41,17 @@ const DEFAULT_TIMEOUT_MS = 5_000;
  * visitor's IP as Cloudflare/nginx handed it to us — instead of ours.
  * Without the env var nothing changes.
  *
+ * The API trusts the first `X-Forwarded-For` hop of a token-bearing request,
+ * so the value must be one the shopper cannot choose: `X-Real-IP` is set by
+ * our own edge nginx from the Cloudflare-validated peer address, while the
+ * incoming `X-Forwarded-For` and `CF-Connecting-IP` are client-supplied on any
+ * request that reaches the box without passing through Cloudflare.
+ *
  * `withVisitor: false` leaves the shopper's IP out, for fetches served from
  * Next's data cache: its cache key includes every request header, so a
  * per-shopper `X-Forwarded-For` made each cached read a miss.
  */
-export async function internalServiceHeaders(
+async function internalServiceHeaders(
   { withVisitor = true }: { withVisitor?: boolean } = {},
 ): Promise<Record<string, string>> {
   const token = process.env.NUMU_INTERNAL_SERVICE_TOKEN;
@@ -55,15 +61,40 @@ export async function internalServiceHeaders(
   try {
     const h = await headers();
     const visitor =
+      h.get("x-real-ip") ||
       h.get("cf-connecting-ip") ||
-      h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      h.get("x-real-ip");
+      h.get("x-forwarded-for")?.split(",")[0]?.trim();
     if (visitor) out["X-Forwarded-For"] = visitor;
   } catch {
     // headers() throws outside a request scope (build-time prerender,
     // tests) — the API then buckets per server, which is still fine.
   }
   return out;
+}
+
+/**
+ * `fetch` for every server-side call to the NUMU API: adds the internal
+ * service headers above, overriding any `X-Forwarded-For` the caller set.
+ * Reads served from Next's data cache (`force-cache` or a non-zero
+ * `next.revalidate`) get the token without the shopper's IP.
+ */
+export async function internalFetch(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const method = (init.method || "GET").toUpperCase();
+  const revalidate = init.next?.revalidate;
+  const dataCached =
+    (method === "GET" || method === "HEAD") &&
+    init.cache !== "no-store" &&
+    (init.cache === "force-cache" || (revalidate !== undefined && revalidate !== 0));
+  const headers = new Headers(init.headers);
+  for (const [k, v] of Object.entries(
+    await internalServiceHeaders({ withVisitor: !dataCached }),
+  )) {
+    headers.set(k, v);
+  }
+  return fetch(url, { ...init, headers });
 }
 
 /**
@@ -118,7 +149,7 @@ async function fetchWithDeployRetry(
   init: RequestInit,
   idempotent: boolean,
 ): Promise<Response> {
-  const attempt = () => fetch(url, init);
+  const attempt = () => internalFetch(url, init);
   if (!idempotent) return attempt();
   let res: Response;
   try {
@@ -153,15 +184,6 @@ async function apiFetch<T>(
 
   const method = (fetchOptions.method || "GET").toUpperCase();
   const idempotent = method === "GET" || method === "HEAD";
-  // Served from Next's data cache (shared by every shopper): keep headers
-  // constant so the cache key is too. The API then buckets the fill under
-  // this server, which it exempts from the per-visitor limit.
-  const dataCached =
-    idempotent && fetchOptions.cache !== "no-store" && (revalidate ?? 60) > 0;
-  const headers = {
-    ...(await internalServiceHeaders({ withVisitor: !dataCached })),
-    ...(fetchOptions.headers as Record<string, string> | undefined),
-  };
 
   let res: Response;
   try {
@@ -169,7 +191,6 @@ async function apiFetch<T>(
       url,
       {
         ...fetchOptions,
-        headers,
         signal: buildFetchSignal(timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
         next: {
           tags: tags || [],
@@ -398,7 +419,7 @@ async function buildPreviewThemePayload(
     // the marketplace metadata. Server logs the fall-through so a
     // future debugging session can correlate "preview rendered with
     // active theme" with the slug that didn't resolve.
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/marketplace/catalog/themes/${encodeURIComponent(slug)}`,
       { cache: "no-store", signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS) },
     );
@@ -516,9 +537,9 @@ export async function fetchCurrentCustomer(
     return null;
   }
   try {
-    const res = await fetch(`${API_URL}/storefront/me/profile`, {
+    const res = await internalFetch(`${API_URL}/storefront/me/profile`, {
       method: "GET",
-      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
+      headers: { cookie: cookieHeader },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
@@ -540,9 +561,9 @@ export async function fetchCustomerOrders(
 ): Promise<any[]> {
   if (!cookieHeader) return [];
   try {
-    const res = await fetch(`${API_URL}/storefront/me/orders`, {
+    const res = await internalFetch(`${API_URL}/storefront/me/orders`, {
       method: "GET",
-      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
+      headers: { cookie: cookieHeader },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
@@ -563,7 +584,7 @@ export async function fetchCustomerOrder(
 ): Promise<Record<string, any> | null> {
   if (!cookieHeader) return null;
   try {
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/storefront/me/orders/${encodeURIComponent(orderId)}`,
       {
         method: "GET",
@@ -606,7 +627,7 @@ export async function fetchPublicOrderTracking(
     // Scope the lookup to this store so one storefront can't resolve another
     // tenant's order by UUID (the API 404s on mismatch).
     const qs = storeScope ? `?store=${encodeURIComponent(storeScope)}` : "";
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/storefront/track/${encodeURIComponent(orderId)}${qs}`,
       {
         method: "GET",
@@ -627,9 +648,9 @@ export async function fetchCustomerAddresses(
 ): Promise<any[]> {
   if (!cookieHeader) return [];
   try {
-    const res = await fetch(`${API_URL}/storefront/me/addresses`, {
+    const res = await internalFetch(`${API_URL}/storefront/me/addresses`, {
       method: "GET",
-      headers: { cookie: cookieHeader, ...(await internalServiceHeaders()) },
+      headers: { cookie: cookieHeader },
       cache: "no-store",
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });

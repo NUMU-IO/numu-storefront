@@ -13,29 +13,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { internalServiceHeaders } from "@/lib/api-client";
+import { internalFetch } from "@/lib/api-client";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 const TIMEOUT_MS = 8_000;
-
-/** Only allow root-relative paths — blocks `//evil.com` and absolute URLs. */
-function safeReturnPath(raw: string | null): string {
-  if (!raw) return "/";
-  try {
-    const dec = decodeURIComponent(raw);
-    if (dec.startsWith("/") && !dec.startsWith("//")) return dec;
-  } catch {
-    /* malformed — fall through to home */
-  }
-  return "/";
-}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   // Relative Location — the browser resolves it against the public host it
   // requested. Building an absolute URL from req.nextUrl.origin yields the
   // container's internal https://0.0.0.0:3000 behind the nginx/Cloudflare
-  // proxy. `to` is validated root-relative by safeReturnPath (no open redirect).
-  const to = safeReturnPath(req.nextUrl.searchParams.get("to"));
+  // proxy. `to` is validated same-origin by safeRedirectPath (no open redirect).
+  const to = safeRedirectPath(req.nextUrl.searchParams.get("to"));
   const code = (req.nextUrl.searchParams.get("code") || "").trim();
 
   const redirectTo = (setCookies: string[] = []): NextResponse => {
@@ -55,9 +44,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (host) headers["x-numu-host"] = host;
 
   try {
-    const res = await fetch(`${API_URL}/storefront/cart/discount`, {
+    const res = await internalFetch(`${API_URL}/storefront/cart/discount`, {
       method: "POST",
-      headers: { ...headers, ...(await internalServiceHeaders()) },
+      headers,
       body: JSON.stringify({ code }),
       cache: "no-store",
       signal: AbortSignal.timeout(TIMEOUT_MS),

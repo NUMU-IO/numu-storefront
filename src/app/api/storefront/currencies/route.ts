@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 /**
  * GET /api/storefront/currencies — presentment currencies + FX rates
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   }
 
   const upstream = `${API_URL}/storefront/store/${store.id}/currencies`;
-  const res = await fetch(upstream, {
+  const res = await internalFetch(upstream, {
     headers: { Accept: "application/json" },
     next: { revalidate: 60, tags: [`currencies-${store.id}`] },
   });

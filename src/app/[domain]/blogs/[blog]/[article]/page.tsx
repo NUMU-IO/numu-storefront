@@ -12,6 +12,7 @@
 import { fetchStoreByDomain, fetchThemeSettings } from "@/lib/api-client";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
 import { sanitizeHtml } from "@/lib/sanitize-html";
+import { serializeLd } from "@/lib/json-ld";
 import { isBuiltInTheme } from "@/components/theme-engine/ThemeRegistry";
 import ByotThemeBoundary from "@/components/theme-engine/ByotThemeBoundary";
 import { SsrArticleContent } from "@/components/seo/SsrContentLayer";
@@ -129,7 +130,7 @@ export default async function ArticlePage({ params }: PageProps) {
     <script
       type="application/ld+json"
       dangerouslySetInnerHTML={{
-        __html: JSON.stringify({
+        __html: serializeLd({
           "@context": "https://schema.org",
           "@type": "Article",
           headline: title,
