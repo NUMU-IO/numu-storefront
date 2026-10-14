@@ -58,36 +58,51 @@ export function isSafeUrl(url: string): boolean {
  * Removes:
  *   - `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>` blocks
  *     (tag + contents),
- *   - void/self-closing `<link>` and `<meta>` tags,
- *   - inline `on*=` event-handler attributes,
- *   - `href`/`src` attributes whose value is not an allowed URL
- *     (drops `javascript:`/`data:`/etc.).
+ *   - any leftover tag of those, plus `<link>`, `<meta>`, `<base>`,
+ *     `<frame>`, `<frameset>`, `<svg>` and `<math>` (an unclosed `<iframe`,
+ *     a `<base href>` that re-points every relative script URL, SVG/MathML
+ *     link and animation vectors),
+ *   - inline `on*=` event-handler attributes, including ones separated from
+ *     the tag name or the previous value by `/` or a quote (`<img/onerror=`),
+ *   - URL-bearing attributes (`href`, `xlink:href`, `src`, `srcdoc`,
+ *     `action`, `formaction`, `data`, `poster`, `background`) whose value is
+ *     not an allowed URL (drops `javascript:`/`data:`/etc.).
+ *
+ * Strips repeat until nothing changes, so a payload that only reassembles
+ * after one pass (`<scr<script></script>ipt>`) is caught too.
  *
  * Everything else (formatting tags, links, images with safe URLs) is left
  * intact. Idempotent: re-running on already-sanitized HTML is a no-op.
  */
 export function sanitizeHtml(input: string | null | undefined): string {
   if (!input) return "";
-  let s = input
-    .replace(/<script[\s\S]*?<\/script\s*>/gi, "")
-    .replace(/<style[\s\S]*?<\/style\s*>/gi, "")
-    .replace(/<iframe[\s\S]*?<\/iframe\s*>/gi, "")
-    .replace(/<object[\s\S]*?<\/object\s*>/gi, "")
-    .replace(/<embed[\s\S]*?<\/embed\s*>/gi, "")
-    // Defence for an unclosed `<script`/`<style` (no matching close tag):
-    // strip from the opening tag to end-of-input so a dangling opener
-    // cannot smuggle raw markup past the block strips above.
-    .replace(/<script[\s\S]*$/gi, "")
-    .replace(/<style[\s\S]*$/gi, "")
-    // Void tags that carry no closing tag.
-    .replace(/<link\b[^>]*>/gi, "")
-    .replace(/<meta\b[^>]*>/gi, "");
-  // Strip inline event handlers: on*="…" / on*='…' / on*=unquoted.
-  s = s.replace(/\s+on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-  // Strip href/src carrying a disallowed protocol (javascript:, data:, …).
+  let s = input;
+  let prev: string;
+  do {
+    prev = s;
+    s = s
+      .replace(/<script[\s\S]*?<\/script\s*>/gi, "")
+      .replace(/<style[\s\S]*?<\/style\s*>/gi, "")
+      .replace(/<iframe[\s\S]*?<\/iframe\s*>/gi, "")
+      .replace(/<object[\s\S]*?<\/object\s*>/gi, "")
+      .replace(/<embed[\s\S]*?<\/embed\s*>/gi, "")
+      // Defence for an unclosed `<script`/`<style` (no matching close tag):
+      // strip from the opening tag to end-of-input so a dangling opener
+      // cannot smuggle raw markup past the block strips above.
+      .replace(/<script[\s\S]*$/gi, "")
+      .replace(/<style[\s\S]*$/gi, "")
+      // Stray/unclosed and void tags that must never render.
+      .replace(
+        /<\/?(?:iframe|object|embed|link|meta|base|frame|frameset|svg|math)\b[^>]*>/gi,
+        "",
+      )
+      // Inline event handlers: on*="…" / on*='…' / on*=unquoted.
+      .replace(/(?<=[\s/"'])on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  } while (s !== prev);
+  // Strip URL attributes carrying a disallowed protocol (javascript:, data:, …).
   s = s.replace(
-    /\s+(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,
-    (full, _attr, val) => {
+    /(?<=[\s/"'])(?:xlink:)?(?:href|src|srcdoc|action|formaction|data|poster|background)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,
+    (full, val) => {
       const cleaned = String(val).replace(/^['"]|['"]$/g, "");
       return isSafeUrl(cleaned) ? full : "";
     },

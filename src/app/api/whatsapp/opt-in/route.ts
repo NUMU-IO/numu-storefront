@@ -15,7 +15,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   // 1) Issue a checkout-session token.
   let token: string;
   try {
-    const sessRes = await fetch(
+    const sessRes = await internalFetch(
       `${API_URL}/storefront/${store.slug}/checkout-session`,
       {
         method: "POST",
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   // 2) Use the token to write the opt-in row.
   try {
-    const optInRes = await fetch(
+    const optInRes = await internalFetch(
       `${API_URL}/storefront/${store.slug}/whatsapp/opt-in`,
       {
         method: "POST",

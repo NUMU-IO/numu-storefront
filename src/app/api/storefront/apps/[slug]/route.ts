@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 /**
  * GET /api/storefront/apps/{slug} — fetch one installed app's manifest
@@ -37,7 +37,7 @@ export async function GET(
   }
 
   const upstream = `${API_URL}/storefront/store/${store.id}/apps/${encodeURIComponent(slug)}`;
-  const res = await fetch(upstream, {
+  const res = await internalFetch(upstream, {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });

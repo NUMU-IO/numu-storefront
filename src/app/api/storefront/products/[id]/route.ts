@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 /**
  * GET /api/storefront/products/{id}
@@ -66,7 +66,7 @@ export async function GET(
     `${API_URL}/storefront/store/${store.id}/products/${encodeURIComponent(id)}`;
 
   try {
-    const res = await fetch(upstream, {
+    const res = await internalFetch(upstream, {
       headers: { Accept: "application/json" },
       // Product detail is safe to cache briefly and is hit once per quick-add
       // open; `no-store` here would make every sheet a cold round trip.

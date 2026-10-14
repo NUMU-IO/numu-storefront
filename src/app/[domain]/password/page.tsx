@@ -14,6 +14,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { fetchStoreByDomain } from "@/lib/api-client";
 import { readPasswordProtection } from "@/lib/store-lock";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 import { resolveByotFork } from "@/lib/byot-fork";
 import { PasswordForm } from "@/components/account/PasswordGateForm";
 import { NOINDEX_ROBOTS } from "@/lib/seo";
@@ -65,16 +66,11 @@ export default async function PasswordPage({
     redirect("/");
   }
 
-  // Guard against open-redirect: only allow `next` values that are
-  // same-origin paths starting with "/". Anything else (a full URL,
-  // protocol-relative, javascript:) silently falls back to "/".
-  const rawNext = sp?.next ?? "";
-  const next =
-    typeof rawNext === "string" &&
-    rawNext.startsWith("/") &&
-    !rawNext.startsWith("//")
-      ? rawNext
-      : "/";
+  // Guard against open-redirect: only same-origin paths survive. Anything
+  // else (a full URL, protocol-relative, `/\host`, javascript:) silently
+  // falls back to "/".
+  const rawNext = sp?.next;
+  const next = safeRedirectPath(typeof rawNext === "string" ? rawNext : null);
 
   // Phase 7.3 — let BYOT themes own the password gate UI completely.
   // Theme's `password` template reads `page.data.next` and renders

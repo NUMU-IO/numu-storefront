@@ -18,7 +18,7 @@ import type { CSSProperties } from "react";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { fetchStoreByDomain, fetchThemeSettings, internalServiceHeaders } from "@/lib/api-client";
+import { fetchStoreByDomain, fetchThemeSettings, internalFetch } from "@/lib/api-client";
 import { relayPath } from "@/lib/app-relay";
 import { brandFontHref, brandVarsToCss, resolveBrandTokens } from "@/lib/brand-tokens";
 import { resolveThemeSettings } from "@/lib/resolve-theme";
@@ -46,8 +46,8 @@ export default async function UnsubscribePage({ params, searchParams }: PageProp
   const path = relayPath(store.id, app, ["unsubscribe", token]);
   if (path) {
     try {
-      const res = await fetch(`${API_URL}${path}`, {
-        headers: { Accept: "application/json", ...(await internalServiceHeaders()) },
+      const res = await internalFetch(`${API_URL}${path}`, {
+        headers: { Accept: "application/json" },
         cache: "no-store",
         signal: AbortSignal.timeout(5_000),
       });

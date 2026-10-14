@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -52,7 +52,7 @@ export async function GET(
     return NextResponse.json({ error: "Store not found" }, { status: 404 });
   }
   const upstream = `${API_URL}/storefront/store/${storeId}/pay/${encodeURIComponent(orderId)}`;
-  const res = await fetch(upstream, { cache: "no-store" });
+  const res = await internalFetch(upstream, { cache: "no-store" });
   return passthrough(res, await res.text());
 }
 
@@ -70,7 +70,7 @@ export async function POST(
   if (idem) headers["idempotency-key"] = idem;
 
   const upstream = `${API_URL}/storefront/store/${storeId}/pay/${encodeURIComponent(orderId)}`;
-  const res = await fetch(upstream, {
+  const res = await internalFetch(upstream, {
     method: "POST",
     headers,
     body: await req.text(),

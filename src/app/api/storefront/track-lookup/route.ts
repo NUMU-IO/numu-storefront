@@ -19,7 +19,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 import { upstreamForwardedFor } from "@/lib/upstream-forwarded-for";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   };
   const forwardedFor = upstreamForwardedFor(req);
   if (forwardedFor) headers["X-Forwarded-For"] = forwardedFor;
-  const res = await fetch(upstream, {
+  const res = await internalFetch(upstream, {
     method: "POST",
     headers,
     body,

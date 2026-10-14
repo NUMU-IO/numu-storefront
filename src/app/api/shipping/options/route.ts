@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { fetchStoreByHost } from "@/lib/api-client";
-import { internalServiceHeaders } from "@/lib/api-client";
+import { internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     const want = String(addr.state ?? addr.city ?? "").trim().toLowerCase();
     let governorate_code = String(addr.state ?? "");
     try {
-      const gRes = await fetch(
+      const gRes = await internalFetch(
         `${API_URL}/storefront/store/${store.id}/shipping/governorates`,
         { headers, cache: "no-store" },
       );
@@ -67,8 +67,8 @@ export async function POST(req: NextRequest) {
     }
     let cart_subtotal_cents = 0;
     try {
-      const cRes = await fetch(`${API_URL}/storefront/cart`, {
-        headers: { ...headers, ...(await internalServiceHeaders()) },
+      const cRes = await internalFetch(`${API_URL}/storefront/cart`, {
+        headers,
         cache: "no-store",
       });
       const cJson = await cRes.json().catch(() => null);
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   }
 
   const upstream = `${API_URL}/storefront/store/${store.id}/shipping/options`;
-  const res = await fetch(upstream, {
+  const res = await internalFetch(upstream, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),

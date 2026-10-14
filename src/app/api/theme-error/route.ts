@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchStoreByHost, fetchStoreByDomain } from "@/lib/api-client";
-import { internalServiceHeaders } from "@/lib/api-client";
+import { internalFetch } from "@/lib/api-client";
 
 /**
  * POST /api/theme-error — shopper-side theme telemetry ingest.
@@ -125,9 +125,9 @@ async function forwardThemeError(
   if (themeSlug) payload.theme_slug = themeSlug;
   if (themeVersion) payload.theme_version = themeVersion;
 
-  await fetch(`${API_URL}/storefront/store/${store.id}/theme-error`, {
+  await internalFetch(`${API_URL}/storefront/store/${store.id}/theme-error`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(await internalServiceHeaders()) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     cache: "no-store",
     signal: AbortSignal.timeout(5000),

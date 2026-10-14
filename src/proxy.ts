@@ -159,16 +159,17 @@ export function proxy(request: NextRequest) {
   }
 
   if (pathname.startsWith("/api/")) {
-    if (
-      PLATFORM_DOMAIN !== "numueg.app" &&
-      hostname.endsWith(`.${PLATFORM_DOMAIN}`)
-    ) {
-      const sub = hostname.slice(0, -(PLATFORM_DOMAIN.length + 1));
-      const requestHeaders = new Headers(request.headers);
-      requestHeaders.set("x-numu-host", `${sub}.numueg.app`);
-      return NextResponse.next({ request: { headers: requestHeaders } });
-    }
-    return NextResponse.next();
+    // Always set from the real Host, never pass the client's through: the
+    // backend scopes the customer session and guest cart to this store, and a
+    // theme's own JS could otherwise name another store.
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set(
+      "x-numu-host",
+      PLATFORM_DOMAIN !== "numueg.app" && hostname.endsWith(`.${PLATFORM_DOMAIN}`)
+        ? `${hostname.slice(0, -(PLATFORM_DOMAIN.length + 1))}.numueg.app`
+        : hostname,
+    );
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   if (!isApexHost(hostname) && pathname.startsWith("/apps/")) {

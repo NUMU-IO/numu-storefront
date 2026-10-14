@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 /**
  * GET /api/storefront/search?q=<term>&mode=predictive|full&types=<csv>&limit=<n>&page=<n>
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     `${API_URL}/storefront/store/${store.id}/search${full ? "" : "/predictive"}?${qs.toString()}`;
 
   try {
-    const res = await fetch(upstream, { cache: "no-store" });
+    const res = await internalFetch(upstream, { cache: "no-store" });
     if (!res.ok) return NextResponse.json(EMPTY);
     const text = await res.text();
     return new NextResponse(text, {

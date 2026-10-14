@@ -20,6 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
   if (search) qs.set("search", search);
 
   const cookie = req.headers.get("cookie") ?? "";
-  const res = await fetch(
+  const res = await internalFetch(
     `${API_URL}/storefront/store/${encodeURIComponent(storeId)}/products?${qs.toString()}`,
     {
       method: "GET",

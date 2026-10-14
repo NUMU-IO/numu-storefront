@@ -14,7 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 const API_URL = process.env.NUMU_API_URL || "http://localhost:8021/api/v1";
 const ALLOWED = new Set(["events", "dismiss", "submit"]);
@@ -42,7 +42,7 @@ export async function POST(
   const body = await req.text();
   const cookie = req.headers.get("cookie");
   try {
-    const res = await fetch(
+    const res = await internalFetch(
       `${API_URL}/storefront/store/${store.id}/promotions/${encodeURIComponent(
         promotionId,
       )}/${action}`,

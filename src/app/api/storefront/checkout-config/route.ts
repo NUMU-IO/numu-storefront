@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchStoreByHost } from "@/lib/api-client";
+import { fetchStoreByHost, internalFetch } from "@/lib/api-client";
 
 /**
  * GET /api/storefront/checkout-config
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   }
 
   const upstream = `${API_URL}/storefront/store/${store.id}/checkout-config`;
-  const res = await fetch(upstream, {
+  const res = await internalFetch(upstream, {
     headers: { Accept: "application/json" },
     // Payment config rarely changes mid-session; a short cache keeps the
     // payment step snappy without hammering FastAPI on every entry.
