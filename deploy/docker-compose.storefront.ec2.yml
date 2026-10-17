@@ -42,6 +42,9 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - HOSTNAME=0.0.0.0
+      # Traces -> the alloy sidecar below (src/instrumentation.ts).
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
     expose:
       - "3000"
     networks:
@@ -127,6 +130,26 @@ services:
       resources:
         limits:
           memory: 1G
+
+  # Grafana Alloy — tail-samples storefront traces and ships them to Grafana
+  # Cloud Tempo (deploy/alloy/config.alloy). GC_TOKEN / GC_OTLP_URL /
+  # GC_OTLP_USER live in ./.env.alloy on the box, NOT in this file. No ports
+  # are published; only the storefront reaches it on the edge network.
+  alloy:
+    image: grafana/alloy:v1.5.1
+    container_name: numu-storefront-alloy
+    restart: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy", "--server.http.listen-addr=127.0.0.1:12345"]
+    env_file:
+      - ./.env.alloy
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    networks:
+      - edge
+    deploy:
+      resources:
+        limits:
+          memory: 160M
 
   # Independent API uptime monitor. The authenticated dashboard is routed by
   # nginx at status.numueg.app; its SQLite data stays in a named volume.
