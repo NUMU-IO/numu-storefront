@@ -1,0 +1,56 @@
+// Storefront traces: Next.js (@vercel/otel, src/instrumentation.ts) -> tail
+// sampling -> Grafana Cloud Tempo. Same keep rules as the api's Alloy
+// (NUMU-api docker/alloy/config.alloy): every error, every trace over 2s, and
+// 1% of the rest. The 1% is trace-id based in both, so a kept baseline trace
+// keeps its storefront and api halves together.
+otelcol.receiver.otlp "default" {
+  http { endpoint = "0.0.0.0:4318" }
+  output { traces = [otelcol.processor.tail_sampling.default.input] }
+}
+
+otelcol.processor.tail_sampling "default" {
+  decision_wait = "10s"
+  num_traces    = 5000
+
+  policy {
+    name = "errors"
+    type = "status_code"
+    status_code {
+      status_codes = ["ERROR"]
+    }
+  }
+
+  policy {
+    name = "slow"
+    type = "latency"
+    latency {
+      threshold_ms = 2000
+    }
+  }
+
+  policy {
+    name = "baseline"
+    type = "probabilistic"
+    probabilistic {
+      sampling_percentage = 1
+    }
+  }
+
+  output { traces = [otelcol.processor.batch.default.input] }
+}
+
+otelcol.processor.batch "default" {
+  output { traces = [otelcol.exporter.otlphttp.grafana.input] }
+}
+
+otelcol.auth.basic "grafana" {
+  username = sys.env("GC_OTLP_USER")
+  password = sys.env("GC_TOKEN")
+}
+
+otelcol.exporter.otlphttp "grafana" {
+  client {
+    endpoint = sys.env("GC_OTLP_URL")
+    auth     = otelcol.auth.basic.grafana.handler
+  }
+}
