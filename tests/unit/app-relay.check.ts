@@ -16,6 +16,19 @@ test("forwards an app's routes to its NUMU-api storefront path", () => {
   );
 });
 
+test("forwards Order Tracking's two shopper routes", () => {
+  const order = "2b1e7a3c-5d4f-4e6a-9b8c-1d2e3f4a5b6c";
+  assert.equal(
+    relayPath(STORE, "order-tracking", ["orders", order]),
+    `/storefront/store/${STORE}/apps/order-tracking/orders/${order}`,
+  );
+  assert.equal(
+    relayPath(STORE, "order-tracking", ["orders", order, "retry"]),
+    `/storefront/store/${STORE}/apps/order-tracking/orders/${order}/retry`,
+  );
+  assert.equal(relayPath(STORE, "order-tracking", ["orders", "..", "..", "track"]), null);
+});
+
 test("refuses an app that is not on the relay list", () => {
   assert.equal(relayPath(STORE, "reviews", ["config"]), null);
   assert.equal(relayPath(STORE, "", ["config"]), null);

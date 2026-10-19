@@ -116,6 +116,12 @@ export interface StoreData {
    * the host-shell WhatsApp float.
    */
   social_links?: Record<string, string> | null;
+  /**
+   * Enabled app installs, each with its `public_settings`-filtered settings
+   * (NUMU-api `_read_installed_apps`). The `/track/<id>` page reads it to show
+   * the Order Tracking app's view.
+   */
+  installed_apps?: { slug: string; settings?: Record<string, unknown> }[];
 }
 
 // Product types

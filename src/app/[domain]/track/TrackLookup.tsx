@@ -94,7 +94,7 @@ export function TrackLookup({
       normalizedEmail = email.trim();
       if (!EMAIL_RE.test(normalizedEmail)) {
         setError(
-          T("Enter a valid email address.", "اكتب بريد إلكتروني صحيح."),
+          T("Enter a valid email address.", "اكتب إيميل صحيح."),
         );
         return;
       }
@@ -123,6 +123,11 @@ export function TrackLookup({
             ? T(
                 "We couldn't find an order matching those details. Check the order number and the phone or email you used at checkout.",
                 "مش لاقيين طلب بالبيانات دي. راجع رقم الطلب والموبايل أو الإيميل اللي استخدمته وقت الشراء.",
+              )
+            : res.status === 429
+            ? T(
+                "Too many tries. Wait a minute and try again.",
+                "محاولات كتير. استنى دقيقة وجرّب تاني.",
               )
             : T(
                 "Something went wrong. Try again in a moment.",
@@ -220,7 +225,7 @@ export function TrackLookup({
                 aria-describedby={describedBy}
                 className="block min-h-11 w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 font-mono text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-gray-900 focus:ring-2 focus:ring-gray-900/15 disabled:cursor-not-allowed disabled:opacity-60"
               />
-              <p className="mt-1 text-xs text-gray-400">
+              <p className="mt-1 text-xs text-gray-500">
                 {T(
                   "It's on your confirmation email or WhatsApp message.",
                   "هتلاقيه في إيميل التأكيد أو رسالة واتساب.",
@@ -297,7 +302,7 @@ export function TrackLookup({
                   htmlFor="track-email"
                   className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500"
                 >
-                  {T("Email", "البريد الإلكتروني")}
+                  {T("Email", "الإيميل")}
                 </label>
                 <input
                   id="track-email"
@@ -335,7 +340,7 @@ export function TrackLookup({
               className="inline-flex min-h-11 w-full items-center justify-center rounded-full bg-gray-900 px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy
-                ? T("Searching…", "جارٍ البحث…")
+                ? T("Searching…", "بندوّر…")
                 : T("Track order", "تتبّع الطلب")}
             </button>
           </form>
