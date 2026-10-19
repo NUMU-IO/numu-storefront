@@ -53,6 +53,14 @@ const STATUS_IDX: Record<string, number> = {
   shipped: 2, out_for_delivery: 2, delivered: 3, completed: 3,
 };
 
+// Closed orders: their own chip and no progress line. Returned and refunded
+// used to fall through STATUS_IDX to "Placed".
+const CLOSED: Record<string, [en: string, ar: string]> = {
+  cancelled: ["Cancelled", "ملغي"],
+  returned: ["Returned", "مرتجع"],
+  refunded: ["Refunded", "تم استرداد المبلغ"],
+};
+
 export function TrackOrder({ orderId, domain }: { orderId: string; domain: string }) {
   const [data, setData] = useState<Tracking | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "notfound">("loading");
@@ -74,8 +82,6 @@ export function TrackOrder({ orderId, domain }: { orderId: string; domain: strin
       }
     })();
   }, [orderId]);
-
-  const fmt = (c?: number) => (c == null ? "" : formatCents(c, data?.currency || "EGP"));
 
   const dir = isAr ? "rtl" : "ltr";
 
@@ -102,7 +108,20 @@ export function TrackOrder({ orderId, domain }: { orderId: string; domain: strin
     );
   }
 
-  const cancelled = data.status.toLowerCase() === "cancelled";
+  return orderView(data, isAr, domain);
+}
+
+/**
+ * A loaded order, rendered (exported for tests/unit/track-app.check.ts). A
+ * plain function, not a component, so its <div> takes the loading <div>'s
+ * place and React updates that node as it always did.
+ */
+export function orderView(data: Tracking, isAr: boolean, domain: string) {
+  const T = (en: string, ar: string) => (isAr ? ar : en);
+  const fmt = (c?: number) => (c == null ? "" : formatCents(c, data?.currency || "EGP"));
+  const dir = isAr ? "rtl" : "ltr";
+
+  const closed = CLOSED[data.status.toLowerCase()];
   const current = STATUS_IDX[data.status.toLowerCase()] ?? 0;
   const steps = [
     { en: "Placed", ar: "تم الطلب", at: data.timeline.placed_at },
@@ -141,14 +160,14 @@ export function TrackOrder({ orderId, domain }: { orderId: string; domain: strin
               <p className="text-xs uppercase tracking-wide text-gray-400">{T("Order", "الطلب")}</p>
               <p className="font-mono text-lg font-semibold text-gray-900" dir="ltr">{data.order_number}</p>
             </div>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${cancelled ? "bg-red-50 text-red-600" : "bg-gray-900 text-white"}`}>
-              {cancelled
-                ? T("Cancelled", "ملغي")
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${closed ? "bg-red-50 text-red-600" : "bg-gray-900 text-white"}`}>
+              {closed
+                ? T(...closed)
                 : [T("Placed", "تم الطلب"), T("Confirmed", "تم التأكيد"), T("Shipped", "تم الشحن"), T("Delivered", "تم التوصيل")][current]}
             </span>
           </div>
 
-          {!cancelled && (
+          {!closed && (
             <ol className="mt-7 flex items-start">
               {steps.map((s, i) => {
                 const done = i <= current;

@@ -131,6 +131,32 @@ function onColor(bg: string): string {
 }
 
 /**
+ * The brand of a host page an app adds for shoppers (the Order Tracking view
+ * on `/track/<id>`): buttons and the current step fill with the theme's
+ * `primary_color` (near-black without one), text on that fill follows
+ * `onColor`, and corners follow `corner_radius` (`radius` in the themes that
+ * name it so). Links sit on white, so a primary that cannot carry 4.5:1 there
+ * (Bazar's amber, a gold) keeps links in ink.
+ */
+export function primaryBrand(gs: Record<string, unknown> | null | undefined): {
+  fill: string;
+  onFill: string;
+  link: string;
+  radius: number;
+} {
+  const fill = normHex(gs?.primary_color) ?? "#111111";
+  const radius = [gs?.corner_radius, gs?.radius].find(
+    (v): v is number => typeof v === "number" && Number.isFinite(v),
+  );
+  return {
+    fill,
+    onFill: onColor(fill),
+    link: contrastRatio(fill, "#ffffff") >= 4.5 ? fill : "#111111",
+    radius: radius === undefined ? 8 : Math.min(Math.max(radius, 0), 24),
+  };
+}
+
+/**
  * The Google-hosted families we may request, keyed by the same setting value
  * the themes store. Anything absent here simply isn't fetched — the stack in
  * FONT_STACKS still names it, so a locally-installed copy is used and the
