@@ -29,8 +29,20 @@ test("forwards Order Tracking's two shopper routes", () => {
   assert.equal(relayPath(STORE, "order-tracking", ["orders", "..", "..", "track"]), null);
 });
 
+test("forwards the Reviews app's product reviews, page by page", () => {
+  const product = "9c0e7a3c-5d4f-4e6a-9b8c-1d2e3f4a5b6c";
+  assert.equal(
+    relayPath(STORE, "reviews", ["products", product]),
+    `/storefront/store/${STORE}/apps/reviews/products/${product}`,
+  );
+  assert.equal(
+    relayPath(STORE, "reviews", ["products", product, "2"]),
+    `/storefront/store/${STORE}/apps/reviews/products/${product}/2`,
+  );
+});
+
 test("refuses an app that is not on the relay list", () => {
-  assert.equal(relayPath(STORE, "reviews", ["config"]), null);
+  assert.equal(relayPath(STORE, "product-quiz", ["config"]), null);
   assert.equal(relayPath(STORE, "", ["config"]), null);
 });
 

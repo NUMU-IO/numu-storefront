@@ -10,7 +10,7 @@
  */
 
 /** Apps with shopper routes. A new app adds its slug here. */
-export const RELAY_APPS: ReadonlySet<string> = new Set(["back-in-stock", "order-tracking"]);
+export const RELAY_APPS: ReadonlySet<string> = new Set(["back-in-stock", "order-tracking", "reviews"]);
 
 /** Route names and `token_urlsafe` tokens only: no dots, slashes or escapes. */
 const SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
