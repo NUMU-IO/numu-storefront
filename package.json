@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^2.0.2",
-    "@numueg/theme-sdk": "^0.19.0",
+    "@numueg/theme-sdk": "^0.19.2",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.208.0",
     "@opentelemetry/instrumentation": "^0.208.0",
