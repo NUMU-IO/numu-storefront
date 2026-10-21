@@ -268,10 +268,10 @@ export default async function ProductPage({ params }: PageProps) {
         // Only assert the return window the merchant actually claimed in the
         // hub's SEO settings.
         hasReturnPolicy30d: storeForSeo.seo?.has_return_policy_30d === true,
-        // NOTE: `reviews` is intentionally unset — there is no server-side
-        // reviews fetcher in api-client yet (only the client-facing
-        // /api/storefront/products/[id]/reviews proxy), so aggregateRating
-        // stays off rather than being guessed.
+        // The Reviews app's summary on the detail payload (published reviews
+        // only). Absent without the app or without reviews, and then
+        // aggregateRating stays off rather than being guessed.
+        reviews: product.apps?.reviews ?? null,
       })
     : null;
   const breadcrumbLd = product
